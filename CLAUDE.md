@@ -13,8 +13,8 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
 
 현재 단계: **Architecture / Initial Planning** — 구현보다 결정을 먼저 확정하는 중입니다.
-다만 `design-system/`과 `apps/web`(Cluster Overview + Namespace/Workload/Pod Drill-down,
-mock API 기준)은 선행 구현되어 있습니다.
+다만 `design-system/`과 `apps/web`(Cluster Overview, Namespace/Workload/Pod Drill-down,
+Logs Explorer — 모두 mock API 기준)은 선행 구현되어 있습니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`, 프런트엔드 규칙은 `apps/web/README.md`에 있습니다.
 
 작업 단위는 GitHub Issues를 따릅니다. 화면·기능 작업을 시작하기 전에 해당 이슈의
@@ -40,7 +40,9 @@ mock API 기준)은 선행 구현되어 있습니다.
 ### 성능 (README §11)
 
 - 브라우저에 대량 시계열 포인트를 그대로 보내지 않습니다. 조회 범위에 따라 Step과 Downsampling을 조정합니다.
-- 로그는 Cursor/Search-after 방식으로 조회합니다.
+- 로그는 Cursor/Search-after 방식으로 조회합니다. **offset 페이징을 만들지 않습니다** (ADR 0003).
+- **로그 마스킹은 서버에서만 합니다.** 원문을 브라우저로 내려보내고 UI에서 가리는 구현을 하지 않습니다.
+  UI는 가려졌다는 사실을 보이게 할 뿐이고, 원문 조회·복사 경로를 만들지 않습니다.
 - 요청 취소를 데이터소스 요청까지 전파합니다. 데이터소스별 Timeout과 Circuit Breaker를 적용합니다.
 
 ### 데이터 접근 (ADR 0002, `apps/web/README.md`)

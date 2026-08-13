@@ -1,8 +1,9 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
   ClusterOverviewResponse,
   NamespaceDetailResponse,
   NamespaceListResponse,
+  LogSearchResponse,
   PodDetailResponse,
   RangeKey,
   ScopeResponse,
@@ -146,5 +147,74 @@ export function usePodDetail(
       ),
     refetchInterval: refreshMs > 0 ? refreshMs : false,
     enabled: Boolean(ns && name),
+  });
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Logs Explorer (이슈 #16)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export interface LogFilters {
+  clusterId: string;
+  namespace: string;
+  workload: string;
+  podUid: string;
+  container: string;
+  levels: string[];
+  q: string;
+  range: RangeKey;
+  /** 차트 구간 선택으로 좁힌 범위. 없으면 range를 씁니다. */
+  from?: number;
+  to?: number;
+}
+
+export const logKeys = {
+  search: (f: LogFilters) =>
+    [
+      "logs",
+      f.clusterId,
+      f.namespace,
+      f.workload,
+      f.podUid,
+      f.container,
+      [...f.levels].sort().join(","),
+      f.q,
+      f.range,
+      f.from ?? null,
+      f.to ?? null,
+    ] as const,
+};
+
+/**
+ * 무한 스크롤. **offset이 아니라 cursor**를 씁니다.
+ * 로그가 계속 들어오는 동안 offset을 쓰면 페이지 경계가 밀려 중복·누락이 생깁니다.
+ * (이슈 #16 완료 기준)
+ */
+export function useLogSearch(f: LogFilters) {
+  return useInfiniteQuery({
+    queryKey: logKeys.search(f),
+    initialPageParam: "" as string,
+    queryFn: ({ signal, pageParam }) =>
+      apiGet<LogSearchResponse>(
+        `/api/v1/clusters/${encodeURIComponent(f.clusterId)}/logs`,
+        {
+          range: f.range,
+          ...(f.namespace && f.namespace !== "all" ? { ns: f.namespace } : {}),
+          ...(f.workload ? { workload: f.workload } : {}),
+          ...(f.podUid ? { podUid: f.podUid } : {}),
+          ...(f.container ? { container: f.container } : {}),
+          ...(f.levels.length ? { levels: f.levels.join(",") } : {}),
+          ...(f.q ? { q: f.q } : {}),
+          ...(f.from ? { from: String(f.from) } : {}),
+          ...(f.to ? { to: String(f.to) } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      ),
+    getNextPageParam: (last) => last.cursor.next ?? undefined,
+    refetchOnWindowFocus: false,
+    retry: retryPolicy,
+    staleTime: 10_000,
   });
 }

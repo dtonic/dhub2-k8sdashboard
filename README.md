@@ -140,8 +140,8 @@ React와 TypeScript를 기반으로 구축합니다.
 - Namespace Overview
 - Workload/Pod 상세 화면
 - Pod Topology (Pod 간 통신 현황 및 방향별 요청 분석)
-- Logs Explorer
-- Metric/Log/Event/Alert 상관분석
+- Logs Explorer *(구현됨 — mock API 기준)*
+- Metric/Log/Event/Alert 상관분석 *(Metric→Log→Event 구현됨 · Alert 연동은 #17)*
 - Dashboard DSL 기반 Widget 렌더링
 - 사용자 권한에 따른 Scope Selector
 - 부분 갱신과 자동 새로고침
@@ -445,7 +445,7 @@ platform.admin
 
 - 브라우저에 대량 시계열 포인트를 그대로 전송하지 않습니다.
 - 조회 범위에 따라 Step과 Downsampling을 조정합니다.
-- 로그는 Cursor/Search-after 방식으로 조회합니다.
+- 로그는 Cursor/Search-after 방식으로 조회합니다. offset은 쓰지 않습니다 (ADR 0003).
 - 동일 In-flight Query는 Singleflight로 병합합니다.
 - 현재 상태, 단기 시계열, 과거 데이터에 서로 다른 TTL을 적용합니다.
 - 요청 취소를 GreptimeDB와 Quickwit 요청까지 전파합니다.
@@ -492,6 +492,7 @@ Custom Range의 최대 폭은 30일입니다.
 - Design System 컴포넌트 확장 (로그 뷰어, 표·차트 가상화)
 - Cluster Overview *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace / Workload / Pod Drill-down *(선행 구현됨 — 실제 API 연결 대기)*
+- Logs Explorer 및 Metric→Log→Event 상관분석 *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace Overview
 - Workload/Pod Detail
 - Logs Explorer
@@ -574,6 +575,7 @@ MVP는 다음 조건을 모두 만족할 때 완료된 것으로 판단합니다
 - Design System 기반 *(완료 — 토큰, 7개 컴포넌트, preview 8종)*
 - Cluster Overview 화면 *(mock API 위에서 동작 · 이슈 #14)*
 - Namespace / Workload / Pod Drill-down *(mock API 위에서 동작 · 이슈 #15)*
+- Logs Explorer 및 상관분석 *(mock API 위에서 동작 · 이슈 #16)*
 - Unified Entity Model
 - API 계약
 - 인증 및 권한 모델

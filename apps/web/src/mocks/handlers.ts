@@ -9,6 +9,9 @@
  */
 import { http, HttpResponse, delay } from "msw";
 import type {
+  LogLevel,
+  LogLine,
+  LogSearchResponse,
   NamespaceDetailResponse,
   NamespaceListResponse,
   PodDetailResponse,
@@ -18,6 +21,7 @@ import type {
   WorkloadKind,
 } from "@k8s-dashboard/contracts";
 import { buildOverview, EVENTS, NOW_MS, rangeWindow, SCOPE, type Scenario } from "./data";
+import { afterCursor, encodeCursor, logCorpus } from "./logs";
 import {
   containersOf,
   NAMESPACE_NAMES,
@@ -224,6 +228,110 @@ export const handlers = [
       containers: ok(containersOf(found, owner)),
       trends: ok(scopedTrends(range, `pod/${found.uid}`)),
       events: ok(eventsFor((n, e) => e === ns && n === found!.name)),
+    };
+    return HttpResponse.json(body);
+  }),
+
+  /* ── Logs Explorer (이슈 #16) ─────────────────────────────────────────── */
+  http.get("/api/v1/clusters/:clusterId/logs", async ({ request, params }) => {
+    const clusterId = String(params.clusterId);
+    const url = new URL(request.url);
+    const ns = url.searchParams.get("ns") ?? "";
+    const auth = authorize(clusterId, ns || undefined);
+    if (!auth.ok) {
+      await delay(60);
+      return denied(auth.message);
+    }
+
+    /* from/to가 오면 그대로, 없으면 range로 계산합니다. 차트 구간 선택이 from/to를 씁니다. */
+    const w = rangeWindow(rangeOf(request));
+    const from = Number(url.searchParams.get("from") ?? Date.parse(w.from));
+    const to = Number(url.searchParams.get("to") ?? Date.parse(w.to));
+    const levels = (url.searchParams.get("levels") ?? "").split(",").filter(Boolean) as LogLevel[];
+    const workload = url.searchParams.get("workload") ?? "";
+    const podUid = url.searchParams.get("podUid") ?? "";
+    const container = url.searchParams.get("container") ?? "";
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const cursor = url.searchParams.get("cursor") ?? "";
+
+    const PAGE = 100;
+    /* 서버가 결과 상한을 강제합니다. 브라우저가 요구한다고 무한히 주지 않습니다. (README §11) */
+    const MAX_LINES = 5000;
+
+    /* 히스토그램과 facet은 **레벨 필터를 적용하기 전** 집합으로 계산합니다.
+       그래야 "WARN을 켜면 몇 줄이 더 보이는가"를 미리 알 수 있습니다.
+       레벨 필터까지 반영하면 켜지지 않은 레벨의 카운트가 항상 0으로 보입니다. */
+    const base = logCorpus().filter(
+      (l) =>
+        l.t >= from &&
+        l.t <= to &&
+        (!ns || l.namespace === ns) &&
+        (!workload || l.workloadName === workload) &&
+        (!podUid || l.podUid === podUid) &&
+        (!container || l.containerName === container) &&
+        (!q || l.message.toLowerCase().includes(q)),
+    );
+
+    let matched = levels.length ? base.filter((l) => levels.includes(l.level)) : base;
+
+    const truncated = matched.length > MAX_LINES;
+    if (truncated) matched = matched.slice(0, MAX_LINES);
+
+    const start = cursor ? afterCursor(matched, cursor) : 0;
+    const page = matched.slice(start, start + PAGE);
+    const last = page[page.length - 1];
+    const next = start + PAGE < matched.length && last ? encodeCursor(last) : null;
+
+    /* 히스토그램·facet은 페이지가 아니라 매칭 전체 기준입니다. */
+    const buckets = 60;
+    const width = Math.max(1, Math.round((to - from) / buckets));
+    const hist = Array.from({ length: buckets }, (_, i) => ({
+      t: from + i * width,
+      counts: { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0 } as Record<LogLevel, number>,
+    }));
+    const countBy = <K extends string>(get: (l: LogLine) => K | undefined) => {
+      const m = new Map<K, number>();
+      for (const l of base) {
+        const k = get(l);
+        if (k) m.set(k, (m.get(k) ?? 0) + 1);
+      }
+      return m;
+    };
+    for (const l of base) {
+      const i = Math.min(buckets - 1, Math.max(0, Math.floor((l.t - from) / width)));
+      hist[i]!.counts[l.level] += 1;
+    }
+
+    const podCounts = countBy((l) => l.podUid);
+    const podName = new Map(base.map((l) => [l.podUid, l.podName]));
+    const wlKind = new Map(base.map((l) => [l.workloadName!, l.workloadKind!]));
+
+    await delay(cursor ? 160 : 260);
+    const body: LogSearchResponse = {
+      lines: page.length ? ok(page) : empty(),
+      cursor: { next, pageSize: PAGE },
+      histogram: ok(hist),
+      events: ok(EVENTS.filter((e) => (!ns || e.namespace === ns))),
+      facets: ok({
+        workloads: [...countBy((l) => l.workloadName).entries()]
+          .map(([name, count]) => ({ name, kind: wlKind.get(name)!, count }))
+          .sort((a, b) => b.count - a.count),
+        pods: [...podCounts.entries()]
+          .map(([uid, count]) => ({ uid, name: podName.get(uid)!, count }))
+          .sort((a, b) => b.count - a.count),
+        containers: [...countBy((l) => l.containerName).entries()]
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count),
+      }),
+      applied: {
+        clusterId,
+        namespace: ns || null,
+        from: new Date(from).toISOString(),
+        to: new Date(to).toISOString(),
+        truncated,
+        maxLines: MAX_LINES,
+      },
+      generatedAt: new Date(NOW_MS).toISOString(),
     };
     return HttpResponse.json(body);
   }),

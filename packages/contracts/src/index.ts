@@ -393,3 +393,104 @@ export const ISSUE_LABEL: Record<IssueReason, string> = {
   OOMKilled: "OOMKilled",
   ProbeFailed: "Probe 실패",
 };
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Logs Explorer & 상관분석 — 이슈 #16
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export type LogLevel = "ERROR" | "WARN" | "INFO" | "DEBUG";
+
+/** 마스킹된 구간. UI가 원문을 복원할 수 없도록 위치와 종류만 내려옵니다. */
+export interface MaskedSpan {
+  /** message 내 시작 offset */
+  start: number;
+  length: number;
+  kind: "token" | "password" | "secret" | "email" | "ip" | "card";
+}
+
+export interface LogLine {
+  /** 정렬·커서에 쓰는 안정적 식별자 */
+  id: string;
+  /** epoch milliseconds */
+  t: number;
+  level: LogLevel;
+  /** 이미 마스킹된 본문. 원문은 서버 밖으로 나가지 않습니다. (README §10) */
+  message: string;
+  /** 어디가 가려졌는지. UI가 표시만 하고 복원하지는 않습니다. */
+  masked: MaskedSpan[];
+  namespace: string;
+  podName: string;
+  podUid: string;
+  containerName: string;
+  workloadKind?: WorkloadKind;
+  workloadName?: string;
+  nodeName?: string;
+  traceId?: string;
+  spanId?: string;
+  /** 구조화 로그의 부가 필드 */
+  attributes?: Record<string, string>;
+}
+
+/**
+ * Cursor 기반 페이징.
+ * Quickwit의 search-after와 같은 방식입니다. offset을 쓰지 않는 이유는
+ * 로그가 계속 들어오는 동안 offset이 밀려 **중복·누락**이 생기기 때문입니다.
+ * 커서는 (timestamp, id) 복합키를 불투명 문자열로 인코딩한 값입니다.
+ */
+export interface LogCursor {
+  /** 다음 페이지 요청에 그대로 넣습니다. null이면 더 없음 */
+  next: string | null;
+  /** 서버가 적용한 페이지 크기 */
+  pageSize: number;
+}
+
+export interface LogSearchRequest {
+  clusterId: string;
+  namespace?: string;
+  workloadName?: string;
+  podUid?: string;
+  containerName?: string;
+  levels?: LogLevel[];
+  /** 전문 검색어. Raw Query가 아니라 서버가 이스케이프해 처리합니다. */
+  q?: string;
+  from: string;
+  to: string;
+  cursor?: string;
+}
+
+export interface LogSearchResponse {
+  lines: Section<LogLine[]>;
+  cursor: LogCursor;
+  /** 시간 범위 전체의 레벨별 분포. 히스토그램과 필터 배지에 씁니다. */
+  histogram: Section<Array<{ t: number; counts: Record<LogLevel, number> }>>;
+  /** 같은 Scope·시간 범위의 Kubernetes Event. 로그와 같은 타임라인에 겹칩니다. */
+  events: Section<ClusterEvent[]>;
+  /** 필터 드롭다운을 채우는 값들. 현재 Scope에서 실제로 관측된 것만 내려옵니다. */
+  facets: Section<{
+    workloads: Array<{ name: string; kind: WorkloadKind; count: number }>;
+    pods: Array<{ name: string; uid: string; count: number }>;
+    containers: Array<{ name: string; count: number }>;
+  }>;
+  /** 서버가 적용한 Scope와 범위. UI가 보낸 값과 다를 수 있습니다. */
+  applied: {
+    clusterId: string;
+    namespace: string | null;
+    from: string;
+    to: string;
+    /** 결과 상한에 걸렸는지. 걸렸다면 화면에 명시합니다. */
+    truncated: boolean;
+    maxLines: number;
+  };
+  generatedAt: string;
+}
+
+export const LEVEL_ORDER: LogLevel[] = ["ERROR", "WARN", "INFO", "DEBUG"];
+
+export const MASK_LABEL: Record<MaskedSpan["kind"], string> = {
+  token: "토큰",
+  password: "비밀번호",
+  secret: "시크릿",
+  email: "이메일",
+  ip: "IP",
+  card: "카드번호",
+};

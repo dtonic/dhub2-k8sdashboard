@@ -9,6 +9,7 @@ import { NamespaceList } from "@/features/drill/NamespaceList";
 import { NamespaceDetail } from "@/features/drill/NamespaceDetail";
 import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
 import { PodDetail } from "@/features/drill/PodDetail";
+import { LogsExplorer } from "@/features/logs/LogsExplorer";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -40,7 +41,7 @@ async function bootstrap() {
               <Route path="/workloads/:kind/:name" element={<WorkloadDetail />} />
               <Route path="/pods/:name" element={<PodDetail />} />
               <Route path="/topology" element={<Placeholder title="Pod Topology" issue="이슈 #16" />} />
-              <Route path="/logs" element={<Placeholder title="Logs Explorer" issue="이슈 #16" />} />
+              <Route path="/logs" element={<LogsExplorer />} />
               <Route path="/alerts" element={<Placeholder title="Alerts" issue="이슈 #17" />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

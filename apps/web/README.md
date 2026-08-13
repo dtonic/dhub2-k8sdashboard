@@ -1,8 +1,9 @@
 # apps/web
 
 React + TypeScript 기반 Custom Observability UI입니다.
-현재 **Cluster Overview(#14)** 와 **Namespace / Workload / Pod Drill-down(#15)** 이 구현되어 있고,
-Logs Explorer와 Alerts는 라우트와 컨텍스트 전달만 잡힌 자리 표시자입니다.
+현재 **Cluster Overview(#14)**, **Namespace / Workload / Pod Drill-down(#15)**,
+**Logs Explorer와 Metric-Log-Event 상관분석(#16)** 이 구현되어 있고,
+Pod Topology와 Alerts는 라우트와 컨텍스트 전달만 잡힌 자리 표시자입니다.
 
 API가 아직 없으므로 **MSW mock 위에서 단독 실행**됩니다. (이슈 #13 완료 기준)
 
@@ -33,6 +34,7 @@ Cluster Overview는 쿼리 파라미터로 상태를 재현할 수 있습니다.
 | `/?scenario=empty` | 모든 지표 정상, 이상 엔티티 0건 |
 | `/?cluster=prod-frankfurt` | 화면 전체 403 (접근 불가 클러스터) |
 | `/namespaces/media?cluster=prod-tokyo` | 권한 없는 Namespace 직접 접근 → 403 (데이터 미노출) |
+| `/logs?range=1d` | 로그 결과가 서버 상한(5,000줄)에 걸려 잘림 안내 표시 |
 
 Scope·시간 범위·자동 갱신 주기는 모두 URL 쿼리(`cluster`, `ns`, `range`, `refresh`)에 있습니다.
 장애 대응 중 링크 하나로 같은 화면을 공유할 수 있어야 하기 때문입니다.
@@ -62,7 +64,8 @@ src/
 | `/namespaces/:namespace` | Namespace 상세 (Workload 표 · 추세 · 이벤트) | #15 |
 | `/workloads/:kind/:name?ns=` | Workload 상세 (replica · rollout · OwnerReference · Pod) | #15 |
 | `/pods/:name?ns=&uid=` | Pod 상세 (Container · Owner 체인 · 로그 연결) | #15 |
-| `/topology`, `/logs`, `/alerts` | 자리 표시자 | #16, #17 |
+| `/logs?ns=&uid=&levels=&q=&from=&to=` | Logs Explorer (히스토그램 · 구간 선택 · 커서 페이징) | #16 |
+| `/topology`, `/alerts` | 자리 표시자 | #16, #17 |
 
 ## 설계 규칙
 
@@ -102,6 +105,20 @@ src/
   현재 세대가 표시됩니다.
 - Pod 상세에서 Logs Explorer로 이동할 때 **같은 시간 범위와 Pod UID**를 그대로 넘깁니다.
 
+### 로그 (#16, ADR 0003)
+
+- **커서 페이징.** offset을 쓰지 않습니다. 로그가 계속 들어오는 동안 offset은 경계가 밀려
+  중복·누락을 만듭니다. 커서는 (timestamp, id) 복합키이며 클라이언트는 해석하지 않습니다.
+- **id는 충돌 불가능해야 합니다.** 같은 밀리초에 여러 줄이 들어오므로 timestamp만으로는 부족합니다.
+- **마스킹은 서버에서만 합니다.** 응답의 `message`는 이미 가려진 문자열이고, UI는 `masked` 스팬으로
+  "무엇이 가려졌는지"를 표시만 합니다. 원문 조회·복사 경로를 만들지 않습니다.
+- **결과 상한은 서버가 강제합니다.** 상한에 걸리면 화면에 "잘렸다"고 명시합니다. 조용히 자르지 않습니다.
+- **히스토그램·facet은 레벨 필터 이전 집합** 기준입니다. 그래야 꺼져 있는 레벨의 건수를 알 수 있습니다.
+- 차트를 드래그하면 그 구간이 URL(`from`/`to`)에 들어가고 조회가 좁혀집니다.
+  Kubernetes Event는 같은 축에 점선으로 겹칩니다.
+- 펼침은 한 번에 한 줄만 허용합니다. 가변 높이가 여럿이면 가상 스크롤 오프셋이 추측이 되어
+  스크롤이 튑니다.
+
 ### 스타일
 
 - 원시 hex·임의 픽셀값을 쓰지 않습니다. `design-system/tokens`의 역할 토큰만 참조합니다.
@@ -119,7 +136,8 @@ src/
 ## 남은 것
 
 - 실제 API 연결 (`#8` Informer, `#9` Query Catalog, `#10` OIDC/RBAC 이후)
-- Logs Explorer와 상관분석 (`#16`), Alerts (`#17`)
+- Pod Topology 화면 (`design-system/`에 preview는 있으나 앱에는 미연결)
+- Alerts (`#17`)
 - Node 상세 화면 — 현재 Overview의 Node 항목은 Namespace 목록으로 되돌립니다
 - 가상 스크롤을 라이브러리(TanStack Virtual)로 교체할지 결정 — 지금은 최소 구현
 - 서버 측 pagination — 현재는 전체를 받아 클라이언트에서 가상화합니다
