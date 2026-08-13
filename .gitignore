@@ -27,3 +27,7 @@ npm-debug.log*
 # Vite / MSW
 apps/web/dist/
 .vite/
+
+# Playwright
+apps/web/playwright-report/
+apps/web/test-results/

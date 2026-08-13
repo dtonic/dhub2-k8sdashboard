@@ -1,0 +1,40 @@
+import { defineConfig, devices } from "@playwright/test";
+
+/**
+ * E2E 설정.
+ * --------------------------------------------------------------------------
+ * 빌드된 산출물을 `vite preview`로 띄워 테스트합니다. dev 서버가 아니라 빌드 결과를
+ * 검증해야 프로덕션 번들에서만 나는 문제(사이드이펙트 트리셰이킹, MSW 워커 경로 등)를 잡습니다.
+ *
+ * mock API 위에서 돌기 때문에 클러스터 없이 CI에서 실행됩니다.
+ * 실제 API가 붙으면 `VITE_USE_MOCK=false`로 별도 스위트를 추가합니다.
+ */
+export default defineConfig({
+  testDir: "./e2e",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 2 : undefined,
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
+  timeout: 45_000,
+  expect: { timeout: 10_000 },
+  use: {
+    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:4173",
+    trace: "on-first-retry",
+    /* 관제 화면은 Dark 사용 비중이 높습니다. 기본을 Dark로 두고 Light는 별도 프로젝트로 돕니다. */
+    colorScheme: "dark",
+    viewport: { width: 1600, height: 1000 },
+  },
+  projects: [
+    { name: "dark", use: { ...devices["Desktop Chrome"], colorScheme: "dark" } },
+    { name: "light", use: { ...devices["Desktop Chrome"], colorScheme: "light" }, testMatch: /smoke\.spec\.ts/ },
+  ],
+  webServer: process.env.E2E_BASE_URL
+    ? undefined
+    : {
+        command: "npm run build && npx vite preview --port 4173 --strictPort",
+        url: "http://127.0.0.1:4173",
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+      },
+});

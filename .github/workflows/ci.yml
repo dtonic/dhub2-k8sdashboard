@@ -1,0 +1,49 @@
+name: CI
+
+# 로컬과 CI가 **같은 명령**을 씁니다. (이슈 #3 완료 기준)
+# 여기서 새 명령을 만들지 말고 Makefile 타깃을 호출하세요.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    name: Web (typecheck · build · e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: make install
+      - name: 타입체크 · design-system preview 검증
+        run: make check
+      - name: 빌드
+        run: make build
+      - name: Playwright 브라우저 설치
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: E2E (mock API 위에서 실행 — 클러스터 불필요)
+        run: make test-web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
+  api:
+    name: API (vet · test · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: apps/api/go.sum
+      - run: make api-vet
+      - run: make api-test
+      - run: make api-build
