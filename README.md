@@ -139,9 +139,9 @@ React와 TypeScript를 기반으로 구축합니다.
 - Cluster Overview
 - Namespace Overview
 - Workload/Pod 상세 화면
-- Pod Topology (Pod 간 통신 현황 및 방향별 요청 분석)
+- Pod Topology (Pod 간 통신 현황 및 방향별 요청 분석) *(구현됨 — mock API 기준)*
 - Logs Explorer *(구현됨 — mock API 기준)*
-- Metric/Log/Event/Alert 상관분석 *(Metric→Log→Event 구현됨 · Alert 연동은 #17)*
+- Metric/Log/Event/Alert 상관분석 *(구현됨 — mock API 기준)*
 - Dashboard DSL 기반 Widget 렌더링
 - 사용자 권한에 따른 Scope Selector
 - 부분 갱신과 자동 새로고침
@@ -350,7 +350,7 @@ k8s-dashboard/
 - Pod Topology 및 방향별 요청 집계
 - Logs Explorer
 - Metric/Log/Event/Alert Drill-down
-- Grafana Alerting 또는 Alertmanager 조회 연동
+- Grafana Alerting 또는 Alertmanager 조회 연동 *(UI 구현됨 — Adapter는 백엔드 과제)*
 - Dashboard DSL 기반 읽기 전용 대시보드
 - Helm/Kustomize 배포
 - CI, 보안 검증, E2E 테스트
@@ -493,6 +493,7 @@ Custom Range의 최대 폭은 30일입니다.
 - Cluster Overview *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace / Workload / Pod Drill-down *(선행 구현됨 — 실제 API 연결 대기)*
 - Logs Explorer 및 Metric→Log→Event 상관분석 *(선행 구현됨 — 실제 API 연결 대기)*
+- Pod Topology · Alerts 조회 화면 *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace Overview
 - Workload/Pod Detail
 - Logs Explorer
@@ -576,6 +577,7 @@ MVP는 다음 조건을 모두 만족할 때 완료된 것으로 판단합니다
 - Cluster Overview 화면 *(mock API 위에서 동작 · 이슈 #14)*
 - Namespace / Workload / Pod Drill-down *(mock API 위에서 동작 · 이슈 #15)*
 - Logs Explorer 및 상관분석 *(mock API 위에서 동작 · 이슈 #16)*
+- Pod Topology · Alerts *(mock API 위에서 동작 · 이슈 #17)*
 - Unified Entity Model
 - API 계약
 - 인증 및 권한 모델

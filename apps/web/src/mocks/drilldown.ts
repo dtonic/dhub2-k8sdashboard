@@ -130,6 +130,50 @@ const PINNED: Record<string, Array<Partial<WorkloadSummary> & { name: string; ki
       issues: [],
       images: ["registry.internal/auth-svc:3.2.1"],
     },
+    {
+      name: "redis-cache",
+      kind: "StatefulSet",
+      severity: "healthy",
+      replicas: { desired: 1, ready: 1, available: 1, updated: 1 },
+      rollout: { status: "Complete" },
+      restarts: 0,
+      issues: [],
+      images: ["registry.internal/redis:7.2.5"],
+    },
+  ],
+  ingress: [
+    {
+      name: "gateway",
+      kind: "Deployment",
+      severity: "healthy",
+      replicas: { desired: 3, ready: 3, available: 3, updated: 3 },
+      rollout: { status: "Complete" },
+      restarts: 0,
+      issues: [],
+      images: ["registry.internal/gateway:5.1.2"],
+    },
+  ],
+  platform: [
+    {
+      name: "kafka-broker",
+      kind: "StatefulSet",
+      severity: "healthy",
+      replicas: { desired: 3, ready: 3, available: 3, updated: 3 },
+      rollout: { status: "Complete" },
+      restarts: 0,
+      issues: [],
+      images: ["registry.internal/kafka:3.7.0"],
+    },
+    {
+      name: "postgres-primary",
+      kind: "StatefulSet",
+      severity: "healthy",
+      replicas: { desired: 1, ready: 1, available: 1, updated: 1 },
+      rollout: { status: "Complete" },
+      restarts: 0,
+      issues: [],
+      images: ["registry.internal/postgres:16.3"],
+    },
   ],
   media: [
     {
@@ -425,4 +469,18 @@ export function scopedTrends(key: RangeKey, seedPrefix: string): TrendPanel[] {
       series: [{ key: "restarts", label: "재시작", unit: "count", points: mk(seedPrefix + "rst", 0.8, 0.9) }],
     },
   ];
+}
+
+
+/**
+ * Pod 신원의 단일 원천.
+ * --------------------------------------------------------------------------
+ * Topology와 로그가 각자 Pod 이름·UID를 만들면 deep link가 404가 됩니다.
+ * 두 mock 모두 이 함수를 통해 **실제로 존재하는 Pod**를 참조합니다.
+ */
+export function primaryPod(ns: string, workloadName: string) {
+  const w = workloadsOf(ns).find((x) => x.name === workloadName);
+  if (!w) throw new Error(`mock: workload ${ns}/${workloadName} 없음`);
+  const pods = podsOf(w).filter((p) => !p.finishedAt);
+  return { workload: w, pod: pods[0] ?? podsOf(w)[0]! };
 }

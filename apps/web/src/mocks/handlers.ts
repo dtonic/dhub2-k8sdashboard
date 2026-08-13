@@ -9,6 +9,7 @@
  */
 import { http, HttpResponse, delay } from "msw";
 import type {
+  AlertListResponse,
   LogLevel,
   LogLine,
   LogSearchResponse,
@@ -17,11 +18,15 @@ import type {
   PodDetailResponse,
   RangeKey,
   Section,
+  TopologyEdgeSeriesResponse,
+  TopologyResponse,
   WorkloadDetailResponse,
   WorkloadKind,
 } from "@k8s-dashboard/contracts";
 import { buildOverview, EVENTS, NOW_MS, rangeWindow, SCOPE, type Scenario } from "./data";
 import { afterCursor, encodeCursor, logCorpus } from "./logs";
+import { edgeSeries, topologyGraph, topologyUnhealthy } from "./topology";
+import { alertList, GROUPING_RULE } from "./alerts";
 import {
   containersOf,
   NAMESPACE_NAMES,
@@ -332,6 +337,103 @@ export const handlers = [
         maxLines: MAX_LINES,
       },
       generatedAt: new Date(NOW_MS).toISOString(),
+    };
+    return HttpResponse.json(body);
+  }),
+
+  /* ── Pod Topology ─────────────────────────────────────────────────────── */
+  http.get("/api/v1/clusters/:clusterId/topology", async ({ request, params }) => {
+    const clusterId = String(params.clusterId);
+    const url = new URL(request.url);
+    const ns = url.searchParams.get("ns") ?? "";
+    const auth = authorize(clusterId, ns || undefined);
+    if (!auth.ok) {
+      await delay(60);
+      return denied(auth.message);
+    }
+    await delay(260);
+    const range = rangeOf(request);
+    const scenario = scenarioOf(request);
+    const graph = topologyGraph(range);
+    const nodes = ns ? graph.nodes.filter((n) => n.namespace === ns) : graph.nodes;
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+    const unhealthy = topologyUnhealthy().filter((u) => !ns || u.namespace === ns);
+
+    const body: TopologyResponse = {
+      ...meta(clusterId, range),
+      namespace: ns || null,
+      pods: ok({
+        total: nodes.length,
+        healthy: nodes.filter((n) => n.severity === "healthy").length,
+        unhealthy: unhealthy.length,
+        unhealthyList: unhealthy,
+      }),
+      graph:
+        scenario === "degraded"
+          ? {
+              status: "degraded",
+              source: "greptimedb",
+              reason: "통신 메트릭 일부 누락 · 마지막 성공 값 표시",
+              observedAt: new Date(NOW_MS - 7 * 60 * 1000).toISOString(),
+              data: { nodes, edges },
+            }
+          : ok({ nodes, edges }),
+    };
+    return HttpResponse.json(body);
+  }),
+
+  http.get("/api/v1/clusters/:clusterId/topology/edges/:edgeId/series", async ({ request, params }) => {
+    const auth = authorize(String(params.clusterId));
+    if (!auth.ok) {
+      await delay(60);
+      return denied(auth.message);
+    }
+    await delay(200);
+    const range = rangeOf(request);
+    const body: TopologyEdgeSeriesResponse = {
+      edgeId: String(params.edgeId),
+      range: meta(String(params.clusterId), range).range,
+      generatedAt: new Date(NOW_MS).toISOString(),
+      series: ok(edgeSeries(String(params.edgeId), range)),
+    };
+    return HttpResponse.json(body);
+  }),
+
+  /* ── Alerts (이슈 #17) ────────────────────────────────────────────────── */
+  http.get("/api/v1/clusters/:clusterId/alerts", async ({ request, params }) => {
+    const clusterId = String(params.clusterId);
+    const url = new URL(request.url);
+    const ns = url.searchParams.get("ns") ?? "";
+    const auth = authorize(clusterId, ns || undefined);
+    if (!auth.ok) {
+      await delay(60);
+      return denied(auth.message);
+    }
+    await delay(200);
+    const range = rangeOf(request);
+    const scenario = scenarioOf(request);
+    const { firing, resolved, counts } = alertList(range, ns);
+
+    /* Alert backend 장애는 **이 섹션만** 죽입니다. 화면 전체를 실패시키지 않습니다.
+       (이슈 #17 완료 기준) */
+    const down = scenario === "degraded";
+    const body: AlertListResponse = {
+      ...meta(clusterId, range),
+      firing: down
+        ? { status: "degraded", source: "alertmanager", reason: "Alertmanager 연결 실패 (connection refused)" }
+        : firing.length
+          ? ok(firing)
+          : empty(),
+      resolved: down
+        ? { status: "degraded", source: "alertmanager", reason: "Alertmanager 연결 실패 (connection refused)" }
+        : resolved.length
+          ? ok(resolved)
+          : empty(),
+      counts: down
+        ? { status: "degraded", source: "alertmanager", reason: "Alertmanager 연결 실패 (connection refused)" }
+        : ok(counts),
+      groupingRule: GROUPING_RULE,
     };
     return HttpResponse.json(body);
   }),

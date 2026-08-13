@@ -1,5 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
+  AlertListResponse,
   ClusterOverviewResponse,
   NamespaceDetailResponse,
   NamespaceListResponse,
@@ -7,6 +8,8 @@ import type {
   PodDetailResponse,
   RangeKey,
   ScopeResponse,
+  TopologyEdgeSeriesResponse,
+  TopologyResponse,
   WorkloadDetailResponse,
 } from "@k8s-dashboard/contracts";
 import { apiGet, HttpError } from "./client";
@@ -216,5 +219,67 @@ export function useLogSearch(f: LogFilters) {
     refetchOnWindowFocus: false,
     retry: retryPolicy,
     staleTime: 10_000,
+  });
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Pod Topology · Alerts
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export const topoKeys = {
+  graph: (clusterId: string, ns: string, range: RangeKey) => ["topology", clusterId, ns, range] as const,
+  series: (clusterId: string, edgeId: string, range: RangeKey) =>
+    ["topology-series", clusterId, edgeId, range] as const,
+};
+
+export function useTopology(clusterId: string, ns: string, range: RangeKey, refreshMs: number) {
+  return useQuery({
+    ...common,
+    queryKey: topoKeys.graph(clusterId, ns, range),
+    queryFn: ({ signal }) =>
+      apiGet<TopologyResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/topology`,
+        { range, ...(ns && ns !== "all" ? { ns } : {}) },
+        signal,
+      ),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+  });
+}
+
+/**
+ * 엣지 시계열은 **선택했을 때만** 조회합니다.
+ * 그래프를 그릴 때 모든 엣지의 시계열을 미리 받으면 화면 하나에 12번의 조회가 붙습니다.
+ * 화면 단위 집계(ADR 0002)의 예외이며, 사용자 조작으로 발생하는 추가 조회입니다.
+ */
+export function useEdgeSeries(clusterId: string, edgeId: string | null, range: RangeKey) {
+  return useQuery({
+    ...common,
+    queryKey: topoKeys.series(clusterId, edgeId ?? "", range),
+    queryFn: ({ signal }) =>
+      apiGet<TopologyEdgeSeriesResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/topology/edges/${encodeURIComponent(edgeId!)}/series`,
+        { range },
+        signal,
+      ),
+    enabled: Boolean(edgeId),
+  });
+}
+
+export const alertKeys = {
+  list: (clusterId: string, ns: string, range: RangeKey) => ["alerts", clusterId, ns, range] as const,
+};
+
+export function useAlerts(clusterId: string, ns: string, range: RangeKey, refreshMs: number) {
+  return useQuery({
+    ...common,
+    queryKey: alertKeys.list(clusterId, ns, range),
+    queryFn: ({ signal }) =>
+      apiGet<AlertListResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/alerts`,
+        { range, ...(ns && ns !== "all" ? { ns } : {}) },
+        signal,
+      ),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
   });
 }

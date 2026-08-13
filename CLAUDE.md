@@ -13,8 +13,9 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
 
 현재 단계: **Architecture / Initial Planning** — 구현보다 결정을 먼저 확정하는 중입니다.
-다만 `design-system/`과 `apps/web`(Cluster Overview, Namespace/Workload/Pod Drill-down,
-Logs Explorer — 모두 mock API 기준)은 선행 구현되어 있습니다.
+다만 `design-system/`과 `apps/web`의 **MVP UI 화면 전체**(Cluster Overview,
+Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts — 모두 mock API 기준)는
+선행 구현되어 있습니다. 남은 것은 실제 API 연결입니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`, 프런트엔드 규칙은 `apps/web/README.md`에 있습니다.
 
 작업 단위는 GitHub Issues를 따릅니다. 화면·기능 작업을 시작하기 전에 해당 이슈의
@@ -56,6 +57,9 @@ Logs Explorer — 모두 mock API 기준)은 선행 구현되어 있습니다.
 - **사용자 상태를 갱신이 지우지 않습니다.** 필터·선택은 URL에, 스크롤은 DOM에 둡니다.
 - **Pod의 신원은 이름이 아니라 UID입니다.** 캐시 키와 목록 key에 UID를 씁니다.
 - 큰 목록은 가상 스크롤을 씁니다. 전체를 한 번에 DOM에 그리지 않습니다.
+- **알림 화면은 조회 전용입니다.** Rule 편집·Silence·Routing 변경 UI를 만들지 않습니다.
+- mock에서 Pod 이름·UID를 새로 지어내지 않습니다. `mocks/drilldown.ts`의 `primaryPod()`를 씁니다.
+  각 mock이 따로 신원을 만들면 화면 간 deep link가 404가 됩니다.
 
 ### 엔티티 식별 (README §5)
 

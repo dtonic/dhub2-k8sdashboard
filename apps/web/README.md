@@ -1,9 +1,9 @@
 # apps/web
 
 React + TypeScript 기반 Custom Observability UI입니다.
-현재 **Cluster Overview(#14)**, **Namespace / Workload / Pod Drill-down(#15)**,
-**Logs Explorer와 Metric-Log-Event 상관분석(#16)** 이 구현되어 있고,
-Pod Topology와 Alerts는 라우트와 컨텍스트 전달만 잡힌 자리 표시자입니다.
+**MVP UI 화면이 모두 구현되어 있습니다** — Cluster Overview(#14),
+Namespace / Workload / Pod Drill-down(#15), Logs Explorer와 상관분석(#16),
+Pod Topology, Alerts(#17). 남은 것은 실제 API 연결입니다.
 
 API가 아직 없으므로 **MSW mock 위에서 단독 실행**됩니다. (이슈 #13 완료 기준)
 
@@ -65,7 +65,8 @@ src/
 | `/workloads/:kind/:name?ns=` | Workload 상세 (replica · rollout · OwnerReference · Pod) | #15 |
 | `/pods/:name?ns=&uid=` | Pod 상세 (Container · Owner 체인 · 로그 연결) | #15 |
 | `/logs?ns=&uid=&levels=&q=&from=&to=` | Logs Explorer (히스토그램 · 구간 선택 · 커서 페이징) | #16 |
-| `/topology`, `/alerts` | 자리 표시자 | #16, #17 |
+| `/topology?edge=` | Pod Topology (방향별 선 · 엣지 상세 · 시계열) | #16 |
+| `/alerts?tab=&alert=` | Alerts (Active/Resolved · 상세 · deep link) | #17 |
 
 ## 설계 규칙
 
@@ -119,6 +120,35 @@ src/
 - 펼침은 한 번에 한 줄만 허용합니다. 가변 높이가 여럿이면 가상 스크롤 오프셋이 추측이 되어
   스크롤이 튑니다.
 
+### 토폴로지
+
+- `A→B`와 `B→A`는 **별도의 선**입니다. 노드 중심선에서 각각 10px씩 반대로 밀어 평행하게 그립니다.
+- 색은 상태, 두께는 트래픽 양, 프로토콜은 캡슐 텍스트입니다. 색으로 프로토콜을 구분하지 않습니다.
+- 캡슐(라벨)은 **노드 박스와 다른 캡슐을 모두 피해** 배치합니다. 빈 자리가 없으면 겹침 면적이
+  가장 작은 자리를 고릅니다. 첫 후보로 되돌아가면 라벨이 노드 이름을 가립니다.
+- 레이아웃(column/row)은 서버가 정합니다. 클라이언트가 매번 배치를 계산하면 갱신할 때마다
+  노드가 튀어 "어제 본 그림"과 달라집니다.
+- 엣지 시계열은 **선택했을 때만** 조회합니다. 화면 단위 집계(ADR 0002)의 의도적 예외이며,
+  사용자 조작으로 발생하는 추가 조회입니다.
+
+### 알림 (#17)
+
+- **조회 전용입니다.** 자체 평가 엔진을 만들지 않고 Grafana Alerting / Alertmanager의 상태를
+  공통 모델로 정규화해 보여주기만 합니다. Rule 편집 · Silence · Routing 변경은 MVP 비목표이며
+  화면에도 제공하지 않고 원본 시스템으로 보냅니다.
+- **Alert backend 장애는 그 섹션만 죽입니다.** `Section`이 degraded로 내려와도 화면과 다른
+  패널은 계속 동작합니다.
+- **grouping 기준을 화면에 노출합니다.** "왜 12건이 1건으로 보이는가"를 설명할 수 없으면
+  운영자는 화면을 믿지 않습니다.
+- label의 namespace/workload를 Unified Entity Model로 매핑해 상세·로그 deep link를 겁니다.
+  매핑에 실패하면 "매핑 없음"을 표시하고 원본 시스템으로 안내합니다.
+
+### Mock 규칙
+
+- **Pod 신원의 단일 원천은 `mocks/drilldown.ts`의 `primaryPod()`입니다.**
+  Topology·로그·알림 mock이 각자 Pod 이름과 UID를 지어내면 화면 간 deep link가 404가 됩니다.
+  mock끼리도 계약을 지켜야 화면 연결을 실제로 검증할 수 있습니다.
+
 ### 스타일
 
 - 원시 hex·임의 픽셀값을 쓰지 않습니다. `design-system/tokens`의 역할 토큰만 참조합니다.
@@ -136,8 +166,6 @@ src/
 ## 남은 것
 
 - 실제 API 연결 (`#8` Informer, `#9` Query Catalog, `#10` OIDC/RBAC 이후)
-- Pod Topology 화면 (`design-system/`에 preview는 있으나 앱에는 미연결)
-- Alerts (`#17`)
 - Node 상세 화면 — 현재 Overview의 Node 항목은 Namespace 목록으로 되돌립니다
 - 가상 스크롤을 라이브러리(TanStack Virtual)로 교체할지 결정 — 지금은 최소 구현
 - 서버 측 pagination — 현재는 전체를 받아 클라이언트에서 가상화합니다

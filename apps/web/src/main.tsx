@@ -3,13 +3,14 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
-import { Placeholder } from "@/app/Placeholder";
 import { ClusterOverview } from "@/features/overview/ClusterOverview";
 import { NamespaceList } from "@/features/drill/NamespaceList";
 import { NamespaceDetail } from "@/features/drill/NamespaceDetail";
 import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
 import { PodDetail } from "@/features/drill/PodDetail";
 import { LogsExplorer } from "@/features/logs/LogsExplorer";
+import { TopologyView } from "@/features/topology/TopologyView";
+import { AlertsView } from "@/features/alerts/AlertsView";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -40,9 +41,9 @@ async function bootstrap() {
               <Route path="/namespaces/:namespace" element={<NamespaceDetail />} />
               <Route path="/workloads/:kind/:name" element={<WorkloadDetail />} />
               <Route path="/pods/:name" element={<PodDetail />} />
-              <Route path="/topology" element={<Placeholder title="Pod Topology" issue="이슈 #16" />} />
+              <Route path="/topology" element={<TopologyView />} />
               <Route path="/logs" element={<LogsExplorer />} />
-              <Route path="/alerts" element={<Placeholder title="Alerts" issue="이슈 #17" />} />
+              <Route path="/alerts" element={<AlertsView />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

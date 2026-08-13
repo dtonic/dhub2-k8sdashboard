@@ -79,3 +79,10 @@ export function unitSuffix(unit: "percent" | "bytes" | "bytes_per_sec" | "count"
       return "건";
   }
 }
+
+/** 좁은 라벨용 축약 수치. 1,234,000 → 1.2M */
+export function compact(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return String(Math.round(n));
+}

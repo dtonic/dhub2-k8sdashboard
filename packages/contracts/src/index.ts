@@ -494,3 +494,114 @@ export const MASK_LABEL: Record<MaskedSpan["kind"], string> = {
   ip: "IP",
   card: "카드번호",
 };
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Pod Topology — 이슈 #16 후속 (design-system의 topology 컴포넌트를 앱에 연결)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export type Protocol = "HTTP" | "gRPC" | "TCP" | "UDP";
+
+export interface TopologyNode {
+  id: string;
+  ref: EntityRef;
+  name: string;
+  namespace: string;
+  severity: Severity;
+  /** 레이아웃 열(0부터). 서버가 의존 방향으로 위상 정렬해 내려줍니다. */
+  column: number;
+  row: number;
+}
+
+export interface TopologyRoute {
+  protocol: Protocol;
+  /** HTTP/gRPC는 API 경로, TCP/UDP는 라우트 식별자 */
+  route: string;
+  /** 선택된 시간 범위 누적 요청 수 */
+  count: number;
+  errorCount: number;
+}
+
+export interface TopologyEdge {
+  id: string;
+  from: string;
+  to: string;
+  severity: Severity;
+  /** 시간 범위 전체 누적. 초당 환산은 UI가 계산합니다. */
+  totalCount: number;
+  errorRate: number;
+  protocols: Protocol[];
+  routes: TopologyRoute[];
+}
+
+export interface TopologyResponse {
+  clusterId: string;
+  namespace: string | null;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  pods: Section<{ total: number; healthy: number; unhealthy: number; unhealthyList: UnhealthyEntity[] }>;
+  graph: Section<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>;
+}
+
+/** 엣지 하나의 시계열. 라인 클릭 후 차트로 전환할 때만 별도 조회합니다. */
+export interface TopologyEdgeSeriesResponse {
+  edgeId: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  series: Section<TrendSeries[]>;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Alerts — 이슈 #17
+   자체 평가 엔진을 만들지 않습니다. Grafana Alerting / Alertmanager의 상태를
+   공통 모델로 정규화해 조회만 합니다.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export type AlertSeverity = "critical" | "warning" | "info";
+export type AlertStatus = "firing" | "resolved" | "pending";
+
+export interface AlertInstance {
+  /** 정규화된 fingerprint. 백엔드가 달라도 같은 알림은 같은 id를 갖습니다. */
+  id: string;
+  name: string;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  startsAt: string;
+  endsAt?: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  /** label에서 유추한 Unified Entity Model 참조. 못 찾으면 undefined. */
+  entity?: EntityRef;
+  entityName?: string;
+  /** 원본 시스템 상세 화면. 새 탭으로 엽니다. */
+  sourceUrl?: string;
+  source: "grafana" | "alertmanager";
+  /** 같은 그룹으로 묶인 인스턴스 수. 1이면 단독. */
+  groupSize: number;
+  /** 그룹 키 — 무엇을 기준으로 묶었는지 화면에 노출합니다. */
+  groupKey: string;
+}
+
+export interface AlertListResponse {
+  clusterId: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  /** 진행 중 알림. Alert backend가 죽으면 degraded로 내려오고 화면은 계속 동작합니다. */
+  firing: Section<AlertInstance[]>;
+  /** 선택 범위 안에서 해소된 알림 */
+  resolved: Section<AlertInstance[]>;
+  counts: Section<Record<AlertSeverity, { firing: number; resolved: number }>>;
+  /** 중복 grouping 기준. 화면에 그대로 노출해 "왜 묶였는지"를 설명합니다. */
+  groupingRule: string;
+}
+
+export const ALERT_SEVERITY_LABEL: Record<AlertSeverity, string> = {
+  critical: "Critical",
+  warning: "Warning",
+  info: "Info",
+};
+
+export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = {
+  firing: "진행 중",
+  resolved: "해소됨",
+  pending: "평가 중",
+};

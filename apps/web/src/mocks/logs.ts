@@ -12,6 +12,7 @@
  */
 import type { LogLevel, LogLine, MaskedSpan, WorkloadKind } from "@k8s-dashboard/contracts";
 import { NOW_MS } from "./data";
+import { primaryPod } from "./drilldown";
 
 function hash(seed: string): number {
   let h = 2166136261;
@@ -25,69 +26,50 @@ const pick = <T,>(seed: string, arr: readonly T[]): T => arr[Math.floor(hash(see
 const hex = (seed: string, len: number) =>
   Array.from({ length: len }, (_, i) => "0123456789abcdef"[Math.floor(hash(seed + i) * 16)]).join("");
 
-/** 로그를 만들어 낼 소스 — drilldown mock의 대표 워크로드와 이름을 맞춥니다. */
-const SOURCES: Array<{
+/**
+ * 로그 소스.
+ * --------------------------------------------------------------------------
+ * Pod 이름과 UID는 drilldown mock의 **실제 Pod**에서 가져옵니다. 여기서 지어내면
+ * 로그 라인 → Pod 상세 deep link가 404가 납니다. (mock끼리도 계약을 지켜야 합니다.)
+ */
+const SOURCE_DEF: Array<{ ns: string; workload: string; containers: string[]; errorRate: number; weight: number }> = [
+  { ns: "payments", workload: "payments-api", containers: ["app", "otel-agent"], errorRate: 0.12, weight: 40 },
+  { ns: "payments", workload: "ledger-worker", containers: ["app", "otel-agent"], errorRate: 0.34, weight: 22 },
+  { ns: "payments", workload: "batch-sync", containers: ["app"], errorRate: 0.72, weight: 10 },
+  { ns: "payments", workload: "auth-svc", containers: ["app"], errorRate: 0.02, weight: 18 },
+  { ns: "search", workload: "indexer", containers: ["app"], errorRate: 0.4, weight: 10 },
+];
+
+type Source = {
   namespace: string;
   workloadName: string;
   workloadKind: WorkloadKind;
   podName: string;
   podUid: string;
   containers: string[];
-  /** 에러 비중. 문제 있는 워크로드일수록 높습니다. */
   errorRate: number;
   weight: number;
-}> = [
-  {
-    namespace: "payments",
-    workloadName: "payments-api",
-    workloadKind: "Deployment",
-    podName: "payments-api-00000aec4b-69652",
-    podUid: "0002f8b1-4c21-9d0e-000000041a7c",
-    containers: ["app", "otel-agent"],
-    errorRate: 0.12,
-    weight: 40,
-  },
-  {
-    namespace: "payments",
-    workloadName: "ledger-worker",
-    workloadKind: "StatefulSet",
-    podName: "ledger-worker-0",
-    podUid: "0004b71c-8a02-31ff-0000000936d1",
-    containers: ["app", "otel-agent"],
-    errorRate: 0.34,
-    weight: 22,
-  },
-  {
-    namespace: "payments",
-    workloadName: "batch-sync",
-    workloadKind: "CronJob",
-    podName: "batch-sync-0000063e8b-32fc2",
-    podUid: "00064f6b-2bab-f25f-00000008370c",
-    containers: ["app"],
-    errorRate: 0.72,
-    weight: 10,
-  },
-  {
-    namespace: "payments",
-    workloadName: "auth-svc",
-    workloadKind: "Deployment",
-    podName: "auth-svc-000001d3c9-11ab4",
-    podUid: "0001c9d2-77aa-4b30-000000012f55",
-    containers: ["app"],
-    errorRate: 0.02,
-    weight: 18,
-  },
-  {
-    namespace: "search",
-    workloadName: "indexer",
-    workloadKind: "StatefulSet",
-    podName: "indexer-1",
-    podUid: "00051aa0-3ccd-8e11-00000005b219",
-    containers: ["app"],
-    errorRate: 0.4,
-    weight: 10,
-  },
-];
+};
+
+let sourceCache: Source[] | null = null;
+
+function sources(): Source[] {
+  if (sourceCache) return sourceCache;
+  sourceCache = SOURCE_DEF.map((d) => {
+    const { workload, pod } = primaryPod(d.ns, d.workload);
+    return {
+      namespace: d.ns,
+      workloadName: workload.name,
+      workloadKind: workload.kind,
+      podName: pod.name,
+      podUid: pod.uid,
+      containers: d.containers,
+      errorRate: d.errorRate,
+      weight: d.weight,
+    };
+  });
+  return sourceCache;
+}
 
 const INFO_MSG = [
   "GET /api/v1/payments/{id} 200 in {ms}ms",
@@ -197,9 +179,10 @@ export function logCorpus(): LogLine[] {
     const span = band < 0.3 ? HOUR_MS : band < 0.6 ? DAY_MS : SPAN_MS;
     const t = Math.round(NOW_MS - hash(seed + "t") * span - hash(seed + "j") * 900);
 
-    const roll = hash(seed + "s") * SOURCES.reduce((s, x) => s + x.weight, 0);
+    const srcList = sources();
+    const roll = hash(seed + "s") * srcList.reduce((s, x) => s + x.weight, 0);
     let acc = 0;
-    const src = SOURCES.find((x) => (acc += x.weight) >= roll) ?? SOURCES[0]!;
+    const src = srcList.find((x) => (acc += x.weight) >= roll) ?? srcList[0]!;
 
     const r = hash(seed + "lv");
     const level: LogLevel =
