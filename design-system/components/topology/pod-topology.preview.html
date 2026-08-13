@@ -1,0 +1,623 @@
+<!-- @dsCard group="Topology" name="Pod topology" viewport="1200x1180" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Pod topology</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/data-table/data-table.css */
+/* @inline: components/status-badge/status-badge.css */
+/* @inline: components/chart-frame/chart-frame.css */
+/* @inline: components/time-range/time-range.css */
+/* @inline: components/log-modal/log-modal.css */
+/* @inline: components/topology/topology.css */
+.ds-preview { max-width: 1140px; }
+.detail-scroll { max-height: 400px; }
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Pod topology</h1>
+    <p class="ds-preview__desc">
+      Pod 간 통신 현황입니다. <strong>선을 클릭</strong>하면 방향별 누적 요청이 표로 열리고,
+      표 우측 상단의 차트 아이콘으로 시계열 보기로 전환합니다.
+      <strong>비정상 Pods</strong>에 마우스를 올리면 목록이 열리고, 목록에서 Pod를 클릭하면 로그 모달이 열립니다.
+    </p>
+  </header>
+
+  <section class="ds-topology" id="topo">
+    <!-- ── Header: 시간 범위 + Pod 요약 ───────────────────────────────────── -->
+    <div class="ds-topology__header">
+      <div class="ds-pod-summary">
+        <span class="ds-pod-summary__item">
+          <span class="ds-pod-summary__count" id="pod-total">8</span>
+          <span class="ds-pod-summary__label">Pods</span>
+        </span>
+        <span class="ds-pod-summary__item">
+          <span class="ds-status-dot" style="--_status-color: var(--status-healthy)"></span>
+          <span class="ds-pod-summary__count" id="pod-healthy">5</span>
+          <span class="ds-pod-summary__label">정상</span>
+        </span>
+        <span class="ds-pod-summary__item ds-pod-summary__item--unhealthy"
+              id="unhealthy-trigger" tabindex="0" role="button"
+              aria-describedby="unhealthy-pop" aria-expanded="false">
+          <span class="ds-status-dot" style="--_status-color: var(--status-critical)"></span>
+          <span class="ds-pod-summary__count" id="pod-unhealthy">3</span>
+          <span class="ds-pod-summary__label">비정상</span>
+          <span class="ds-pod-popover" id="unhealthy-pop" hidden>
+            <span class="ds-pod-popover__header">
+              비정상 Pods (3)
+              <span class="ds-pod-popover__hint"> — 행을 클릭하면 로그가 열립니다</span>
+            </span>
+            <span class="ds-pod-popover__scroll">
+              <table class="ds-data-table ds-data-table--compact ds-data-table--interactive" id="unhealthy-table">
+                <thead><tr><th>Pod</th><th>상태</th><th class="ds-num">Restarts</th><th>Age</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </span>
+          </span>
+        </span>
+      </div>
+
+      <div class="ds-time-range">
+        <div class="ds-time-range__presets" role="group" aria-label="시간 범위">
+          <button class="ds-time-range__preset" type="button" data-range="30d" aria-pressed="false">30일</button>
+          <button class="ds-time-range__preset" type="button" data-range="7d"  aria-pressed="false">7일</button>
+          <button class="ds-time-range__preset" type="button" data-range="1d"  aria-pressed="false">1일</button>
+          <button class="ds-time-range__preset" type="button" data-range="1h"  aria-pressed="true">1시간</button>
+          <button class="ds-time-range__preset" type="button" data-range="custom" aria-pressed="false">Custom</button>
+        </div>
+        <span class="ds-time-range__state">
+          <span id="range-label">최근 1시간</span>
+          <span class="ds-time-range__step" id="step-label">step 1분</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- ── Canvas ─────────────────────────────────────────────────────────── -->
+    <div class="ds-topology__canvas">
+      <svg class="ds-topology__svg" id="topo-svg" viewBox="0 0 1120 470"
+           role="application" aria-label="Pod 간 통신 토폴로지. 선을 선택하면 방향별 요청 상세를 볼 수 있습니다."></svg>
+    </div>
+
+    <ul class="ds-topology__legend">
+      <li><i style="--_c: var(--status-healthy)"></i> 정상</li>
+      <li><i style="--_c: var(--status-warning)"></i> 지연/에러 증가</li>
+      <li><i style="--_c: var(--status-critical)"></i> 심각</li>
+      <li><span aria-hidden="true">▸</span> 화살표 = 요청 방향 · A→B와 B→A는 20px 떨어진 평행선</li>
+      <li>선 두께 = 트래픽 양 · 색 = 상태(프로토콜 아님)</li>
+    </ul>
+
+    <!-- ── Detail ─────────────────────────────────────────────────────────── -->
+    <div class="ds-topology__detail">
+      <div class="ds-table-panel" id="detail-panel">
+        <div class="ds-table-panel__header">
+          <div>
+            <div class="ds-edge-detail__route" id="detail-route"></div>
+            <div class="ds-table-panel__subtitle" id="detail-sub"></div>
+          </div>
+          <div class="ds-table-panel__actions">
+            <button class="ds-icon-button" id="mode-toggle" type="button"
+                    aria-pressed="false" aria-label="시계열 차트로 보기" title="시계열 차트로 보기">
+              <svg viewBox="0 0 16 16" aria-hidden="true" fill="none"
+                   stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2 13.5V2.5"></path>
+                <path d="M2 13.5h12"></path>
+                <path d="M4 10.5l3-3 2.5 2.5L14 4.5"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="ds-table-panel__scroll detail-scroll" id="detail-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="ds-preview__note">
+    <strong>중첩 방지 규칙</strong> — A→B와 B→A는 노드 중심선에서 각각 10px씩 반대쪽으로 밀어 평행하게 그립니다.
+    라벨은 선보다 폭이 넓어 오프셋만으로는 부족하므로, 방향 캡슐은 선 위 여러 후보 지점 중
+    이미 놓인 캡슐과 겹치지 않는 자리를 골라 배치합니다. 캡슐 레이어는 모든 선 위에 그립니다.
+    <code>payments-api ↔ auth-svc</code>와 <code>payments-api ↔ ledger-worker</code>에서 확인할 수 있습니다.
+  </p>
+  <p class="ds-preview__note">
+    <strong>Step 정책</strong> — 시계열은 분단위 고정이 아니라 범위별 자동 Step입니다
+    (1시간→1분, 1일→5분, 7일→15분, 30일→1시간). 30일을 분단위로 그리면 계열당 43,200 포인트가 되어
+    README §11의 "브라우저에 대량 시계열 포인트를 그대로 전송하지 않는다"에 위배됩니다.
+    현재 Step은 차트와 컨트롤 양쪽에 항상 표시합니다.
+  </p>
+</main>
+
+<!-- ── 로그 모달 ──────────────────────────────────────────────────────────── -->
+<div class="ds-modal-backdrop" id="log-backdrop" hidden>
+  <div class="ds-modal" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <div class="ds-modal__header">
+      <div>
+        <div class="ds-modal__title" id="log-title"></div>
+        <div class="ds-modal__subtitle" id="log-sub"></div>
+      </div>
+      <button class="ds-icon-button" id="log-close" type="button" aria-label="닫기" title="닫기 (Esc)">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M4 4l8 8M12 4l-8 8"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="ds-modal__body"><ul class="ds-log-list" id="log-list"></ul></div>
+    <div class="ds-modal__footer">
+      <span id="log-foot"></span>
+      <span>Logs Explorer에서 열기 →</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ── 데이터 ─────────────────────────────────────────────────────────────── */
+  const NODE_W = 148, NODE_H = 56, EDGE_OFFSET = 10, ARROW = 9;
+
+  const NODES = [
+    { id:"gateway",  name:"gateway-5f7c9",       ns:"ingress",  status:"healthy",  x:110, y:235, restarts:0,  age:"12d" },
+    { id:"auth",     name:"auth-svc-8b41d",      ns:"payments", status:"healthy",  x:380, y:95,  restarts:0,  age:"6d"  },
+    { id:"payments", name:"payments-api-x2mkq",  ns:"payments", status:"warning",  x:380, y:235, restarts:2,  age:"3d"  },
+    { id:"batch",    name:"batch-sync-qq81z",    ns:"payments", status:"critical", x:660, y:390, restarts:14, age:"41m" },
+    { id:"redis",    name:"redis-cache-0",       ns:"payments", status:"healthy",  x:660, y:95,  restarts:0,  age:"21d" },
+    { id:"ledger",   name:"ledger-worker-9fkt2", ns:"payments", status:"degraded", x:660, y:235, restarts:5,  age:"2d"  },
+    { id:"kafka",    name:"kafka-broker-1",      ns:"platform", status:"healthy",  x:940, y:120, restarts:0,  age:"34d" },
+    { id:"postgres", name:"postgres-primary-0",  ns:"platform", status:"healthy",  x:940, y:330, restarts:0,  age:"34d" },
+  ];
+
+  const EDGES = [
+    { id:"e1",  from:"gateway",  to:"payments", status:"healthy",  routes:[
+      ["HTTP","GET /api/v1/payments/{id}",1420000],["HTTP","POST /api/v1/payments",980000],
+      ["HTTP","GET /api/v1/payments/summary",420000],["HTTP","POST /api/v1/payments/{id}/refund",148000],
+      ["HTTP","GET /healthz",63000]] },
+    { id:"e2",  from:"gateway",  to:"auth",     status:"healthy",  routes:[
+      ["HTTP","POST /api/v1/auth/token",300000],["HTTP","GET /api/v1/auth/jwks",124800]] },
+    { id:"e3",  from:"payments", to:"auth",     status:"healthy",  routes:[
+      ["gRPC","auth.v1.AuthService/VerifyToken",620000],["gRPC","auth.v1.AuthService/GetPrincipal",118000]] },
+    { id:"e4",  from:"auth",     to:"payments", status:"warning",  routes:[
+      ["gRPC","payments.v1.Ledger/Notify",148000]] },
+    { id:"e5",  from:"payments", to:"redis",    status:"healthy",  routes:[
+      ["TCP","redis:6379 GET",3200000],["TCP","redis:6379 SET",980000],["TCP","redis:6379 EVAL",284000]] },
+    { id:"e6",  from:"payments", to:"ledger",   status:"healthy",  routes:[
+      ["HTTP","POST /internal/ledger/entries",890000],["HTTP","GET /internal/ledger/balance",233200]] },
+    { id:"e7",  from:"ledger",   to:"payments", status:"warning",  routes:[
+      ["HTTP","POST /internal/payments/settle",345600]] },
+    { id:"e8",  from:"payments", to:"postgres", status:"healthy",  routes:[
+      ["TCP","postgres:5432 SELECT",1620000],["TCP","postgres:5432 INSERT",468000],["TCP","postgres:5432 UPDATE",86400]] },
+    { id:"e9",  from:"ledger",   to:"postgres", status:"healthy",  routes:[
+      ["TCP","postgres:5432 SELECT",1210000],["TCP","postgres:5432 INSERT",510800]] },
+    { id:"e10", from:"ledger",   to:"kafka",    status:"healthy",  routes:[
+      ["TCP","produce ledger.entries",795600]] },
+    { id:"e11", from:"batch",    to:"postgres", status:"critical", routes:[
+      ["TCP","postgres:5432 SELECT",108000],["TCP","postgres:5432 COPY",28800]] },
+    { id:"e12", from:"batch",    to:"kafka",    status:"critical", routes:[
+      ["UDP","statsd metrics",43200]] },
+  ];
+
+  const RANGES = {
+    "30d":    { hours:720, stepMin:60, stepLabel:"1시간", label:"최근 30일",  buckets:720 },
+    "7d":     { hours:168, stepMin:15, stepLabel:"15분",  label:"최근 7일",   buckets:672 },
+    "1d":     { hours:24,  stepMin:5,  stepLabel:"5분",   label:"최근 1일",   buckets:288 },
+    "1h":     { hours:1,   stepMin:1,  stepLabel:"1분",   label:"최근 1시간", buckets:60  },
+    "custom": { hours:72,  stepMin:15, stepLabel:"15분",  label:"Custom · 3일 (최대 30일)", buckets:288 },
+  };
+
+  const STATUS_LABEL = { healthy:"Healthy", warning:"Warning", degraded:"Degraded", critical:"Critical" };
+  const STATUS_GLYPH = { healthy:"✓", warning:"!", degraded:"▲", critical:"✕" };
+  const STATUS_REASON = {
+    warning:  "Replica 2/3 · p99 지연 상승",
+    degraded: "Readiness probe 실패 반복",
+    critical: "CrashLoopBackOff",
+  };
+
+  const LOGS = {
+    payments: [
+      ["12:47:31","WARN", "upstream auth-svc p99=812ms exceeds slo=500ms"],
+      ["12:47:33","INFO", "GET /api/v1/payments/9f21 200 in 41ms"],
+      ["12:47:35","WARN", "connection pool near limit: 47/50 (postgres-primary-0)"],
+      ["12:47:38","ERROR","POST /api/v1/payments 503 upstream ledger-worker-9fkt2 timeout after 2000ms"],
+      ["12:47:39","INFO", "retrying ledger settle attempt=2 backoff=400ms"],
+      ["12:47:41","ERROR","POST /api/v1/payments 503 upstream ledger-worker-9fkt2 timeout after 2000ms"],
+      ["12:47:44","INFO", "readiness probe ok"],
+    ],
+    ledger: [
+      ["12:47:20","INFO", "consumed batch offset=8841203 size=500"],
+      ["12:47:26","WARN", "readiness probe failed: /healthz returned 500 (attempt 3)"],
+      ["12:47:31","ERROR","postgres: canceling statement due to statement timeout (30s)"],
+      ["12:47:33","WARN", "kafka produce lag=18400 partition=3"],
+      ["12:47:37","ERROR","settle batch failed, 118 entries requeued"],
+      ["12:47:42","WARN", "readiness probe failed: /healthz returned 500 (attempt 4)"],
+    ],
+    batch: [
+      ["12:46:58","INFO", "starting sync window 2026-08-13T03:00Z"],
+      ["12:47:02","ERROR","dial tcp postgres-primary-0:5432: connect: connection refused"],
+      ["12:47:02","ERROR","panic: sql: database is closed"],
+      ["12:47:03","INFO", "container exited with code 2"],
+      ["12:47:18","INFO", "back-off 40s restarting failed container (restart #14)"],
+      ["12:47:58","ERROR","dial tcp postgres-primary-0:5432: connect: connection refused"],
+    ],
+  };
+
+  /* ── 상태 ───────────────────────────────────────────────────────────────── */
+  const state = { range:"1h", edge:"e1", mode:"table" };
+  const nodeById = Object.fromEntries(NODES.map(n => [n.id, n]));
+  const edgeById = Object.fromEntries(EDGES.map(e => [e.id, e]));
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Math.round(n).toLocaleString("en-US");
+  const totalPerHour = (e) => e.routes.reduce((s, r) => s + r[2], 0);
+
+  /* 결정적 의사난수 — 스크린샷/리뷰 간 결과가 흔들리지 않게 합니다. */
+  function noise(seed) {
+    let h = 2166136261;
+    for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 10000) / 10000;
+  }
+
+  /* ── 토폴로지 렌더 ──────────────────────────────────────────────────────── */
+  function edgeGeom(edge) {
+    const a = nodeById[edge.from], b = nodeById[edge.to];
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    const ux = dx / len, uy = dy / len;
+    const px = -uy, py = ux;                       // 진행 방향 기준 왼쪽 수직
+    const hw = NODE_W / 2 + 8, hh = NODE_H / 2 + 8;
+    const t = Math.min(Math.abs(ux) < 1e-6 ? Infinity : hw / Math.abs(ux),
+                       Math.abs(uy) < 1e-6 ? Infinity : hh / Math.abs(uy));
+    const ox = px * EDGE_OFFSET, oy = py * EDGE_OFFSET;
+    const x1 = a.x + ux * t + ox,               y1 = a.y + uy * t + oy;
+    const x2 = b.x - ux * (t + ARROW) + ox,     y2 = b.y - uy * (t + ARROW) + oy;
+    const tipX = b.x - ux * t + ox,             tipY = b.y - uy * t + oy;
+    return { x1, y1, x2, y2, tipX, tipY, ux, uy, px, py };
+  }
+
+  function arrowPath(g) {
+    const w = 4.5;
+    const bx = g.tipX - g.ux * ARROW, by = g.tipY - g.uy * ARROW;
+    return `M ${g.tipX} ${g.tipY} L ${bx + g.px * w} ${by + g.py * w} L ${bx - g.px * w} ${by - g.py * w} Z`;
+  }
+
+  function strokeWidth(perHour) {
+    return Math.max(2, Math.min(6, 2 + Math.log10(perHour / 40000 + 1) * 3));
+  }
+
+  /* 방향 캡슐 위치 — 선 위 여러 후보 지점 중 이미 놓인 캡슐과 겹치지 않는 첫 지점을
+     고릅니다. 라인은 오프셋으로 분리되지만 라벨은 폭이 있어 따로 충돌 회피가 필요합니다. */
+  const CAP_FRACTIONS = [0.38, 0.30, 0.46, 0.24, 0.54, 0.18, 0.62, 0.12];
+  function placeCap(g, w, placed) {
+    const h = 18, pad = 4;
+    let fallback = null;
+    for (const f of CAP_FRACTIONS) {
+      const cx = g.x1 + (g.x2 - g.x1) * f, cy = g.y1 + (g.y2 - g.y1) * f;
+      const box = { x1: cx - w / 2 - pad, y1: cy - h / 2 - pad, x2: cx + w / 2 + pad, y2: cy + h / 2 + pad };
+      if (!fallback) fallback = { cx, cy, box };
+      const hit = placed.some(p => !(box.x2 < p.x1 || box.x1 > p.x2 || box.y2 < p.y1 || box.y1 > p.y2));
+      if (!hit) return { cx, cy, box };
+    }
+    return fallback;
+  }
+
+  function renderTopology() {
+    const sel = edgeById[state.edge];
+    const active = new Set(sel ? [sel.from, sel.to] : []);
+    let edgeSvg = "", capSvg = "", nodeSvg = "";
+    const placed = [];
+
+    for (const e of EDGES) {
+      const g = edgeGeom(e);
+      const ph = totalPerHour(e);
+      const proto = [...new Set(e.routes.map(r => r[0]))].join("/");
+      const capText = `${proto} ${fmt(ph / 3600)}/s`;
+      const capW = capText.length * 5.6 + 14;
+      const cap = placeCap(g, capW, placed);
+      placed.push(cap.box);
+      const dim = sel && e.id !== sel.id ? " ds-topo-edge--dimmed" : "";
+      const on  = sel && e.id === sel.id ? " ds-topo-edge--selected" : "";
+      const cls = `ds-topo-edge--${e.status}${dim}${on}`;
+      edgeSvg += `<g class="ds-topo-edge ${cls}" data-edge="${e.id}"
+        tabindex="0" role="button"
+        aria-label="${nodeById[e.from].name}에서 ${nodeById[e.to].name}로 ${proto} 요청, 시간당 ${fmt(ph)}건">
+        <line class="ds-topo-edge__hit" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}"></line>
+        <line class="ds-topo-edge__line" x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}"
+              stroke-width="${strokeWidth(ph)}"></line>
+        <path class="ds-topo-edge__arrow" d="${arrowPath(g)}"></path>
+      </g>`;
+      /* 캡슐은 모든 선 위에 그려지도록 별도 레이어로 분리합니다. */
+      capSvg += `<g class="ds-topo-cap ${cls}" data-edge="${e.id}" aria-hidden="true">
+        <rect class="ds-topo-edge__cap" x="${cap.cx - capW / 2}" y="${cap.cy - 9}" width="${capW}" height="18"></rect>
+        <text class="ds-topo-edge__cap-text" x="${cap.cx}" y="${cap.cy + 3.5}" text-anchor="middle">${capText}</text>
+      </g>`;
+    }
+
+    for (const n of NODES) {
+      const x = n.x - NODE_W / 2, y = n.y - NODE_H / 2;
+      const dim = sel && !active.has(n.id) ? " ds-topo-node--dimmed" : "";
+      nodeSvg += `<g class="ds-topo-node ds-topo-node--${n.status}${dim}" data-node="${n.id}"
+        tabindex="0" role="button" aria-label="${n.name}, 상태 ${STATUS_LABEL[n.status]}. 로그 보기">
+        <rect class="ds-topo-node__box" x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="8"></rect>
+        <rect class="ds-topo-node__rail" x="${x + 5}" y="${y + 10}" width="4" height="${NODE_H - 20}" rx="2"></rect>
+        <text class="ds-topo-node__name" x="${x + 18}" y="${y + 24}">${n.name}</text>
+        <text class="ds-topo-node__meta" x="${x + 18}" y="${y + 41}">${n.ns} · ${STATUS_LABEL[n.status]}</text>
+      </g>`;
+    }
+    $("topo-svg").innerHTML = edgeSvg + capSvg + nodeSvg;
+  }
+
+  /* ── Detail: 테이블 / 차트 ──────────────────────────────────────────────── */
+  function rangeRoutes(edge) {
+    const r = RANGES[state.range];
+    return edge.routes
+      .map(([proto, route, perHour]) => ({ proto, route, count: perHour * r.hours }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  function renderTable(edge) {
+    const rows = rangeRoutes(edge);
+    const total = rows.reduce((s, r) => s + r.count, 0);
+    $("detail-body").innerHTML = `
+      <table class="ds-data-table ds-data-table--compact">
+        <thead><tr><th style="width:110px">통신 종류</th><th>Route 종류 (혹은 API)</th><th class="ds-num" style="width:140px">누적 Count</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td>${r.proto}</td>
+            <td class="ds-ident">${r.route}</td>
+            <td class="ds-num">${fmt(r.count)}</td>
+          </tr>`).join("")}
+          <tr>
+            <td colspan="2" style="font: var(--type-label); color: var(--color-text-secondary)">합계</td>
+            <td class="ds-num" style="font: var(--type-body-strong)">${fmt(total)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  }
+
+  function series(edge) {
+    const rows = rangeRoutes(edge);
+    const top = rows.slice(0, 3);
+    const rest = rows.slice(3);
+    const out = top.map(r => ({ name: r.route, proto: r.proto, count: r.count }));
+    if (rest.length) out.push({ name: `기타 ${rest.length}개`, proto: "—", count: rest.reduce((s, r) => s + r.count, 0) });
+    return out;
+  }
+
+  function buckets(edge, s, i) {
+    const r = RANGES[state.range];
+    const n = r.buckets;
+    const per = s.count / n;
+    /* 버킷이 길수록 집계로 노이즈가 줄어듭니다. 진폭을 step에 반비례시켜
+       "30일 뷰가 1시간 뷰보다 매끈하다"는 실제 감각을 재현합니다. */
+    const amp = 0.36 / Math.sqrt(r.stepMin);
+    const arr = new Array(n);
+    for (let b = 0; b < n; b++) {
+      const wave = 1 + 0.22 * Math.sin((b / n) * Math.PI * 3 + i * 1.7);
+      const jitter = 1 - amp / 2 + noise(`${edge.id}|${i}|${b}|${state.range}`) * amp;
+      arr[b] = per * wave * jitter;
+    }
+    return arr;
+  }
+
+  /* 버킷 시각 — 고정 종료 시각 기준(리뷰 간 결과 고정). KST 표기. */
+  const END_MS = Date.UTC(2026, 7, 13, 4, 0, 0);   // 2026-08-13 13:00 KST
+  function bucketTime(b) {
+    const r = RANGES[state.range];
+    const t = new Date(END_MS - (r.buckets - 1 - b) * r.stepMin * 60000 + 9 * 3600000);
+    const p = (v) => String(v).padStart(2, "0");
+    const hm = `${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+    return r.hours <= 24 ? hm : `${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${hm}`;
+  }
+
+  function niceMax(v) {
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    return Math.ceil(v / p * 2) / 2 * p;
+  }
+
+  function timeLabels() {
+    const r = RANGES[state.range];
+    if (state.range === "1h") return ["12:00","12:15","12:30","12:45","13:00"];
+    if (state.range === "1d") return ["13:00","19:00","01:00","07:00","13:00"];
+    if (state.range === "7d") return ["08-06","08-08","08-09","08-11","08-13"];
+    if (state.range === "30d") return ["07-14","07-21","07-28","08-04","08-13"];
+    return ["08-10","08-11","08-11","08-12","08-13"];
+  }
+
+  function renderChart(edge) {
+    const ss = series(edge);
+    const data = ss.map((s, i) => buckets(edge, s, i));
+    const r = RANGES[state.range];
+    const max = niceMax(Math.max(...data.flat()));
+    const X0 = 56, X1 = 1032, Y0 = 16, Y1 = 196;
+    const n = r.buckets;
+    const px = (b) => X0 + (X1 - X0) * (n === 1 ? 0 : b / (n - 1));
+    const py = (v) => Y1 - (Y1 - Y0) * (v / max);
+
+    const grid = [0, 0.25, 0.5, 0.75, 1].map(f => {
+      const y = Y1 - (Y1 - Y0) * f;
+      return `<line class="ds-chart-${f === 0 ? "axis" : "grid"}-line" x1="${X0}" y1="${y}" x2="${X1}" y2="${y}"></line>
+              <text class="ds-chart-axis-label" x="${X0 - 8}" y="${y + 4}" text-anchor="end">${fmt(max * f)}</text>`;
+    }).join("");
+
+    const xlab = timeLabels().map((t, i) => {
+      const x = X0 + (X1 - X0) * (i / 4);
+      return `<text class="ds-chart-axis-label" x="${x}" y="${Y1 + 22}" text-anchor="middle">${t}</text>`;
+    }).join("");
+
+    const lines = data.map((d, i) =>
+      `<polyline class="ds-chart-line" stroke="var(--series-${i + 1})"
+        points="${d.map((v, b) => `${px(b).toFixed(1)},${py(v).toFixed(1)}`).join(" ")}"></polyline>`).join("");
+
+    /* 직접 라벨 — 선 위에 겹치지 않도록 마지막 점 위쪽에 짧은 이름으로 붙입니다. */
+    const last = data.map(d => d[d.length - 1]);
+    const topIdx = last.indexOf(Math.max(...last));
+    const shortName = (s) => s.name.split("/").pop().split(" ").pop();
+    const lblText = shortName(ss[topIdx]);
+    const lblW = lblText.length * 5.8 + 12;
+    const lblY = Math.max(py(last[topIdx]) - 16, Y0 + 12);
+    const label = `<circle cx="${px(n - 1)}" cy="${py(last[topIdx])}" r="4" fill="var(--series-${topIdx + 1})"
+                     class="ds-chart-mark--overlap"></circle>
+                   <rect x="${px(n - 1) - 10 - lblW}" y="${lblY - 11}" width="${lblW}" height="16" rx="4"
+                     fill="var(--chart-surface)"></rect>
+                   <text class="ds-chart-axis-label" x="${px(n - 1) - 14}" y="${lblY}"
+                     text-anchor="end" style="fill: var(--color-text-secondary)">${lblText}</text>`;
+
+    $("detail-body").innerHTML = `
+      <div style="padding: var(--space-5)">
+        <ul class="ds-chart-legend" style="margin-bottom: var(--space-4)">
+          ${ss.map((s, i) => `<li class="ds-chart-legend__item ds-series-${i + 1}">
+             <span class="ds-chart-legend__swatch"></span>${s.name}</li>`).join("")}
+        </ul>
+        <div style="position:relative" id="chart-wrap">
+          <svg viewBox="0 0 1060 230" style="width:100%; height:auto; display:block"
+               role="img" aria-label="${ss.map(s => s.name).join(", ")} 요청 수 시계열. ${r.stepLabel} 누적.">
+            ${grid}${xlab}${lines}${label}
+            <g id="cross" style="display:none">
+              <line class="ds-chart-axis-line" id="cross-line" y1="${Y0}" y2="${Y1}"></line>
+            </g>
+            <rect id="chart-hit" x="${X0}" y="${Y0}" width="${X1 - X0}" height="${Y1 - Y0}" fill="transparent"></rect>
+          </svg>
+          <div class="ds-chart-tooltip" id="chart-tip" style="display:none"></div>
+        </div>
+        <div style="font: var(--type-meta); color: var(--color-text-muted); margin-top: var(--space-3)">
+          ${r.label} · ${r.stepLabel} 누적 · 계열당 ${fmt(r.buckets)} 포인트 · 상위 3개 Route + 나머지는 “기타”로 접음
+        </div>
+      </div>`;
+
+    /* 호버 레이어 — HTML/SVG 차트는 기본적으로 인터랙티브합니다. */
+    const wrap = $("chart-wrap"), tip = $("chart-tip"), cross = $("cross"), cline = $("cross-line");
+    wrap.addEventListener("mousemove", (ev) => {
+      const box = wrap.getBoundingClientRect();
+      const vx = (ev.clientX - box.left) / box.width * 1060;
+      if (vx < X0 || vx > X1) return;
+      const b = Math.round((vx - X0) / (X1 - X0) * (n - 1));
+      cross.style.display = "";
+      cline.setAttribute("x1", px(b)); cline.setAttribute("x2", px(b));
+      tip.style.display = "";
+      tip.style.left = `${Math.min(Math.max(ev.clientX - box.left + 12, 0), box.width - 240)}px`;
+      tip.style.top = "8px";
+      tip.innerHTML = `<div style="font: var(--type-label); margin-bottom: var(--space-3)">${bucketTime(b)}</div>` +
+        ss.map((s, i) => `<div class="ds-chart-tooltip__row ds-series-${i + 1}">
+          <span class="ds-chart-tooltip__name"><span class="ds-chart-legend__swatch"></span>${shortName(s)}</span>
+          <span>${fmt(data[i][b])}</span></div>`).join("");
+    });
+    wrap.addEventListener("mouseleave", () => { cross.style.display = "none"; tip.style.display = "none"; });
+  }
+
+  function renderDetail() {
+    const e = edgeById[state.edge];
+    const from = nodeById[e.from], to = nodeById[e.to];
+    const r = RANGES[state.range];
+    const total = totalPerHour(e) * r.hours;
+    $("detail-route").innerHTML =
+      `<span>${from.name}</span><span class="ds-edge-detail__arrow" aria-hidden="true">→</span><span>${to.name}</span>
+       <span class="ds-status-badge ds-status-badge--sm ds-status-badge--${e.status}" style="margin-left: var(--space-3)">
+         <span class="ds-status-badge__glyph" aria-hidden="true">${STATUS_GLYPH[e.status]}</span>
+         <span class="ds-status-badge__label">${STATUS_LABEL[e.status]}</span>
+       </span>`;
+    const reverse = EDGES.some(x => x.from === e.to && x.to === e.from);
+    $("detail-sub").textContent = `${r.label} · 누적 ${fmt(total)}건 · ` +
+      (reverse ? `반대 방향(${to.name} → ${from.name})은 별도 선입니다` : "이 방향으로만 관측됩니다");
+    $("mode-toggle").setAttribute("aria-pressed", String(state.mode === "chart"));
+    $("mode-toggle").setAttribute("aria-label", state.mode === "chart" ? "표로 보기" : "시계열 차트로 보기");
+    $("mode-toggle").title = state.mode === "chart" ? "표로 보기" : "시계열 차트로 보기";
+    state.mode === "chart" ? renderChart(e) : renderTable(e);
+  }
+
+  /* ── 비정상 Pods ────────────────────────────────────────────────────────── */
+  function renderUnhealthy() {
+    const bad = NODES.filter(n => n.status !== "healthy");
+    $("pod-total").textContent = NODES.length;
+    $("pod-healthy").textContent = NODES.length - bad.length;
+    $("pod-unhealthy").textContent = bad.length;
+    $("unhealthy-table").querySelector("tbody").innerHTML = bad.map(n => `
+      <tr tabindex="0" data-pod="${n.id}">
+        <td class="ds-ident">${n.name}</td>
+        <td><span class="ds-status-badge ds-status-badge--sm ds-status-badge--${n.status}">
+          <span class="ds-status-badge__glyph" aria-hidden="true">${STATUS_GLYPH[n.status]}</span>
+          <span class="ds-status-badge__label">${STATUS_REASON[n.status]}</span></span></td>
+        <td class="ds-num">${n.restarts}</td>
+        <td>${n.age}</td>
+      </tr>`).join("");
+  }
+
+  /* ── 로그 모달 ──────────────────────────────────────────────────────────── */
+  function openLogs(podId) {
+    const n = nodeById[podId];
+    const lines = LOGS[podId] || [["12:47:44","INFO","no recent errors"]];
+    $("log-title").textContent = n.name;
+    $("log-sub").textContent = `namespace: ${n.ns} · container: app · 최근 200줄 중 ${lines.length}줄`;
+    $("log-foot").textContent = `restarts ${n.restarts} · age ${n.age} · Secret은 서버에서 마스킹됩니다`;
+    $("log-list").innerHTML = lines.map(([t, lv, msg]) => `
+      <li class="ds-log-line ds-log-line--${lv.toLowerCase()}">
+        <span class="ds-log-line__time">${t}</span>
+        <span class="ds-log-line__level">${lv}</span>
+        <span class="ds-log-line__msg">${msg.replace(/</g, "&lt;")}</span>
+      </li>`).join("");
+    $("log-backdrop").hidden = false;
+  }
+  const closeLogs = () => { $("log-backdrop").hidden = true; };
+
+  /* ── 이벤트 ─────────────────────────────────────────────────────────────── */
+  $("topo-svg").addEventListener("click", (ev) => {
+    const edge = ev.target.closest("[data-edge]");
+    if (edge) { state.edge = edge.dataset.edge; renderTopology(); renderDetail(); return; }
+    const node = ev.target.closest("[data-node]");
+    if (node) openLogs(node.dataset.node);
+  });
+  $("topo-svg").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    const edge = ev.target.closest("[data-edge]");
+    if (edge) { state.edge = edge.dataset.edge; renderTopology(); renderDetail(); return; }
+    const node = ev.target.closest("[data-node]");
+    if (node) openLogs(node.dataset.node);
+  });
+
+  document.querySelectorAll("[data-range]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.range = btn.dataset.range;
+      document.querySelectorAll("[data-range]").forEach(b =>
+        b.setAttribute("aria-pressed", String(b === btn)));
+      const r = RANGES[state.range];
+      $("range-label").textContent = r.label;
+      $("step-label").textContent = `step ${r.stepLabel}`;
+      renderDetail();
+    });
+  });
+
+  $("mode-toggle").addEventListener("click", () => {
+    state.mode = state.mode === "chart" ? "table" : "chart";
+    renderDetail();
+  });
+
+  const trigger = $("unhealthy-trigger"), pop = $("unhealthy-pop");
+  const showPop = () => { pop.hidden = false; trigger.setAttribute("aria-expanded", "true"); };
+  const hidePop = () => { pop.hidden = true;  trigger.setAttribute("aria-expanded", "false"); };
+  trigger.addEventListener("mouseenter", showPop);
+  trigger.addEventListener("focus", showPop);
+  trigger.addEventListener("mouseleave", (ev) => { if (!pop.contains(ev.relatedTarget)) hidePop(); });
+  pop.addEventListener("mouseleave", (ev) => { if (!trigger.contains(ev.relatedTarget)) hidePop(); });
+  pop.addEventListener("click", (ev) => {
+    const row = ev.target.closest("[data-pod]");
+    if (row) { ev.stopPropagation(); openLogs(row.dataset.pod); }
+  });
+  pop.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    const row = ev.target.closest("[data-pod]");
+    if (row) { ev.preventDefault(); openLogs(row.dataset.pod); }
+  });
+
+  $("log-close").addEventListener("click", closeLogs);
+  $("log-backdrop").addEventListener("click", (ev) => { if (ev.target === $("log-backdrop")) closeLogs(); });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { closeLogs(); hidePop(); } });
+
+  /* ── 초기화 ─────────────────────────────────────────────────────────────── */
+  renderUnhealthy();
+  renderTopology();
+  renderDetail();
+})();
+</script>
+</body>
+</html>

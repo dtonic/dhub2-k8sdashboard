@@ -1,0 +1,100 @@
+<!-- @dsCard group="Components" name="Time range control" viewport="960x520" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Time range control</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/time-range/time-range.css */
+.wrap { position: relative; }
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Time range</h1>
+    <p class="ds-preview__desc">
+      대시보드 전역 시간 범위 컨트롤입니다. 기본값은 최근 1시간이며, Custom Range는 최대 30일입니다.
+      Step은 사용자가 고르지 않습니다. 범위에 따라 서버가 강제하고 UI는 결과만 표시합니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Default — 최근 1시간</h2>
+    <div class="ds-time-range">
+      <div class="ds-time-range__presets" role="group" aria-label="시간 범위">
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">30일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">7일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">1일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="true">1시간</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">Custom</button>
+      </div>
+      <span class="ds-time-range__state">
+        2026-08-13 12:00 – 13:00
+        <span class="ds-time-range__step">step 1분</span>
+      </span>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">30일 선택 — step이 1시간으로 강제됨</h2>
+    <div class="ds-time-range">
+      <div class="ds-time-range__presets" role="group" aria-label="시간 범위">
+        <button class="ds-time-range__preset" type="button" aria-pressed="true">30일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">7일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">1일</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">1시간</button>
+        <button class="ds-time-range__preset" type="button" aria-pressed="false">Custom</button>
+      </div>
+      <span class="ds-time-range__state">
+        2026-07-14 13:00 – 08-13 13:00
+        <span class="ds-time-range__step">step 1시간</span>
+      </span>
+    </div>
+    <table class="ds-table" style="max-width:420px">
+      <thead><tr><th>범위</th><th>강제 Step</th><th class="ds-num" style="text-align:right">계열당 포인트</th></tr></thead>
+      <tbody style="font-variant-numeric: tabular-nums">
+        <tr><td>1시간</td><td>1분</td><td style="text-align:right">60</td></tr>
+        <tr><td>1일</td><td>5분</td><td style="text-align:right">288</td></tr>
+        <tr><td>7일</td><td>15분</td><td style="text-align:right">672</td></tr>
+        <tr><td>30일</td><td>1시간</td><td style="text-align:right">720</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Custom Range — 30일 초과 시</h2>
+    <div class="wrap" style="height: 260px">
+      <div class="ds-time-range">
+        <div class="ds-time-range__presets" role="group" aria-label="시간 범위">
+          <button class="ds-time-range__preset" type="button" aria-pressed="false">30일</button>
+          <button class="ds-time-range__preset" type="button" aria-pressed="false">7일</button>
+          <button class="ds-time-range__preset" type="button" aria-pressed="false">1일</button>
+          <button class="ds-time-range__preset" type="button" aria-pressed="false">1시간</button>
+          <button class="ds-time-range__preset" type="button" aria-pressed="true">Custom</button>
+        </div>
+      </div>
+      <div class="ds-time-range__popover" style="position:absolute; top:40px; left:0">
+        <div class="ds-time-range__field">
+          <label for="tr-from">시작</label>
+          <input id="tr-from" type="text" value="2026-06-01 00:00" readonly>
+        </div>
+        <div class="ds-time-range__field">
+          <label for="tr-to">종료</label>
+          <input id="tr-to" type="text" value="2026-08-13 13:00" readonly>
+        </div>
+        <span class="ds-time-range__error"><span aria-hidden="true">✕</span> 최대 조회 범위는 30일입니다. 현재 73일 선택됨</span>
+        <span class="ds-time-range__hint">서버가 범위·Step·Data Point·Result Size를 강제합니다.</span>
+      </div>
+    </div>
+    <p class="ds-preview__note">
+      범위 제한은 UI 편의가 아니라 서버 가드레일입니다. 클라이언트 검증은 안내용이고,
+      실제 거절은 Observability API에서 수행합니다.
+    </p>
+  </section>
+</main>
+</body>
+</html>

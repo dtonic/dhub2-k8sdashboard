@@ -139,6 +139,7 @@ React와 TypeScript를 기반으로 구축합니다.
 - Cluster Overview
 - Namespace Overview
 - Workload/Pod 상세 화면
+- Pod Topology (Pod 간 통신 현황 및 방향별 요청 분석)
 - Logs Explorer
 - Metric/Log/Event/Alert 상관분석
 - Dashboard DSL 기반 Widget 렌더링
@@ -346,6 +347,7 @@ k8s-dashboard/
 - Cluster Overview
 - Namespace Overview
 - Workload/Pod 상세
+- Pod Topology 및 방향별 요청 집계
 - Logs Explorer
 - Metric/Log/Event/Alert Drill-down
 - Grafana Alerting 또는 Alertmanager 조회 연동
@@ -379,6 +381,16 @@ Cluster Overview
         → Logs
         → Kubernetes Events
         → Related Alerts
+```
+
+### 통신 경로 분석
+
+```text
+Pod Topology
+  → 문제 있는 방향의 선 선택 (A→B와 B→A는 별도 선)
+    → API/Route별 누적 요청 수
+      → 시계열 전환 (범위별 자동 Step)
+        → 비정상 Pod 목록 → Pod 로그
 ```
 
 ### 자원 사용 분석
@@ -449,6 +461,10 @@ platform.admin
 | 최근 24시간 | 1~5분 |
 | 최근 30일 | 1시간 집계 |
 
+Pod Topology의 요청 수 시계열은 위 정책의 구체화입니다.
+1시간→1분, 1일→5분, 7일→15분, 30일→1시간이며, Step은 사용자가 고르지 않고 서버가 강제합니다.
+Custom Range의 최대 폭은 30일입니다.
+
 ---
 
 ## 12. 개발 로드맵
@@ -472,7 +488,7 @@ platform.admin
 
 ### Phase 3 — Core UI
 
-- Design System 컴포넌트 확장 (테이블, 로그 뷰어, Scope Selector, 시간 범위 컨트롤)
+- Design System 컴포넌트 확장 (Scope Selector, 로그 뷰어, 빈/오류 상태)
 - Cluster Overview
 - Namespace Overview
 - Workload/Pod Detail

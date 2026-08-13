@@ -1,0 +1,225 @@
+/* ==========================================================================
+   Component — Pod Topology
+   --------------------------------------------------------------------------
+   Pod 간 통신(HTTP / gRPC / TCP / UDP) 현황을 그래프로 보여줍니다.
+
+   방향 표기 규칙 (핵심)
+   - A→B와 B→A는 **서로 다른 선**입니다. 두 선은 노드 중심선에서 수직 방향으로
+     각각 `--topo-edge-offset`만큼 밀어 평행하게 그립니다. 절대 겹치지 않습니다.
+   - 화살표는 도착 노드 쪽 끝에 붙습니다. 선 위의 방향 캡슐(프로토콜 + RPS)로
+     화살표 없이도 방향을 읽을 수 있게 합니다. 캡슐은 선 위 여러 후보 지점 중
+     이미 놓인 캡슐과 겹치지 않는 자리를 골라 배치합니다(라벨 충돌 회피).
+   - 선 두께는 트래픽 양을 나타냅니다(2~6px). 색은 프로토콜이 아니라 **상태**를
+     나타냅니다. 프로토콜은 캡슐의 텍스트로 구분합니다.
+     → 색상 채널을 상태에 예약해 두면 "빨간 선 = 에러율 높음"이 항상 참이 됩니다.
+
+   접근성
+   - 각 방향 선은 tabindex를 가진 버튼입니다. 키보드로 순회하고 Enter로 선택합니다.
+   - 히트 영역은 보이는 선보다 두껍습니다(투명 stroke).
+   ========================================================================== */
+
+.ds-topology {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  --topo-edge-offset: 10px;  /* 중심선 기준 수직 오프셋 → 두 방향 간 총 20px */
+  --topo-node-w: 148px;
+  --topo-node-h: 56px;
+}
+
+/* --- Header: Pod 수 요약 --------------------------------------------------- */
+.ds-topology__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.ds-pod-summary { display: flex; align-items: center; gap: var(--space-5); }
+
+.ds-pod-summary__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+.ds-pod-summary__count {
+  font: var(--weight-semibold) var(--text-xl) / var(--leading-tight) var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.ds-pod-summary__label { font: var(--type-label); color: var(--color-text-secondary); }
+
+/* 비정상 항목은 hover/focus로 목록을 엽니다. */
+.ds-pod-summary__item--unhealthy {
+  position: relative;
+  cursor: pointer;
+  border-color: var(--status-critical);
+}
+.ds-pod-summary__item--unhealthy .ds-pod-summary__count { color: var(--status-critical); }
+.ds-pod-summary__item--unhealthy:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* --- 비정상 Pod 목록 팝오버 ------------------------------------------------ */
+.ds-pod-popover {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: var(--z-dropdown);
+  width: 520px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-2);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-3);
+  overflow: hidden;
+}
+.ds-pod-popover[hidden] { display: none; }
+.ds-pod-popover__header {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--border-hairline) solid var(--color-border-subtle);
+  font: var(--type-body-strong);
+}
+.ds-pod-popover__hint { font: var(--type-meta); color: var(--color-text-muted); font-weight: var(--weight-regular); }
+.ds-pod-popover__scroll { overflow: auto; min-height: 0; }
+
+/* --- Canvas --------------------------------------------------------------- */
+.ds-topology__canvas {
+  position: relative;
+  background: var(--chart-surface);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.ds-topology__svg { display: block; width: 100%; height: auto; }
+
+/* --- Node ----------------------------------------------------------------- */
+.ds-topo-node { cursor: pointer; }
+.ds-topo-node__box {
+  fill: var(--color-surface-2);
+  stroke: var(--color-border-strong);
+  stroke-width: 1;
+  rx: 8;
+}
+.ds-topo-node__name {
+  fill: var(--color-text-primary);
+  font: var(--weight-medium) var(--text-xs) / 1 var(--font-sans);
+}
+.ds-topo-node__meta {
+  fill: var(--color-text-muted);
+  font: var(--weight-regular) var(--text-2xs) / 1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+/* 상태 레일 — 노드 좌측 4px 바. 배지 텍스트가 노드 안에 함께 있습니다. */
+.ds-topo-node__rail { rx: 2; }
+.ds-topo-node--healthy    .ds-topo-node__rail { fill: var(--status-healthy); }
+.ds-topo-node--warning    .ds-topo-node__rail { fill: var(--status-warning); }
+.ds-topo-node--degraded   .ds-topo-node__rail { fill: var(--status-degraded); }
+.ds-topo-node--critical   .ds-topo-node__rail { fill: var(--status-critical); }
+.ds-topo-node--critical   .ds-topo-node__box  { stroke: var(--status-critical); stroke-width: 2; }
+.ds-topo-node:hover .ds-topo-node__box { stroke: var(--color-border-focus); }
+.ds-topo-node--dimmed { opacity: 0.35; }
+
+/* --- Edge ----------------------------------------------------------------- */
+.ds-topo-edge { cursor: pointer; outline: none; }
+.ds-topo-edge__hit { stroke: transparent; stroke-width: 16; fill: none; }
+.ds-topo-edge__line {
+  fill: none;
+  stroke: var(--color-border-strong);
+  stroke-linecap: round;
+  transition: stroke-width var(--duration-fast) var(--ease-standard);
+}
+.ds-topo-edge__arrow { fill: var(--color-border-strong); }
+
+.ds-topo-edge--healthy  .ds-topo-edge__line  { stroke: var(--status-healthy); }
+.ds-topo-edge--healthy  .ds-topo-edge__arrow { fill:   var(--status-healthy); }
+.ds-topo-edge--warning  .ds-topo-edge__line  { stroke: var(--status-warning); }
+.ds-topo-edge--warning  .ds-topo-edge__arrow { fill:   var(--status-warning); }
+.ds-topo-edge--critical .ds-topo-edge__line  { stroke: var(--status-critical); }
+.ds-topo-edge--critical .ds-topo-edge__arrow { fill:   var(--status-critical); }
+
+.ds-topo-edge:hover .ds-topo-edge__line,
+.ds-topo-edge:focus-visible .ds-topo-edge__line { stroke-width: 6; }
+.ds-topo-edge:focus-visible .ds-topo-edge__cap { stroke: var(--color-border-focus); stroke-width: 2; }
+.ds-topo-edge--selected .ds-topo-edge__line { stroke-width: 6; }
+.ds-topo-edge--dimmed { opacity: 0.32; }
+
+/* 방향 캡슐 — 프로토콜과 RPS를 텍스트로 보여줍니다.
+   모든 선 위에 그려지도록 별도 레이어로 분리하고, 라벨끼리 겹치지 않도록
+   선 위 여러 후보 지점 중 빈 자리를 골라 배치합니다. */
+.ds-topo-cap { cursor: pointer; }
+.ds-topo-edge__cap { fill: var(--color-surface-1); stroke: var(--color-border-subtle); stroke-width: 1; rx: 9; }
+.ds-topo-edge__cap-text {
+  fill: var(--color-text-secondary);
+  font: var(--weight-medium) var(--text-2xs) / 1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Legend --------------------------------------------------------------- */
+.ds-topology__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}
+.ds-topology__legend li { display: inline-flex; align-items: center; gap: var(--space-3); }
+.ds-topology__legend i {
+  width: 18px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--_c, var(--color-border-strong));
+  forced-color-adjust: none;
+}
+
+/* --- Detail 패널 (선 선택 시) ---------------------------------------------- */
+.ds-topology__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ds-edge-detail__route {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font: var(--type-body-strong);
+}
+.ds-edge-detail__arrow { color: var(--color-text-muted); }
+
+/* 표 우측 상단 차트 아이콘 버튼 */
+.ds-icon-button {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.ds-icon-button:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.ds-icon-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+.ds-icon-button[aria-pressed="true"] {
+  background: var(--color-surface-selected);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
+}
+.ds-icon-button svg { width: 16px; height: 16px; }

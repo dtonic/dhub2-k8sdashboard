@@ -1,0 +1,120 @@
+/* ==========================================================================
+   Component — Time Range control
+   --------------------------------------------------------------------------
+   대시보드 전역 시간 범위 컨트롤입니다.
+
+   정책
+   - 기본값: 최근 1시간
+   - 프리셋: 30일 / 7일 / 1일 / 1시간 / Custom Range
+   - Custom Range 최대 폭: 30일 (초과 시 서버가 거절)
+   - Step은 사용자가 고르지 않습니다. 범위에 따라 서버가 강제하며 UI는 결과를 표시만 합니다.
+       1시간 → 1분 · 1일 → 5분 · 7일 → 15분 · 30일 → 1시간
+     (README §11 Step 정책. 브라우저에 대량 포인트를 보내지 않기 위한 장치입니다.)
+   ========================================================================== */
+
+.ds-time-range {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+/* --- 프리셋 세그먼트 ------------------------------------------------------- */
+.ds-time-range__presets {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1);
+  gap: var(--space-1);
+  background: var(--color-surface-sunken);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.ds-time-range__preset {
+  appearance: none;
+  height: calc(var(--control-height-sm) - var(--space-2));
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: var(--type-label);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.ds-time-range__preset:hover { background: var(--color-surface-hover); }
+.ds-time-range__preset:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+.ds-time-range__preset[aria-pressed="true"] {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  box-shadow: var(--elevation-1);
+}
+
+/* --- 현재 적용 상태 -------------------------------------------------------- */
+.ds-time-range__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font: var(--type-meta);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-time-range__step {
+  padding: 0 var(--space-3);
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+}
+
+/* --- Custom range 팝오버 --------------------------------------------------- */
+.ds-time-range__popover {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  min-width: 280px;
+  margin-top: var(--space-2);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--color-surface-2);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+}
+.ds-time-range__popover[hidden] { display: none; }
+
+.ds-time-range__field { display: flex; flex-direction: column; gap: var(--space-2); }
+.ds-time-range__field label { font: var(--type-label); color: var(--color-text-secondary); }
+.ds-time-range__field input {
+  height: var(--control-height-md);
+  padding: 0 var(--space-4);
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  border: var(--border-hairline) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font: var(--type-body);
+  font-variant-numeric: tabular-nums;
+}
+.ds-time-range__field input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: 0;
+  border-color: var(--color-border-focus);
+}
+
+.ds-time-range__hint { font: var(--type-meta); color: var(--color-text-muted); }
+.ds-time-range__error {
+  font: var(--type-meta);
+  color: var(--status-critical);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ds-time-range__error[hidden] { display: none; }

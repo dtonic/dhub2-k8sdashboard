@@ -1,0 +1,102 @@
+/* ==========================================================================
+   Component — Data Table
+   --------------------------------------------------------------------------
+   리소스 목록 · 라우트 집계 · 비정상 Pod 목록 등 제품 화면의 표 공통 스타일입니다.
+   (문서/미리보기용 `.ds-table`과는 별개입니다.)
+
+   규칙
+   - 수치 컬럼은 우측 정렬 + tabular-nums.
+   - 헤더는 sticky. 긴 목록에서도 컬럼 의미가 사라지지 않게 합니다.
+   - 행 클릭이 동작을 유발하면 `--interactive`를 붙이고 키보드 포커스를 지원합니다.
+   - 상태는 색 단독이 아니라 배지(아이콘 + 라벨)로 표기합니다.
+   ========================================================================== */
+
+.ds-data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: var(--type-table-cell);
+  color: var(--color-text-primary);
+}
+
+.ds-data-table th,
+.ds-data-table td {
+  padding: 0 var(--space-4);
+  height: var(--density-row-default);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: var(--border-hairline) solid var(--color-border-default);
+  white-space: nowrap;
+}
+
+.ds-data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: var(--density-row-compact);
+  background: var(--color-surface-1);
+  font: var(--type-label);
+  color: var(--color-text-muted);
+}
+
+.ds-data-table tbody tr:last-child td { border-bottom: none; }
+
+/* 수치 컬럼 */
+.ds-data-table .ds-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 식별자(Pod 이름, Route 경로) */
+.ds-data-table .ds-ident {
+  font: var(--type-code);
+  color: var(--color-text-secondary);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 밀도 변형 */
+.ds-data-table--compact th,
+.ds-data-table--compact td { height: var(--density-row-compact); }
+
+/* 행 인터랙션 */
+.ds-data-table--interactive tbody tr { cursor: pointer; }
+.ds-data-table--interactive tbody tr:hover { background: var(--color-surface-hover); }
+.ds-data-table--interactive tbody tr:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+.ds-data-table tbody tr[aria-selected="true"] { background: var(--color-surface-selected); }
+
+/* 표 껍데기 — 제목 + 우측 액션 + 스크롤 영역 */
+.ds-table-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-surface-1);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.ds-table-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+  border-bottom: var(--border-hairline) solid var(--color-border-subtle);
+}
+
+.ds-table-panel__title { font: var(--type-body-strong); }
+.ds-table-panel__subtitle { font: var(--type-meta); color: var(--color-text-muted); }
+.ds-table-panel__actions { display: flex; align-items: center; gap: var(--space-2); }
+.ds-table-panel__scroll { overflow: auto; min-height: 0; }
+
+.ds-table-panel__empty {
+  padding: var(--space-9) var(--space-5);
+  text-align: center;
+  font: var(--type-body);
+  color: var(--color-text-muted);
+}

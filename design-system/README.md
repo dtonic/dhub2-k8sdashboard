@@ -17,9 +17,13 @@ design-system/
 │   ├── layout.css              #   space/radius/elevation/density/motion/chart mark
 │   └── index.css               #   앱이 import 하는 진입점
 ├── components/                 # 컴포넌트별 CSS + preview 소스
-│   ├── status-badge/
-│   ├── stat-tile/
-│   └── chart-frame/
+│   ├── status-badge/           #   Kubernetes 정규화 상태 배지
+│   ├── stat-tile/              #   단일 지표 KPI 타일
+│   ├── chart-frame/            #   차트 위젯 공통 껍데기
+│   ├── data-table/             #   제품 화면 표 (+ table panel)
+│   ├── time-range/             #   전역 시간 범위 컨트롤
+│   ├── log-modal/              #   Pod 로그 모달
+│   └── topology/               #   Pod 간 통신 토폴로지
 ├── foundations/                # 토큰 자체를 보여주는 preview 소스
 │   ├── colors.preview.html
 │   ├── typography.preview.html
@@ -81,7 +85,28 @@ npm run check   # 파일을 쓰지 않고 검증만 (CI용)
 
 > 계열 hex를 바꾸면 **반드시 두 모드 모두 재검증**하고 이 표를 갱신합니다. 검증 없이 색을 바꾸지 않습니다.
 
-### 3.4 Preview 소스
+### 3.4 토폴로지
+
+Pod 간 통신 그래프(`components/topology/`)에만 적용되는 규칙입니다.
+
+- **방향은 선을 나눕니다.** `A→B`와 `B→A`는 하나의 선에 화살표를 두 개 다는 것이 아니라
+  **서로 다른 선**입니다. 두 선은 노드 중심선에서 수직으로 각각 10px씩 반대편으로 밀어
+  평행하게 그립니다(총 20px 분리). 방향별로 클릭 타겟과 상세 데이터가 다르기 때문에,
+  선을 합치면 "어느 방향의 요청인가"를 물어볼 수 없게 됩니다.
+- **라벨은 따로 충돌 회피합니다.** 방향 캡슐(프로토콜 + RPS)은 선보다 폭이 넓어 오프셋만으로는
+  겹칩니다. 선 위 여러 후보 지점 중 이미 놓인 캡슐과 겹치지 않는 자리를 골라 배치하고,
+  캡슐은 모든 선 위에 그려지도록 별도 레이어로 분리합니다.
+- **색은 상태, 두께는 양, 텍스트는 프로토콜.** 선 색으로 프로토콜을 구분하지 않습니다.
+  색상 채널을 상태에 예약해 두어야 "빨간 선 = 문제 있는 경로"가 화면 어디서나 참이 됩니다.
+  프로토콜은 캡슐의 텍스트로 읽습니다.
+- **선은 버튼입니다.** `tabindex`와 `role="button"`을 주고 Enter로 선택할 수 있어야 하며,
+  히트 영역(투명 stroke)은 보이는 선보다 두껍게 잡습니다.
+- **시계열은 범위별 자동 Step입니다.** 분단위 고정이 아닙니다
+  (1시간→1분, 1일→5분, 7일→15분, 30일→1시간). 현재 Step은 시간 범위 컨트롤과 차트 양쪽에
+  항상 표시합니다. 30일을 분단위로 그리면 계열당 43,200 포인트가 되어 README §11에 위배됩니다.
+- **Route 계열은 상위 3개 + "기타"입니다.** 라우트 수는 예측할 수 없으므로 계열을 늘리지 않고 접습니다.
+
+### 3.5 Preview 소스
 
 - 파일명은 `*.preview.html`, 위치는 해당 컴포넌트 폴더 또는 `foundations/`입니다.
 - **첫 줄은 반드시** `@dsCard` 마커입니다. Design System 패널이 이 마커로 카드 인덱스를 만듭니다.
@@ -90,7 +115,7 @@ npm run check   # 파일을 쓰지 않고 검증만 (CI용)
   <!-- @dsCard group="Components" name="Status badge" viewport="960x560" -->
   ```
 
-  `group`은 패널의 섹션 라벨입니다. 현재 사용 중인 값: `Colors`, `Type`, `Spacing`, `Components`, `Charts`.
+  `group`은 패널의 섹션 라벨입니다. 현재 사용 중인 값: `Colors`, `Type`, `Spacing`, `Components`, `Charts`, `Topology`.
 - `<style>` 안에서 토큰과 컴포넌트 CSS를 `/* @inline: <design-system 기준 경로> */` 지시자로 불러옵니다.
   빌드가 실제 CSS로 치환해 자기완결 HTML을 만듭니다.
 - **외부 리소스 금지.** 폰트 · 스크립트 · 이미지 URL을 참조하면 빌드가 실패합니다.
@@ -164,6 +189,7 @@ import "@k8s-dashboard/design-system/tokens";
 - [ ] Light · Dark 두 모드에서 모두 확인했는가
 - [ ] 색상 단독으로 의미를 전달하는 곳이 없는가 (아이콘 + 라벨 동반)
 - [ ] 차트라면 `dataviz` 규칙(이중 축 금지 · 고정 순서 · 범례 · 잉크 토큰)을 지켰는가
+- [ ] 토폴로지라면 방향별로 선이 분리되고 라벨이 겹치지 않는가
 - [ ] 계열 색을 바꿨다면 validator를 두 모드로 재실행하고 §3.3 표를 갱신했는가
 - [ ] `npm run check`가 통과하는가
 - [ ] preview를 실제로 열어 라벨 겹침 · 오버플로를 눈으로 확인했는가

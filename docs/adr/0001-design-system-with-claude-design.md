@@ -63,7 +63,7 @@ UI 일관성 자체가 제품의 차별점입니다. 나중에 붙이는 것으�
 
 **감수하는 것**
 
-- Phase 1에 선투자가 필요하다. (초기 토큰 + 3개 컴포넌트 + 빌드 스크립트)
+- Phase 1에 선투자가 필요하다. (토큰 + 7개 컴포넌트 + 빌드 스크립트)
 - 색을 바꿀 때마다 validator 재실행이라는 절차가 생긴다. 의도한 마찰이다.
 - 미리보기 빌드 산출물(`dist/`)과 원천의 동기화를 사람이 챙겨야 한다. CI의 `npm run check`로 보완한다.
 - Claude Design 접근 권한이 없는 인원은 카드 리뷰에 참여할 수 없다. 이들에게는 저장소의
@@ -71,8 +71,10 @@ UI 일관성 자체가 제품의 차별점입니다. 나중에 붙이는 것으�
 
 ## 후속 작업
 
+- [x] 초기 토큰 + 핵심 컴포넌트(status-badge, stat-tile, chart-frame)
+- [x] Pod Topology 및 부속 컴포넌트(data-table, time-range, log-modal)
 - [ ] Claude Design에 Design System 타입 프로젝트 생성 후 최초 동기화
 - [ ] CI에 `design-system` 빌드 검증(`npm run check`) 추가
-- [ ] 컴포넌트 확장: 리소스 테이블, 로그 뷰어 라인, Scope Selector, 시간 범위 컨트롤, 빈/오류 상태
+- [ ] 컴포넌트 확장: Scope Selector, 로그 뷰어(Logs Explorer 본체), 빈/오류 상태, 아이콘 세트
 - [ ] 아이콘 세트 결정 (인라인 SVG 스프라이트 여부) — 별도 ADR
 - [ ] 차트 라이브러리 확정 (ECharts vs uPlot) 시 토큰 바인딩 레이어 정의 — 별도 ADR
