@@ -311,7 +311,7 @@ k8s-dashboard/
 │   ├── scripts/                #   preview 빌드
 │   └── dist/                   #   빌드 산출물 (design-sync 업로드 대상, gitignore)
 ├── packages/
-│   ├── contracts/              # OpenAPI/JSON Schema/공통 타입
+│   ├── contracts/              # 화면 단위 응답 계약 (TypeScript, 추후 OpenAPI 생성)
 │   ├── dashboard-schema/       # Dashboard DSL
 │   └── query-catalog/          # Query 정의
 ├── deploy/
@@ -344,7 +344,7 @@ k8s-dashboard/
 - OIDC 인증과 Cluster/Namespace RBAC
 - Query Catalog
 - Redis 캐시와 쿼리 보호 정책
-- Cluster Overview
+- Cluster Overview *(구현됨 — mock API 기준)*
 - Namespace Overview
 - Workload/Pod 상세
 - Pod Topology 및 방향별 요청 집계
@@ -472,8 +472,9 @@ Custom Range의 최대 폭은 30일입니다.
 ### Phase 1 — Architecture & Foundation
 
 - MVP 범위와 ADR 확정
-- Monorepo Bootstrap
-- Design System 기반 정립 (토큰, 핵심 컴포넌트, Claude Design 동기화)
+- Monorepo Bootstrap *(Node workspace 구성 완료 · Go workspace 예정)*
+- Design System 기반 정립 (토큰, 핵심 컴포넌트, Claude Design 동기화) *(완료)*
+- React 앱 셸과 데이터 접근 계층 *(완료 — mock API 기준)*
 - Unified Entity Model
 - Go API/BFF 기본 구조
 
@@ -488,8 +489,8 @@ Custom Range의 최대 폭은 30일입니다.
 
 ### Phase 3 — Core UI
 
-- Design System 컴포넌트 확장 (Scope Selector, 로그 뷰어, 빈/오류 상태)
-- Cluster Overview
+- Design System 컴포넌트 확장 (로그 뷰어, 표·차트 가상화)
+- Cluster Overview *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace Overview
 - Workload/Pod Detail
 - Logs Explorer
@@ -524,25 +525,25 @@ Custom Range의 최대 폭은 30일입니다.
 git clone https://github.com/xenx96/k8s-dashboard.git
 cd k8s-dashboard
 
-# 디자인 시스템 미리보기 빌드 (지금 바로 동작합니다)
-cd design-system && npm run build && cd ..
+# 의존성 설치
+make install
 
-# 개발 의존성 실행
-make dev-infra
+# Web 실행 — MSW mock API 위에서 단독으로 동작합니다 (http://localhost:5173)
+make dev
 
-# API 실행
-make dev-api
+# 디자인 시스템 미리보기 빌드 (Claude Design 업로드 대상)
+make design
 
-# Web 실행
-make dev-web
-
-# 전체 검증
-make lint
-make test
-make build
+# 검증
+make check          # 타입체크 + preview 빌드 검증
+make build          # 전체 빌드
 ```
 
-실제 명령은 Bootstrap 작업 후 확정합니다.
+`make dev`는 지금 바로 동작합니다. Go API(`apps/api`)와 개발용 인프라 구성은
+Bootstrap 이슈에서 이어서 추가합니다.
+
+화면 상태(부분 장애 · 권한 없음 · 빈 결과)는 URL 쿼리로 재현할 수 있습니다.
+자세한 내용은 [`apps/web/README.md`](./apps/web/README.md)를 참고하세요.
 
 ---
 
@@ -569,7 +570,8 @@ MVP는 다음 조건을 모두 만족할 때 완료된 것으로 판단합니다
 
 - ADR과 MVP 비목표
 - 저장소 구조
-- Design System 기반 (진행 중 — 토큰과 핵심 컴포넌트 초안 완료)
+- Design System 기반 *(완료 — 토큰, 7개 컴포넌트, preview 8종)*
+- Cluster Overview 화면 *(mock API 위에서 동작 · 이슈 #14)*
 - Unified Entity Model
 - API 계약
 - 인증 및 권한 모델

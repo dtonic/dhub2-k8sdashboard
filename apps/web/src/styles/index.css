@@ -1,0 +1,14 @@
+/* ==========================================================================
+   앱 스타일 진입점
+   --------------------------------------------------------------------------
+   디자인 시스템은 복사하지 않고 그대로 참조합니다. 토큰과 컴포넌트 CSS의
+   단일 원천은 design-system/ 입니다. (ADR 0001)
+   ========================================================================== */
+@import "@k8s-dashboard/design-system/tokens/index.css";
+@import "@k8s-dashboard/design-system/components/status-badge/status-badge.css";
+@import "@k8s-dashboard/design-system/components/stat-tile/stat-tile.css";
+@import "@k8s-dashboard/design-system/components/chart-frame/chart-frame.css";
+@import "@k8s-dashboard/design-system/components/data-table/data-table.css";
+@import "@k8s-dashboard/design-system/components/time-range/time-range.css";
+@import "@k8s-dashboard/design-system/components/topology/topology.css";
+@import "./app-shell.css";

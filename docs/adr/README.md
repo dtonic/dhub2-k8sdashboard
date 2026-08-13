@@ -7,6 +7,7 @@
 | # | 제목 | 상태 | 날짜 |
 |---|---|---|---|
 | [0001](./0001-design-system-with-claude-design.md) | 디자인 시스템을 `design-system/`에서 관리하고 Claude Design으로 동기화한다 | Accepted | 2026-08-13 |
+| [0002](./0002-screen-scoped-aggregated-endpoints.md) | 화면 단위 집계 엔드포인트를 BFF의 기본 형태로 삼는다 | Accepted | 2026-08-13 |
 
 ## 상태 값
 
