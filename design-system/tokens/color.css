@@ -1,0 +1,194 @@
+/* ==========================================================================
+   K8s Dashboard — Color Tokens
+   --------------------------------------------------------------------------
+   원칙
+   - 컴포넌트는 원시 hex를 직접 쓰지 않고 반드시 역할(role) 토큰을 참조합니다.
+   - Light / Dark는 자동 반전이 아니라 각 surface에 맞춰 별도로 선택된 값입니다.
+   - Series(차트 카테고리) 색상은 고정 순서로만 배정하며 순환시키지 않습니다.
+   - Status 색상은 예약어입니다. 절대 series 색상으로 재사용하지 않습니다.
+   - 차트 팔레트는 dataviz validator(CVD/대비/명도대역)를 통과한 값입니다.
+     변경 시 반드시 재검증 후 design-system/README.md의 검증 기록을 갱신하세요.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* --- Surface / Plane ---------------------------------------------------- */
+  --color-plane:              #f9f9f7; /* 앱 배경 */
+  --color-surface-1:          #fcfcfb; /* 패널 · 차트 표면 */
+  --color-surface-2:          #ffffff; /* 떠 있는 카드 · 팝오버 */
+  --color-surface-sunken:     #f2f1ee; /* 코드/로그 블록 */
+  --color-surface-hover:      rgba(11, 11, 11, 0.04);
+  --color-surface-active:     rgba(11, 11, 11, 0.08);
+  --color-surface-selected:   rgba(42, 120, 214, 0.10);
+
+  /* --- Ink ---------------------------------------------------------------- */
+  --color-text-primary:       #0b0b0b;
+  --color-text-secondary:     #52514e;
+  --color-text-muted:         #898781; /* 축 라벨 · 보조 메타 */
+  --color-text-inverse:       #ffffff;
+  --color-text-link:          #2a78d6;
+
+  /* --- Border / Divider --------------------------------------------------- */
+  --color-border-subtle:      rgba(11, 11, 11, 0.10);
+  --color-border-default:     #e1e0d9;
+  --color-border-strong:      #c3c2b7;
+  --color-border-focus:       #2a78d6;
+
+  /* --- Status (예약 · 테마 불변) ------------------------------------------
+     항상 아이콘 + 텍스트 라벨과 함께 사용합니다. 색상 단독으로 의미를
+     전달하지 않습니다. */
+  --color-status-good:        #0ca30c;
+  --color-status-warning:     #fab219;
+  --color-status-serious:     #ec835a;
+  --color-status-critical:    #d03b3b;
+  --color-status-unknown:     #898781;
+  --color-status-info:        #2a78d6;
+
+  /* --- Kubernetes 도메인 상태 매핑 ----------------------------------------
+     Cluster State Adapter가 정규화한 상태 → status 역할 매핑 */
+  --status-healthy:           var(--color-status-good);     /* Running / Available */
+  --status-progressing:       var(--color-status-info);     /* Rollout / Pending(정상) */
+  --status-warning:           var(--color-status-warning);  /* Replica 불일치 · Node Pressure */
+  --status-degraded:          var(--color-status-serious);  /* 일부 Pod 실패 · Rollout 지연 */
+  --status-critical:          var(--color-status-critical); /* CrashLoopBackOff · NotReady */
+  --status-unknown:           var(--color-status-unknown);  /* 데이터소스 장애 · Degraded Mode */
+
+  /* --- Chart: Categorical series (고정 순서, 순환 금지) --------------------
+     9번째 계열은 새 색을 생성하지 않고 "Other"로 접거나 small multiples로
+     분리합니다. 산점도/버블/코로플레스(all-pairs)는 3계열까지만 사용합니다. */
+  --series-1:  #2a78d6; /* blue    */
+  --series-2:  #eb6834; /* orange  */
+  --series-3:  #1baf7a; /* aqua    */
+  --series-4:  #eda100; /* yellow  */
+  --series-5:  #e87ba4; /* magenta */
+  --series-6:  #008300; /* green   */
+  --series-7:  #4a3aa7; /* violet  */
+  --series-8:  #e34948; /* red     */
+
+  /* --- Chart: Sequential (단일 hue · 연속 크기) --------------------------- */
+  --seq-100: #cde2fb;
+  --seq-150: #b7d3f6;
+  --seq-200: #9ec5f4;
+  --seq-250: #86b6ef; /* light 모드 ordinal 램프의 최소 단계 (2.06:1) */
+  --seq-300: #6da7ec;
+  --seq-350: #5598e7;
+  --seq-400: #3987e5;
+  --seq-450: #2a78d6;
+  --seq-500: #256abf;
+  --seq-550: #1c5cab;
+  --seq-600: #184f95; /* dark 모드 ordinal 램프의 최대 단계 (2.15:1) */
+  --seq-650: #104281;
+  --seq-700: #0d366b;
+
+  /* --- Chart: Diverging (blue ↔ red, 중립 회색 midpoint) ------------------ */
+  --div-neg:  #2a78d6;
+  --div-mid:  #f0efec;
+  --div-pos:  #e34948;
+
+  /* --- Chart: Chrome ------------------------------------------------------ */
+  --chart-surface:   #fcfcfb;
+  --chart-grid:      #e1e0d9;
+  --chart-axis:      #c3c2b7;
+  --chart-label:     #898781;
+  --chart-delta-up:  #006300; /* 개선(good) 텍스트 */
+  --chart-delta-down:#d03b3b;
+}
+
+/* ==========================================================================
+   Dark — OS 설정
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --color-plane:            #0d0d0d;
+    --color-surface-1:        #1a1a19;
+    --color-surface-2:        #232322;
+    --color-surface-sunken:   #111110;
+    --color-surface-hover:    rgba(255, 255, 255, 0.06);
+    --color-surface-active:   rgba(255, 255, 255, 0.10);
+    --color-surface-selected: rgba(57, 135, 229, 0.18);
+
+    --color-text-primary:     #ffffff;
+    --color-text-secondary:   #c3c2b7;
+    --color-text-muted:       #898781;
+    --color-text-inverse:     #0b0b0b;
+    --color-text-link:        #3987e5;
+
+    --color-border-subtle:    rgba(255, 255, 255, 0.10);
+    --color-border-default:   #2c2c2a;
+    --color-border-strong:    #383835;
+    --color-border-focus:     #3987e5;
+
+    --color-status-info:      #3987e5;
+
+    --series-1:  #3987e5;
+    --series-2:  #d95926;
+    --series-3:  #199e70;
+    --series-4:  #c98500;
+    --series-5:  #d55181;
+    --series-6:  #008300;
+    --series-7:  #9085e9;
+    --series-8:  #e66767;
+
+    --div-neg:  #3987e5;
+    --div-mid:  #383835;
+    --div-pos:  #e66767;
+
+    --chart-surface:    #1a1a19;
+    --chart-grid:       #2c2c2a;
+    --chart-axis:       #383835;
+    --chart-label:      #898781;
+    --chart-delta-up:   #0ca30c;
+    --chart-delta-down: #e66767;
+  }
+}
+
+/* ==========================================================================
+   Dark — 사용자 테마 토글 (OS 설정보다 우선)
+   ========================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-plane:            #0d0d0d;
+  --color-surface-1:        #1a1a19;
+  --color-surface-2:        #232322;
+  --color-surface-sunken:   #111110;
+  --color-surface-hover:    rgba(255, 255, 255, 0.06);
+  --color-surface-active:   rgba(255, 255, 255, 0.10);
+  --color-surface-selected: rgba(57, 135, 229, 0.18);
+
+  --color-text-primary:     #ffffff;
+  --color-text-secondary:   #c3c2b7;
+  --color-text-muted:       #898781;
+  --color-text-inverse:     #0b0b0b;
+  --color-text-link:        #3987e5;
+
+  --color-border-subtle:    rgba(255, 255, 255, 0.10);
+  --color-border-default:   #2c2c2a;
+  --color-border-strong:    #383835;
+  --color-border-focus:     #3987e5;
+
+  --color-status-info:      #3987e5;
+
+  --series-1:  #3987e5;
+  --series-2:  #d95926;
+  --series-3:  #199e70;
+  --series-4:  #c98500;
+  --series-5:  #d55181;
+  --series-6:  #008300;
+  --series-7:  #9085e9;
+  --series-8:  #e66767;
+
+  --div-neg:  #3987e5;
+  --div-mid:  #383835;
+  --div-pos:  #e66767;
+
+  --chart-surface:    #1a1a19;
+  --chart-grid:       #2c2c2a;
+  --chart-axis:       #383835;
+  --chart-label:      #898781;
+  --chart-delta-up:   #0ca30c;
+  --chart-delta-down: #e66767;
+}

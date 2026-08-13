@@ -1,0 +1,118 @@
+<!-- @dsCard group="Charts" name="Chart frame" viewport="960x620" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Chart frame</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/chart-frame/chart-frame.css */
+.demo-plot { width: 100%; height: 220px; display: block; }
+.demo-direct-label { font: var(--type-meta); fill: var(--color-text-secondary); }
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Chart frame</h1>
+    <p class="ds-preview__desc">
+      모든 차트 위젯이 공유하는 껍데기입니다. 차트 라이브러리와 무관하게 제목 · 범례 · 플롯 · 상태 표현을 통일합니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Line — 다계열</h2>
+    <div class="ds-chart-frame">
+      <div class="ds-chart-frame__header">
+        <div>
+          <div class="ds-chart-frame__title">CPU Usage by Pod</div>
+          <div class="ds-chart-frame__subtitle">namespace: payments · 최근 1시간 · step 30s · GreptimeDB</div>
+        </div>
+      </div>
+
+      <ul class="ds-chart-legend">
+        <li class="ds-chart-legend__item ds-series-1"><span class="ds-chart-legend__swatch"></span>payments-api</li>
+        <li class="ds-chart-legend__item ds-series-2"><span class="ds-chart-legend__swatch"></span>ledger-worker</li>
+        <li class="ds-chart-legend__item ds-series-3"><span class="ds-chart-legend__swatch"></span>batch-sync</li>
+      </ul>
+
+      <div class="ds-chart-frame__plot">
+        <svg class="demo-plot" viewBox="0 0 640 220" role="img" aria-label="Pod별 CPU 사용량 시계열. payments-api가 가장 높고 상승 추세입니다.">
+          <g>
+            <line class="ds-chart-grid-line" x1="48" y1="24"  x2="596" y2="24"></line>
+            <line class="ds-chart-grid-line" x1="48" y1="64"  x2="596" y2="64"></line>
+            <line class="ds-chart-grid-line" x1="48" y1="104" x2="596" y2="104"></line>
+            <line class="ds-chart-grid-line" x1="48" y1="144" x2="596" y2="144"></line>
+            <line class="ds-chart-axis-line" x1="48" y1="184" x2="596" y2="184"></line>
+          </g>
+          <g class="ds-chart-axis-label" text-anchor="end">
+            <text x="40" y="28">1200</text>
+            <text x="40" y="68">900</text>
+            <text x="40" y="108">600</text>
+            <text x="40" y="148">300</text>
+            <text x="40" y="188">0</text>
+          </g>
+          <g class="ds-chart-axis-label" text-anchor="middle">
+            <text x="48"  y="204">12:00</text>
+            <text x="185" y="204">12:15</text>
+            <text x="322" y="204">12:30</text>
+            <text x="459" y="204">12:45</text>
+            <text x="596" y="204">13:00</text>
+          </g>
+
+          <polyline class="ds-chart-line" stroke="var(--series-1)"
+            points="48,142 116,130 185,118 253,96 322,88 390,70 459,58 527,44 596,36"></polyline>
+          <polyline class="ds-chart-line" stroke="var(--series-2)"
+            points="48,166 116,160 185,168 253,150 322,158 390,146 459,152 527,138 596,144"></polyline>
+          <polyline class="ds-chart-line" stroke="var(--series-3)"
+            points="48,178 116,176 185,172 253,176 322,168 390,174 459,166 527,172 596,162"></polyline>
+
+          <circle cx="596" cy="36"  r="4" fill="var(--series-1)" class="ds-chart-mark--overlap"></circle>
+          <text class="demo-direct-label" x="588" y="24" text-anchor="end">payments-api 1,204m</text>
+        </svg>
+      </div>
+    </div>
+    <p class="ds-preview__note">
+      2계열 이상이면 범례가 항상 존재하고, 4계열 이하면 직접 라벨도 함께 붙여 식별이 색상 단독으로 이뤄지지 않게 합니다.
+      이중 y축은 금지입니다. 단위가 다른 지표는 차트를 나눕니다. 계열 색은 엔티티에 고정되어 필터로 계열 수가 바뀌어도 재도색하지 않습니다.
+    </p>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Tooltip</h2>
+    <div style="position:relative; height:120px">
+      <div class="ds-chart-tooltip" style="position:static; max-width:260px">
+        <div style="font: var(--type-label); margin-bottom: var(--space-3)">12:47:30</div>
+        <div class="ds-chart-tooltip__row ds-series-1"><span class="ds-chart-tooltip__name"><span class="ds-chart-legend__swatch"></span>payments-api</span><span>1,204m</span></div>
+        <div class="ds-chart-tooltip__row ds-series-2"><span class="ds-chart-tooltip__name"><span class="ds-chart-legend__swatch"></span>ledger-worker</span><span>318m</span></div>
+        <div class="ds-chart-tooltip__row ds-series-3"><span class="ds-chart-tooltip__name"><span class="ds-chart-legend__swatch"></span>batch-sync</span><span>96m</span></div>
+      </div>
+    </div>
+    <p class="ds-preview__note">
+      HTML/SVG 차트는 기본적으로 인터랙티브합니다. line/area에는 crosshair + tooltip, bar/dot/cell에는 마크별 tooltip을 기본 제공합니다.
+      값 텍스트는 계열 색을 입지 않고 잉크 토큰을 사용하며, 옆의 색 스와치가 식별을 담당합니다.
+    </p>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">States</h2>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-5)">
+      <div class="ds-chart-frame">
+        <div class="ds-chart-frame__title">Memory Working Set</div>
+        <div class="ds-chart-frame__state">불러오는 중…</div>
+      </div>
+      <div class="ds-chart-frame">
+        <div class="ds-chart-frame__title">Network Errors</div>
+        <div class="ds-chart-frame__state">선택한 범위에 데이터가 없습니다.</div>
+      </div>
+      <div class="ds-chart-frame ds-chart-frame--degraded">
+        <div class="ds-chart-frame__title">Log Volume</div>
+        <div class="ds-chart-frame__state">Quickwit 응답 없음 · 다른 패널은 계속 동작합니다.</div>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

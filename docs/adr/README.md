@@ -1,0 +1,41 @@
+# Architecture Decision Records
+
+되돌리기 비싼 결정만 기록합니다. 파일명은 `NNNN-kebab-case-title.md`이며 번호는 재사용하지 않습니다.
+
+## 목록
+
+| # | 제목 | 상태 | 날짜 |
+|---|---|---|---|
+| [0001](./0001-design-system-with-claude-design.md) | 디자인 시스템을 `design-system/`에서 관리하고 Claude Design으로 동기화한다 | Accepted | 2026-08-13 |
+
+## 상태 값
+
+- **Proposed** — 논의 중
+- **Accepted** — 확정. 코드가 이 결정을 따릅니다.
+- **Superseded by NNNN** — 다른 ADR로 대체됨. 원문은 지우지 않고 남겨둡니다.
+- **Deprecated** — 더 이상 유효하지 않으나 대체 결정이 없음
+
+## 템플릿
+
+```markdown
+# ADR NNNN — 제목
+
+- 상태: Proposed
+- 날짜: YYYY-MM-DD
+- 결정자:
+- 관련:
+
+## 배경
+어떤 힘(제약, 요구사항, 문제)이 결정을 강제하는가.
+
+## 결정
+무엇을 하기로 했는가. 단정형으로 쓴다.
+
+## 검토한 대안
+표로. 각 대안의 기각 사유를 남긴다.
+
+## 결과
+좋아지는 것 / 감수하는 것을 모두 쓴다.
+
+## 후속 작업
+```

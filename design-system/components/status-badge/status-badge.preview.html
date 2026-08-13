@@ -1,0 +1,70 @@
+<!-- @dsCard group="Components" name="Status badge" viewport="960x560" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Status badge</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/status-badge/status-badge.css */
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Status badge</h1>
+    <p class="ds-preview__desc">
+      Cluster State Adapter가 정규화한 상태를 표시합니다. 색상 · 글리프 · 텍스트 라벨 세 채널을 항상 함께 씁니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Default (28px)</h2>
+    <div class="ds-preview__row">
+      <span class="ds-status-badge ds-status-badge--healthy"><span class="ds-status-badge__glyph" aria-hidden="true">✓</span><span class="ds-status-badge__label">Healthy</span><span class="ds-status-badge__count">42</span></span>
+      <span class="ds-status-badge ds-status-badge--progressing"><span class="ds-status-badge__glyph" aria-hidden="true">→</span><span class="ds-status-badge__label">Progressing</span><span class="ds-status-badge__count">3</span></span>
+      <span class="ds-status-badge ds-status-badge--warning"><span class="ds-status-badge__glyph" aria-hidden="true">!</span><span class="ds-status-badge__label">Warning</span><span class="ds-status-badge__count">7</span></span>
+      <span class="ds-status-badge ds-status-badge--degraded"><span class="ds-status-badge__glyph" aria-hidden="true">▲</span><span class="ds-status-badge__label">Degraded</span><span class="ds-status-badge__count">2</span></span>
+      <span class="ds-status-badge ds-status-badge--critical"><span class="ds-status-badge__glyph" aria-hidden="true">✕</span><span class="ds-status-badge__label">Critical</span><span class="ds-status-badge__count">1</span></span>
+      <span class="ds-status-badge ds-status-badge--unknown"><span class="ds-status-badge__glyph" aria-hidden="true">?</span><span class="ds-status-badge__label">Unknown</span></span>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Small (20px) — 표 셀 내부</h2>
+    <div class="ds-preview__row">
+      <span class="ds-status-badge ds-status-badge--sm ds-status-badge--critical"><span class="ds-status-badge__glyph" aria-hidden="true">✕</span><span class="ds-status-badge__label">CrashLoopBackOff</span></span>
+      <span class="ds-status-badge ds-status-badge--sm ds-status-badge--degraded"><span class="ds-status-badge__glyph" aria-hidden="true">▲</span><span class="ds-status-badge__label">ImagePullBackOff</span></span>
+      <span class="ds-status-badge ds-status-badge--sm ds-status-badge--warning"><span class="ds-status-badge__glyph" aria-hidden="true">!</span><span class="ds-status-badge__label">Replica 2/3</span></span>
+      <span class="ds-status-badge ds-status-badge--sm ds-status-badge--progressing"><span class="ds-status-badge__glyph" aria-hidden="true">→</span><span class="ds-status-badge__label">Rollout 진행 중</span></span>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">표 안에서의 사용</h2>
+    <table class="ds-table" style="max-width:640px">
+      <thead><tr><th>Workload</th><th>Kind</th><th>Ready</th><th>상태</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>payments-api</code></td><td>Deployment</td><td>2/3</td>
+          <td><span class="ds-status-dot" style="--_status-color: var(--status-warning)"></span> Replica 불일치</td>
+        </tr>
+        <tr>
+          <td><code>ledger-worker</code></td><td>StatefulSet</td><td>0/2</td>
+          <td><span class="ds-status-dot" style="--_status-color: var(--status-critical)"></span> CrashLoopBackOff</td>
+        </tr>
+        <tr>
+          <td><code>fluent-bit</code></td><td>DaemonSet</td><td>12/12</td>
+          <td><span class="ds-status-dot" style="--_status-color: var(--status-healthy)"></span> Healthy</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="ds-preview__note">
+      <code>.ds-status-dot</code>은 같은 셀 안에 상태 텍스트가 있을 때만 사용합니다. 점 단독 표기는 금지입니다.
+    </p>
+  </section>
+</main>
+</body>
+</html>

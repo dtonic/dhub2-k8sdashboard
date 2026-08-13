@@ -1,0 +1,7 @@
+/* K8s Dashboard — Design Tokens entry point
+   앱(apps/web)에서는 이 파일 하나만 import 합니다.
+   preview 빌드(scripts/build-previews.mjs)는 아래 3개 파일을 순서대로
+   인라인하여 자기완결 HTML을 만듭니다. */
+@import "./color.css";
+@import "./typography.css";
+@import "./layout.css";

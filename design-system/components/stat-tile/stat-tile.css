@@ -1,0 +1,71 @@
+/* ==========================================================================
+   Component — Stat Tile
+   --------------------------------------------------------------------------
+   단일 헤드라인 수치를 보여줍니다. 값이 하나뿐이면 차트를 그리지 않습니다.
+   - 대형 수치는 기본 비례 숫자(tabular-nums 미적용)
+   - delta는 색상 + 방향 글리프 + 부호를 함께 표기
+   - 임계 상태는 status 토큰만 사용 (series 색상 사용 금지)
+   ========================================================================== */
+
+.ds-stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 160px;
+  padding: var(--space-5) var(--space-6);
+  background: var(--color-surface-1);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-1);
+}
+
+.ds-stat-tile__label {
+  font: var(--type-label);
+  color: var(--color-text-secondary);
+}
+
+.ds-stat-tile__value-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.ds-stat-tile__value {
+  font: var(--type-metric);
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-primary);
+}
+
+.ds-stat-tile__unit {
+  font: var(--type-body);
+  color: var(--color-text-secondary);
+}
+
+.ds-stat-tile__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font: var(--type-label);
+  font-variant-numeric: tabular-nums;
+}
+/* 방향이 아니라 "좋아졌는가/나빠졌는가"로 색을 정합니다.
+   (Pending Pods 증가처럼 값이 올라가도 나쁜 지표가 있습니다.)
+   화살표 글리프가 방향을, 색이 의미를 담당합니다. */
+.ds-stat-tile__delta--good { color: var(--chart-delta-up); }
+.ds-stat-tile__delta--bad  { color: var(--chart-delta-down); }
+.ds-stat-tile__delta--flat { color: var(--color-text-muted); }
+
+.ds-stat-tile__footnote {
+  font: var(--type-meta);
+  color: var(--color-text-muted);
+}
+
+/* --- 임계 상태 강조 --------------------------------------------------------
+   좌측 4px 레일로 표시합니다. 색상 단독 신호를 피하기 위해 footnote에 상태
+   문구를 함께 노출하는 것을 전제로 합니다. */
+.ds-stat-tile--warning  { border-left: var(--space-2) solid var(--status-warning); }
+.ds-stat-tile--degraded { border-left: var(--space-2) solid var(--status-degraded); }
+.ds-stat-tile--critical { border-left: var(--space-2) solid var(--status-critical); }
+
+/* --- 데이터소스 부분 장애(Degraded Mode) ---------------------------------- */
+.ds-stat-tile--stale .ds-stat-tile__value { color: var(--color-text-muted); }

@@ -1,0 +1,78 @@
+<!-- @dsCard group="Spacing" name="Space, radius, density" viewport="960x700" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Space &amp; Density</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+.bar { background: var(--series-1); height: 16px; border-radius: var(--radius-xs); }
+.demo-row {
+  display: flex; align-items: center; gap: var(--space-5);
+  border: var(--border-hairline) dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-4);
+  background: var(--color-surface-1);
+  font: var(--type-table-cell);
+}
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Space, Radius, Density</h1>
+    <p class="ds-preview__desc">4px 그리드 기반입니다. 임의 픽셀값 대신 토큰을 사용합니다.</p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Space scale</h2>
+    <table class="ds-table" style="max-width:520px">
+      <tbody>
+        <tr><td style="width:120px"><code>--space-1</code></td><td>2px</td><td><div class="bar" style="width:2px"></div></td></tr>
+        <tr><td><code>--space-2</code></td><td>4px</td><td><div class="bar" style="width:4px"></div></td></tr>
+        <tr><td><code>--space-3</code></td><td>6px</td><td><div class="bar" style="width:6px"></div></td></tr>
+        <tr><td><code>--space-4</code></td><td>8px</td><td><div class="bar" style="width:8px"></div></td></tr>
+        <tr><td><code>--space-5</code></td><td>12px</td><td><div class="bar" style="width:12px"></div></td></tr>
+        <tr><td><code>--space-6</code></td><td>16px</td><td><div class="bar" style="width:16px"></div></td></tr>
+        <tr><td><code>--space-8</code></td><td>24px</td><td><div class="bar" style="width:24px"></div></td></tr>
+        <tr><td><code>--space-9</code></td><td>32px</td><td><div class="bar" style="width:32px"></div></td></tr>
+        <tr><td><code>--space-11</code></td><td>48px</td><td><div class="bar" style="width:48px"></div></td></tr>
+        <tr><td><code>--space-12</code></td><td>64px</td><td><div class="bar" style="width:64px"></div></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Radius</h2>
+    <div class="ds-preview__row">
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-xs);display:grid;place-items:center;font:var(--type-meta)">xs 2</div>
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-sm);display:grid;place-items:center;font:var(--type-meta)">sm 4</div>
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-md);display:grid;place-items:center;font:var(--type-meta)">md 6</div>
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-lg);display:grid;place-items:center;font:var(--type-meta)">lg 8</div>
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-xl);display:grid;place-items:center;font:var(--type-meta)">xl 12</div>
+      <div style="width:72px;height:56px;background:var(--color-surface-1);border:1px solid var(--color-border-default);border-radius:var(--radius-full);display:grid;place-items:center;font:var(--type-meta)">full</div>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Row density</h2>
+    <div style="display:flex; flex-direction:column; gap: var(--space-3); max-width:520px">
+      <div class="demo-row" style="height: var(--density-row-compact)"><span>compact 28px</span><span class="ds-swatch__meta">로그 라인 · 조밀 표</span></div>
+      <div class="demo-row" style="height: var(--density-row-default)"><span>default 32px</span><span class="ds-swatch__meta">리소스 목록</span></div>
+      <div class="demo-row" style="height: var(--density-row-comfortable)"><span>comfortable 40px</span><span class="ds-swatch__meta">요약 카드 목록</span></div>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Elevation</h2>
+    <div class="ds-preview__row">
+      <div style="width:120px;height:64px;background:var(--color-surface-2);border-radius:var(--radius-lg);box-shadow:var(--elevation-1);display:grid;place-items:center;font:var(--type-meta)">elevation-1</div>
+      <div style="width:120px;height:64px;background:var(--color-surface-2);border-radius:var(--radius-lg);box-shadow:var(--elevation-2);display:grid;place-items:center;font:var(--type-meta)">elevation-2</div>
+      <div style="width:120px;height:64px;background:var(--color-surface-2);border-radius:var(--radius-lg);box-shadow:var(--elevation-3);display:grid;place-items:center;font:var(--type-meta)">elevation-3</div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

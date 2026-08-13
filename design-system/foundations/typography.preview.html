@@ -1,0 +1,54 @@
+<!-- @dsCard group="Type" name="Typography scale" viewport="960x760" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Typography</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Typography</h1>
+    <p class="ds-preview__desc">
+      시스템 sans 한 벌만 사용합니다. 식별자와 로그 원문에는 mono를 씁니다.
+      대시보드는 정보 밀도가 높아 본문 기본값이 13px입니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Roles</h2>
+    <div style="display:flex; flex-direction:column; gap: var(--space-5)">
+      <div><div style="font: var(--type-page-title)">Cluster Overview</div><span class="ds-swatch__meta">--type-page-title · 24/600</span></div>
+      <div><div style="font: var(--type-section-title)">Unhealthy Workloads</div><span class="ds-swatch__meta">--type-section-title · 20/600</span></div>
+      <div><div style="font: var(--type-panel-title)">CPU Usage by Pod</div><span class="ds-swatch__meta">--type-panel-title · 16/600</span></div>
+      <div><div style="font: var(--type-body)">Namespace <strong>payments</strong>의 Deployment 3개가 Rollout 지연 상태입니다.</div><span class="ds-swatch__meta">--type-body · 13/400</span></div>
+      <div><div style="font: var(--type-label)">NAMESPACE</div><span class="ds-swatch__meta">--type-label · 12/500</span></div>
+      <div><div style="font: var(--type-meta)">마지막 갱신 12초 전 · GreptimeDB</div><span class="ds-swatch__meta">--type-meta · 11/400</span></div>
+      <div><div style="font: var(--type-metric); letter-spacing: var(--tracking-tight)">1,284</div><span class="ds-swatch__meta">--type-metric · 32/600 · 비례 숫자</span></div>
+      <div><div style="font: var(--type-code)">payments-api-7d9c4f8b6c-x2mkq · container: api · restarts=14</div><span class="ds-swatch__meta">--type-code · 12/400 mono</span></div>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Tabular numerals — 표 · 축 눈금에만 적용</h2>
+    <table class="ds-table" style="max-width:520px">
+      <thead><tr><th>Pod</th><th style="text-align:right">CPU (mCore)</th><th style="text-align:right">Memory (MiB)</th></tr></thead>
+      <tbody style="font-variant-numeric: tabular-nums">
+        <tr><td><code>payments-api-…x2mkq</code></td><td style="text-align:right">1,204</td><td style="text-align:right">812</td></tr>
+        <tr><td><code>payments-api-…9fkt2</code></td><td style="text-align:right">98</td><td style="text-align:right">1,024</td></tr>
+        <tr><td><code>ledger-worker-…qq81z</code></td><td style="text-align:right">411</td><td style="text-align:right">96</td></tr>
+      </tbody>
+    </table>
+    <p class="ds-preview__note">
+      Stat tile의 대형 수치처럼 단독으로 놓이는 숫자는 기본 비례 숫자를 사용합니다.
+      <code>tabular-nums</code>는 세로로 자리를 맞춰야 하는 표 행과 축 눈금에만 씁니다.
+    </p>
+  </section>
+</main>
+</body>
+</html>

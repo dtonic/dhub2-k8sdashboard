@@ -1,0 +1,73 @@
+# CLAUDE.md
+
+이 저장소에서 작업할 때 Claude가 따라야 할 규칙입니다.
+
+## 프로젝트
+
+Kubernetes 운영자용 커스텀 Observability Dashboard입니다. 기존 수집·저장 계층
+(GreptimeDB 메트릭 / Quickwit 로그 / Kubernetes API / Grafana Alerting)은 유지하고,
+그 위에 **Go 기반 Observability API·BFF**와 **React/TypeScript UI**를 얹습니다.
+
+Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니다.** 운영 흐름
+(장애 발견 → Namespace/Workload 확인 → Pod/Container 확인 → Metric/Log/Event/Alert 상관분석)에
+특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
+
+현재 단계: **Architecture / Initial Planning** — 구현보다 결정을 먼저 확정하는 중입니다.
+전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`에 있습니다.
+
+## 시작 전에
+
+1. 원격 변경사항을 먼저 확인합니다. 변경이 있으면 `git fetch && git pull` 후에 작업합니다.
+2. 관련 ADR(`docs/adr/`)을 읽습니다. ADR과 충돌하는 구현을 제안하지 않습니다.
+   결정을 바꿔야 한다면 코드를 먼저 고치지 말고 **새 ADR을 제안**합니다.
+
+## 반드시 지킬 것
+
+### 보안 (README §10)
+
+- UI가 보낸 Cluster/Namespace 값을 신뢰하지 않습니다. 권한 Scope는 **서버에서 강제 삽입**합니다.
+- 데이터소스 Credential을 브라우저에 노출하지 않습니다. GreptimeDB · Quickwit · Kubernetes API
+  접근은 서버에서만 수행합니다.
+- 프런트엔드에서 Raw PromQL/SQL/Quickwit Query를 전달하지 않습니다. 서버에 등록된 `queryRef`를 씁니다.
+- 사용자 권한 Scope를 캐시 키에 포함합니다. 로그의 Token/Password/Secret은 마스킹합니다.
+- Secret을 git에 커밋하지 않습니다.
+
+### 성능 (README §11)
+
+- 브라우저에 대량 시계열 포인트를 그대로 보내지 않습니다. 조회 범위에 따라 Step과 Downsampling을 조정합니다.
+- 로그는 Cursor/Search-after 방식으로 조회합니다.
+- 요청 취소를 데이터소스 요청까지 전파합니다. 데이터소스별 Timeout과 Circuit Breaker를 적용합니다.
+
+### 엔티티 식별 (README §5)
+
+- Pod 이름보다 **Pod UID · Workload UID**를 우선합니다.
+  식별 우선순위: Pod UID → Workload UID → Namespace + Kind + Name → Pod Name.
+
+### 디자인 (ADR 0001, `design-system/README.md`)
+
+UI 작업 시 **`design-system/README.md`를 먼저 읽습니다.**
+
+- 원시 hex나 임의 픽셀값을 쓰지 않습니다. `design-system/tokens/`의 역할 토큰만 참조합니다.
+- Light/Dark는 자동 반전이 아닙니다. 두 모드 모두에서 확인합니다.
+- 상태 색(`good/warning/serious/critical`)은 예약어입니다. 차트 계열 색으로 재사용하지 않고,
+  항상 아이콘 + 텍스트 라벨과 함께 씁니다.
+- 차트: **이중 y축 금지**, 계열 색은 고정 순서 배정(순환 금지), 색은 엔티티에 고정,
+  2계열 이상이면 범례 필수, 텍스트에 계열 색을 입히지 않음.
+- 차트 계열 색을 바꾸면 `dataviz` validator를 Light/Dark 두 모드로 재실행하고
+  `design-system/README.md`의 검증 기록 표를 갱신합니다.
+- 새 컴포넌트를 추가하면 `*.preview.html`도 함께 만듭니다. 첫 줄에 `@dsCard` 마커가 필요합니다.
+  작업 후 `cd design-system && npm run check`가 통과해야 합니다.
+
+## 하지 말 것
+
+- Grafana 기능을 통째로 재현하려는 시도 (Raw Query Editor, 자체 Alert Rule Evaluator,
+  Silence/Grouping/Notification Router, 완전한 Dashboard Builder는 MVP 제외 범위입니다)
+- 수집 파이프라인 교체 (OpenTelemetry 표준화는 Post-MVP입니다)
+- 요청받지 않은 커밋·푸시
+- 검증 없이 차트 색상 변경
+- `Lorem ipsum` 같은 더미 문구 — preview에는 실제 리소스 이름과 실제 문구를 씁니다
+
+## 작성 언어
+
+문서와 주석은 한국어, 코드 식별자는 영어로 씁니다. 커밋 메시지는 Conventional Commits
+(`feat:`, `fix:`, `docs:`, `chore:`) 형식의 영어 제목을 사용합니다.

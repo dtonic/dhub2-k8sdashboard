@@ -1,0 +1,86 @@
+<!-- @dsCard group="Components" name="Stat tile" viewport="960x520" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Stat tile</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/stat-tile/stat-tile.css */
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Stat tile</h1>
+    <p class="ds-preview__desc">
+      값이 하나뿐인 지표는 차트로 그리지 않고 타일로 표시합니다. Cluster / Namespace Overview 상단 KPI 행에 사용합니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">KPI row</h2>
+    <div class="ds-preview__row" style="align-items: stretch">
+      <div class="ds-stat-tile">
+        <span class="ds-stat-tile__label">Running Pods</span>
+        <span class="ds-stat-tile__value-row">
+          <span class="ds-stat-tile__value">1,284</span>
+          <span class="ds-stat-tile__delta ds-stat-tile__delta--good">↑ 2.4%</span>
+        </span>
+        <span class="ds-stat-tile__footnote">최근 1시간 · 전체 1,291</span>
+      </div>
+
+      <div class="ds-stat-tile">
+        <span class="ds-stat-tile__label">CPU Utilization</span>
+        <span class="ds-stat-tile__value-row">
+          <span class="ds-stat-tile__value">63</span>
+          <span class="ds-stat-tile__unit">%</span>
+          <span class="ds-stat-tile__delta ds-stat-tile__delta--flat">→ 0.1%p</span>
+        </span>
+        <span class="ds-stat-tile__footnote">Request 대비 · 최근 15분</span>
+      </div>
+
+      <div class="ds-stat-tile ds-stat-tile--warning">
+        <span class="ds-stat-tile__label">Pending Pods</span>
+        <span class="ds-stat-tile__value-row">
+          <span class="ds-stat-tile__value">7</span>
+          <span class="ds-stat-tile__delta ds-stat-tile__delta--bad">↑ 5</span>
+        </span>
+        <span class="ds-stat-tile__footnote">Warning · 스케줄링 실패 3건 포함</span>
+      </div>
+
+      <div class="ds-stat-tile ds-stat-tile--critical">
+        <span class="ds-stat-tile__label">CrashLoopBackOff</span>
+        <span class="ds-stat-tile__value-row">
+          <span class="ds-stat-tile__value">2</span>
+          <span class="ds-stat-tile__delta ds-stat-tile__delta--bad">↑ 2</span>
+        </span>
+        <span class="ds-stat-tile__footnote">Critical · ledger-worker, batch-sync</span>
+      </div>
+    </div>
+    <p class="ds-preview__note">
+      좌측 레일 색상은 status 토큰만 사용하며, 상태 문구를 footnote에 함께 노출해 색상 단독 신호를 피합니다.
+      delta 색은 방향이 아니라 <code>good</code>/<code>bad</code> 의미로 정합니다. Pending Pods처럼 증가가 나쁜 지표는 ↑ 글리프에 bad 색을 씁니다.
+    </p>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Degraded mode — 데이터소스 부분 장애</h2>
+    <div class="ds-preview__row" style="align-items: stretch">
+      <div class="ds-stat-tile ds-stat-tile--stale">
+        <span class="ds-stat-tile__label">Log Ingest Rate</span>
+        <span class="ds-stat-tile__value-row">
+          <span class="ds-stat-tile__value">—</span>
+        </span>
+        <span class="ds-stat-tile__footnote">Quickwit 응답 없음 · 마지막 값 12분 전</span>
+      </div>
+    </div>
+    <p class="ds-preview__note">
+      한 데이터소스가 죽어도 나머지 화면은 계속 동작해야 합니다. 값 대신 <code>—</code>와 사유를 표시하고 타일 전체를 숨기지 않습니다.
+    </p>
+  </section>
+</main>
+</body>
+</html>

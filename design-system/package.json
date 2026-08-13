@@ -1,0 +1,16 @@
+{
+  "name": "@k8s-dashboard/design-system",
+  "version": "0.0.0",
+  "private": true,
+  "description": "K8s Dashboard 디자인 토큰 · 컴포넌트 스타일 · Claude Design 미리보기 소스",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-previews.mjs",
+    "check": "node scripts/build-previews.mjs --check"
+  },
+  "exports": {
+    "./tokens": "./tokens/index.css",
+    "./tokens/*": "./tokens/*",
+    "./components/*": "./components/*"
+  }
+}

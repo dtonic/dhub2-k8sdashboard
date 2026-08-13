@@ -1,0 +1,5 @@
+# 빌드 산출물 — `npm run build`로 언제든 재생성됩니다.
+dist/
+
+# design-sync 렌더 검증 결과
+.render-check.json

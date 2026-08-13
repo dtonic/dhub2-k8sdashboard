@@ -1,0 +1,77 @@
+/* ==========================================================================
+   Component — Status Badge
+   --------------------------------------------------------------------------
+   Kubernetes 리소스의 정규화된 상태를 표시합니다.
+   접근성 규칙: 색상 단독으로 의미를 전달하지 않습니다. 반드시 아이콘 글리프와
+   텍스트 라벨을 함께 렌더링합니다. (forced-colors / 색각 이상 대응)
+   ========================================================================== */
+
+.ds-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4) 0 var(--space-3);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-1);
+  font: var(--type-label);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.ds-status-badge__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  color: var(--color-text-inverse);
+  background: var(--_status-color, var(--color-status-unknown));
+  forced-color-adjust: none;
+}
+
+.ds-status-badge__label {
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-status-badge__count {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Variants ------------------------------------------------------------- */
+.ds-status-badge--healthy      { --_status-color: var(--status-healthy); }
+.ds-status-badge--progressing  { --_status-color: var(--status-progressing); }
+.ds-status-badge--warning      { --_status-color: var(--status-warning); }
+.ds-status-badge--degraded     { --_status-color: var(--status-degraded); }
+.ds-status-badge--critical     { --_status-color: var(--status-critical); }
+.ds-status-badge--unknown      { --_status-color: var(--status-unknown); }
+
+/* warning은 밝은 노랑이라 흰 글리프 텍스트 대비가 부족합니다. */
+.ds-status-badge--warning .ds-status-badge__glyph { color: #0b0b0b; }
+
+/* --- Sizes ---------------------------------------------------------------- */
+.ds-status-badge--sm {
+  height: 20px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  font: var(--type-meta);
+  gap: var(--space-2);
+}
+.ds-status-badge--sm .ds-status-badge__glyph { width: 12px; height: 12px; font-size: 9px; }
+
+/* --- Dot 전용(표 셀 내부에서 라벨이 이미 옆에 있을 때) ---------------------
+   단독 사용 금지. 반드시 인접 셀에 텍스트 상태값이 있어야 합니다. */
+.ds-status-dot {
+  display: inline-block;
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--_status-color, var(--color-status-unknown));
+  forced-color-adjust: none;
+}

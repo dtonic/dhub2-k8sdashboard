@@ -169,7 +169,26 @@ Kubernetes API를 매 요청마다 직접 조회하지 않고 Shared Informer Ca
 - Node NotReady/Pressure
 - Deployment Rollout 상태
 
-### 4.4 Query Catalog
+### 4.4 Design System
+
+구현에 앞서 디자인 토큰과 핵심 컴포넌트를 먼저 확정합니다. 자세한 규칙은
+[`design-system/README.md`](./design-system/README.md), 결정 배경은
+[ADR 0001](./docs/adr/0001-design-system-with-claude-design.md)에 있습니다.
+
+- **원천은 git입니다.** `design-system/tokens/`가 단일 원천이며 `apps/web`은 토큰만 참조합니다.
+  컴포넌트 코드에 원시 hex나 임의 픽셀값을 쓰지 않습니다.
+- **리뷰 표면은 Claude Design입니다.** 컴포넌트별 `*.preview.html`을 자기완결 HTML로 빌드해
+  **design-sync**로 업로드하고, 팀은 카드 단위로 보고 논의합니다. 동기화는 한 번에 한 컴포넌트씩
+  증분으로 수행합니다.
+- **상태 색은 예약어입니다.** `good / warning / serious / critical`을 차트 계열 색으로
+  재사용하지 않고, 항상 아이콘 + 텍스트 라벨과 함께 렌더링합니다.
+- **차트 팔레트는 검증된 값만 씁니다.** 명도 대역 · 채도 하한 · 인접 쌍 색각 이상 분리 ·
+  정상 시야 하한 · 표면 대비를 Light/Dark 두 모드에서 통과한 8슬롯 고정 순서 팔레트를 사용하며,
+  계열 색을 바꿀 때는 검증을 재실행하고 결과를 기록합니다.
+- **Light/Dark는 자동 반전이 아닙니다.** 각 표면에 맞춰 별도로 고른 값을 선언하며,
+  사용자 테마 토글이 OS 설정보다 우선합니다.
+
+### 4.5 Query Catalog
 
 프런트엔드에서 Raw Query를 직접 전달하지 않고, 서버에 등록된 `queryRef`를 사용합니다.
 
@@ -256,6 +275,7 @@ Pod Name
 | 영역 | 기술 |
 |---|---|
 | Frontend | React, TypeScript, Vite 또는 Next.js |
+| Design System | CSS Custom Properties 기반 토큰, Claude Design + design-sync |
 | Server State | TanStack Query |
 | UI State | Zustand |
 | Chart | Apache ECharts 또는 uPlot |
@@ -282,6 +302,13 @@ k8s-dashboard/
 ├── apps/
 │   ├── api/                    # Go Observability API/BFF
 │   └── web/                    # React/TypeScript UI
+├── design-system/              # 디자인 토큰 · 컴포넌트 스타일 · Claude Design preview
+│   ├── tokens/                 #   color / typography / layout (단일 원천)
+│   ├── components/             #   컴포넌트 CSS + *.preview.html
+│   ├── foundations/            #   토큰 자체를 보여주는 preview
+│   ├── previews/               #   preview 전용 레이아웃
+│   ├── scripts/                #   preview 빌드
+│   └── dist/                   #   빌드 산출물 (design-sync 업로드 대상, gitignore)
 ├── packages/
 │   ├── contracts/              # OpenAPI/JSON Schema/공통 타입
 │   ├── dashboard-schema/       # Dashboard DSL
@@ -296,11 +323,12 @@ k8s-dashboard/
 │   ├── runbooks/
 │   └── security/
 ├── scripts/
+├── CLAUDE.md
 ├── Makefile
 └── README.md
 ```
 
-실제 구조는 Bootstrap 이슈에서 확정합니다.
+`design-system/`을 제외한 실제 구조는 Bootstrap 이슈에서 확정합니다.
 
 ---
 
@@ -429,6 +457,7 @@ platform.admin
 
 - MVP 범위와 ADR 확정
 - Monorepo Bootstrap
+- Design System 기반 정립 (토큰, 핵심 컴포넌트, Claude Design 동기화)
 - Unified Entity Model
 - Go API/BFF 기본 구조
 
@@ -443,7 +472,7 @@ platform.admin
 
 ### Phase 3 — Core UI
 
-- React Design System
+- Design System 컴포넌트 확장 (테이블, 로그 뷰어, Scope Selector, 시간 범위 컨트롤)
 - Cluster Overview
 - Namespace Overview
 - Workload/Pod Detail
@@ -478,6 +507,9 @@ platform.admin
 # 저장소 복제
 git clone https://github.com/xenx96/k8s-dashboard.git
 cd k8s-dashboard
+
+# 디자인 시스템 미리보기 빌드 (지금 바로 동작합니다)
+cd design-system && npm run build && cd ..
 
 # 개발 의존성 실행
 make dev-infra
@@ -521,6 +553,7 @@ MVP는 다음 조건을 모두 만족할 때 완료된 것으로 판단합니다
 
 - ADR과 MVP 비목표
 - 저장소 구조
+- Design System 기반 (진행 중 — 토큰과 핵심 컴포넌트 초안 완료)
 - Unified Entity Model
 - API 계약
 - 인증 및 권한 모델

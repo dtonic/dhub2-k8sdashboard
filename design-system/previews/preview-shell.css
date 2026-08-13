@@ -1,0 +1,77 @@
+/* ==========================================================================
+   Preview shell — Claude Design 카드 렌더링용 공통 레이아웃
+   --------------------------------------------------------------------------
+   이 파일은 제품 UI에 포함되지 않습니다. preview HTML 안에서만 사용합니다.
+   ========================================================================== */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: var(--space-8);
+  background: var(--color-plane);
+  color: var(--color-text-primary);
+  font: var(--type-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.ds-preview { display: flex; flex-direction: column; gap: var(--space-8); max-width: 960px; }
+
+.ds-preview__header { display: flex; flex-direction: column; gap: var(--space-2); }
+.ds-preview__title { font: var(--type-section-title); margin: 0; }
+.ds-preview__desc { font: var(--type-body); color: var(--color-text-secondary); margin: 0; }
+
+.ds-preview__section { display: flex; flex-direction: column; gap: var(--space-4); }
+.ds-preview__section-title {
+  margin: 0;
+  font: var(--type-label);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--color-text-muted);
+}
+
+.ds-preview__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+.ds-preview__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-4);
+}
+
+.ds-preview__note {
+  padding: var(--space-4) var(--space-5);
+  border-left: var(--space-1) solid var(--color-border-strong);
+  background: var(--color-surface-sunken);
+  border-radius: var(--radius-sm);
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}
+
+/* 스와치 */
+.ds-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+.ds-swatch__chip {
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  forced-color-adjust: none;
+}
+.ds-swatch__name { font: var(--type-label); }
+.ds-swatch__meta { font: var(--type-meta); color: var(--color-text-muted); font-family: var(--font-mono); }
+
+/* 토큰 표 */
+.ds-table { width: 100%; border-collapse: collapse; font: var(--type-table-cell); }
+.ds-table th, .ds-table td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-hairline) solid var(--color-border-default);
+  vertical-align: middle;
+}
+.ds-table th { font: var(--type-label); color: var(--color-text-muted); }
+.ds-table code { font: var(--type-code); color: var(--color-text-secondary); }
