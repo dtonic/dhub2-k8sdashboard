@@ -13,7 +13,8 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
 
 현재 단계: **Architecture / Initial Planning** — 구현보다 결정을 먼저 확정하는 중입니다.
-다만 `design-system/`과 `apps/web`(Cluster Overview, mock API 기준)은 선행 구현되어 있습니다.
+다만 `design-system/`과 `apps/web`(Cluster Overview + Namespace/Workload/Pod Drill-down,
+mock API 기준)은 선행 구현되어 있습니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`, 프런트엔드 규칙은 `apps/web/README.md`에 있습니다.
 
 작업 단위는 GitHub Issues를 따릅니다. 화면·기능 작업을 시작하기 전에 해당 이슈의
@@ -50,6 +51,9 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 - **"데이터 없음 · 권한 없음 · upstream 장애"를 같은 빈 화면으로 처리하지 않습니다.**
 - 브라우저에서 데이터소스를 직접 호출하지 않습니다. `apps/web/src/api/client.ts`가 유일한 통로입니다.
 - 자동 갱신은 데이터만 바꿉니다. 페이지를 다시 마운트하지 않습니다.
+- **사용자 상태를 갱신이 지우지 않습니다.** 필터·선택은 URL에, 스크롤은 DOM에 둡니다.
+- **Pod의 신원은 이름이 아니라 UID입니다.** 캐시 키와 목록 key에 UID를 씁니다.
+- 큰 목록은 가상 스크롤을 씁니다. 전체를 한 번에 DOM에 그리지 않습니다.
 
 ### 엔티티 식별 (README §5)
 

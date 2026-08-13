@@ -1,6 +1,14 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { ClusterOverviewResponse, RangeKey, ScopeResponse } from "@k8s-dashboard/contracts";
-import { apiGet } from "./client";
+import type {
+  ClusterOverviewResponse,
+  NamespaceDetailResponse,
+  NamespaceListResponse,
+  PodDetailResponse,
+  RangeKey,
+  ScopeResponse,
+  WorkloadDetailResponse,
+} from "@k8s-dashboard/contracts";
+import { apiGet, HttpError } from "./client";
 
 export const queryKeys = {
   scope: ["scope"] as const,
@@ -42,7 +50,101 @@ export function useClusterOverview(args: {
     refetchInterval: refreshMs > 0 ? refreshMs : false,
     refetchOnWindowFocus: false,
     /* 권한 문제는 재시도해도 달라지지 않습니다. */
-    retry: (count, error) => !(error instanceof Error && error.name === "HttpError") && count < 2,
+    retry: (count, error) => !(error instanceof HttpError) && count < 2,
     staleTime: 10_000,
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Drill-down (이슈 #15) — 화면 하나당 요청 하나. ADR 0002를 그대로 따릅니다.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** 권한 문제는 재시도해도 결과가 같습니다. 404도 마찬가지입니다. */
+const retryPolicy = (count: number, error: unknown) =>
+  !(error instanceof HttpError && (error.status === 403 || error.status === 404)) && count < 2;
+
+const common = {
+  placeholderData: keepPreviousData,
+  refetchOnWindowFocus: false,
+  staleTime: 10_000,
+  retry: retryPolicy,
+} as const;
+
+export const drillKeys = {
+  namespaces: (clusterId: string, range: RangeKey) => ["namespaces", clusterId, range] as const,
+  namespace: (clusterId: string, ns: string, range: RangeKey) => ["namespace", clusterId, ns, range] as const,
+  workload: (clusterId: string, ns: string, kind: string, name: string, range: RangeKey) =>
+    ["workload", clusterId, ns, kind, name, range] as const,
+  /** Pod는 UID가 신원입니다. 이름이 같아도 재생성되면 다른 캐시 항목입니다. */
+  pod: (clusterId: string, ns: string, name: string, uid: string, range: RangeKey) =>
+    ["pod", clusterId, ns, name, uid, range] as const,
+};
+
+export function useNamespaceList(clusterId: string, range: RangeKey, refreshMs: number) {
+  return useQuery({
+    ...common,
+    queryKey: drillKeys.namespaces(clusterId, range),
+    queryFn: ({ signal }) =>
+      apiGet<NamespaceListResponse>(`/api/v1/clusters/${encodeURIComponent(clusterId)}/namespaces`, { range }, signal),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+  });
+}
+
+export function useNamespaceDetail(clusterId: string, ns: string, range: RangeKey, refreshMs: number) {
+  return useQuery({
+    ...common,
+    queryKey: drillKeys.namespace(clusterId, ns, range),
+    queryFn: ({ signal }) =>
+      apiGet<NamespaceDetailResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/namespaces/${encodeURIComponent(ns)}`,
+        { range },
+        signal,
+      ),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+    enabled: Boolean(ns),
+  });
+}
+
+export function useWorkloadDetail(
+  clusterId: string,
+  ns: string,
+  kind: string,
+  name: string,
+  range: RangeKey,
+  refreshMs: number,
+) {
+  return useQuery({
+    ...common,
+    queryKey: drillKeys.workload(clusterId, ns, kind, name, range),
+    queryFn: ({ signal }) =>
+      apiGet<WorkloadDetailResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`,
+        { ns, range },
+        signal,
+      ),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+    enabled: Boolean(ns && name),
+  });
+}
+
+export function usePodDetail(
+  clusterId: string,
+  ns: string,
+  name: string,
+  uid: string,
+  range: RangeKey,
+  refreshMs: number,
+) {
+  return useQuery({
+    ...common,
+    queryKey: drillKeys.pod(clusterId, ns, name, uid, range),
+    queryFn: ({ signal }) =>
+      apiGet<PodDetailResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/pods/${encodeURIComponent(name)}`,
+        { ns, range, ...(uid ? { uid } : {}) },
+        signal,
+      ),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+    enabled: Boolean(ns && name),
   });
 }

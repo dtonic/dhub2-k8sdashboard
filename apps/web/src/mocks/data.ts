@@ -153,7 +153,7 @@ const UNHEALTHY: UnhealthyEntity[] = [
   },
 ];
 
-const EVENTS: ClusterEvent[] = [
+export const EVENTS: ClusterEvent[] = [
   {
     id: "ev-1",
     type: "Warning",

@@ -16,11 +16,16 @@ import { duration, num, since } from "@/lib/format";
 export function detailPath(ref: EntityRef): string {
   const p = new URLSearchParams();
   if (ref.namespace && ref.namespace !== "—") p.set("ns", ref.namespace);
-  if (ref.podUid) p.set("podUid", ref.podUid);
-  if (ref.workloadUid) p.set("workloadUid", ref.workloadUid);
-  if (ref.podName) return `/pods/${encodeURIComponent(ref.podName)}?${p}`;
-  if (ref.workloadName) return `/workloads/${encodeURIComponent(ref.workloadName)}?${p}`;
-  return `/namespaces/${encodeURIComponent(ref.namespace ?? "default")}`;
+  if (ref.podUid) p.set("uid", ref.podUid);
+  if (ref.podName && ref.namespace && ref.namespace !== "—") {
+    return `/pods/${encodeURIComponent(ref.podName)}?${p}`;
+  }
+  if (ref.workloadName && ref.workloadKind) {
+    return `/workloads/${ref.workloadKind}/${encodeURIComponent(ref.workloadName)}?${p}`;
+  }
+  /* Node는 아직 상세 화면이 없습니다. Namespace로 보내지 않고 목록으로 되돌립니다. */
+  if (!ref.namespace || ref.namespace === "—") return "/namespaces";
+  return `/namespaces/${encodeURIComponent(ref.namespace)}`;
 }
 
 /* ── Unhealthy Top N ─────────────────────────────────────────────────────── */

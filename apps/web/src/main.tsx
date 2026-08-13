@@ -5,6 +5,10 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { Placeholder } from "@/app/Placeholder";
 import { ClusterOverview } from "@/features/overview/ClusterOverview";
+import { NamespaceList } from "@/features/drill/NamespaceList";
+import { NamespaceDetail } from "@/features/drill/NamespaceDetail";
+import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
+import { PodDetail } from "@/features/drill/PodDetail";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -31,10 +35,10 @@ async function bootstrap() {
           <Routes>
             <Route element={<AppShell />}>
               <Route path="/" element={<ClusterOverview />} />
-              <Route path="/namespaces" element={<Placeholder title="Namespaces" issue="이슈 #15" />} />
-              <Route path="/namespaces/:namespace" element={<Placeholder title="Namespace 상세" issue="이슈 #15" />} />
-              <Route path="/workloads/:name" element={<Placeholder title="Workload 상세" issue="이슈 #15" />} />
-              <Route path="/pods/:name" element={<Placeholder title="Pod 상세" issue="이슈 #15" />} />
+              <Route path="/namespaces" element={<NamespaceList />} />
+              <Route path="/namespaces/:namespace" element={<NamespaceDetail />} />
+              <Route path="/workloads/:kind/:name" element={<WorkloadDetail />} />
+              <Route path="/pods/:name" element={<PodDetail />} />
               <Route path="/topology" element={<Placeholder title="Pod Topology" issue="이슈 #16" />} />
               <Route path="/logs" element={<Placeholder title="Logs Explorer" issue="이슈 #16" />} />
               <Route path="/alerts" element={<Placeholder title="Alerts" issue="이슈 #17" />} />

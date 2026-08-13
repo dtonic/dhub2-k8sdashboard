@@ -1,7 +1,8 @@
 # apps/web
 
-React + TypeScript 기반 Custom Observability UI입니다. 현재 **Cluster Overview(이슈 #14)** 가 구현되어 있고,
-나머지 화면은 라우트와 컨텍스트 전달만 잡힌 자리 표시자입니다.
+React + TypeScript 기반 Custom Observability UI입니다.
+현재 **Cluster Overview(#14)** 와 **Namespace / Workload / Pod Drill-down(#15)** 이 구현되어 있고,
+Logs Explorer와 Alerts는 라우트와 컨텍스트 전달만 잡힌 자리 표시자입니다.
 
 API가 아직 없으므로 **MSW mock 위에서 단독 실행**됩니다. (이슈 #13 완료 기준)
 
@@ -31,6 +32,7 @@ Cluster Overview는 쿼리 파라미터로 상태를 재현할 수 있습니다.
 | `/?scenario=forbidden` | Event·Alert·Topology 섹션이 권한 부족으로 거절 |
 | `/?scenario=empty` | 모든 지표 정상, 이상 엔티티 0건 |
 | `/?cluster=prod-frankfurt` | 화면 전체 403 (접근 불가 클러스터) |
+| `/namespaces/media?cluster=prod-tokyo` | 권한 없는 Namespace 직접 접근 → 403 (데이터 미노출) |
 
 Scope·시간 범위·자동 갱신 주기는 모두 URL 쿼리(`cluster`, `ns`, `range`, `refresh`)에 있습니다.
 장애 대응 중 링크 하나로 같은 화면을 공유할 수 있어야 하기 때문입니다.
@@ -43,12 +45,24 @@ src/
 ├── app/            # AppShell, 자리 표시자 라우트
 ├── components/     # 공통 조각 (상태, primitives, LineChart, 컨트롤)
 ├── features/
-│   └── overview/   # Cluster Overview 화면과 패널
+│   ├── overview/   # Cluster Overview 화면과 패널
+│   └── drill/      # Namespace 목록·상세, Workload 상세, Pod 상세
 ├── lib/            # 포맷터
 ├── mocks/          # MSW 핸들러와 고정 데이터
 ├── state/          # URL 기반 대시보드 파라미터
 └── styles/         # design-system 참조 + 앱 셸 레이아웃
 ```
+
+## 화면
+
+| 경로 | 화면 | 이슈 |
+|---|---|---|
+| `/` | Cluster Overview | #14 |
+| `/namespaces` | Namespace 목록 | #15 |
+| `/namespaces/:namespace` | Namespace 상세 (Workload 표 · 추세 · 이벤트) | #15 |
+| `/workloads/:kind/:name?ns=` | Workload 상세 (replica · rollout · OwnerReference · Pod) | #15 |
+| `/pods/:name?ns=&uid=` | Pod 상세 (Container · Owner 체인 · 로그 연결) | #15 |
+| `/topology`, `/logs`, `/alerts` | 자리 표시자 | #16, #17 |
 
 ## 설계 규칙
 
@@ -75,6 +89,19 @@ src/
   화면이 비워지지 않고 값만 교체됩니다. (DOM 노드 유지 확인 완료)
 - Step은 사용자가 고르지 않습니다. 범위에 따라 서버가 강제하고 UI는 현재 Step을 표시만 합니다.
 
+### 드릴다운 (#15)
+
+- **권한은 서버가 강제합니다.** 접근 불가한 Namespace를 URL로 직접 찍어도 403이 나가고
+  화면은 권한 안내만 표시합니다. 목록·표가 부분적으로도 노출되지 않습니다.
+- **Pod의 신원은 UID입니다.** 이름이 같아도 재생성된 Pod는 다른 인스턴스입니다.
+  URL의 `uid`, 캐시 키, 표의 `key`가 모두 UID를 따릅니다.
+- **큰 목록은 가상 스크롤입니다.** Workload 240개인 Namespace에서 실제 렌더 행은 30개 이하입니다.
+- **갱신이 사용자 상태를 지우지 않습니다.** 필터 선택은 URL에, 스크롤 위치는 DOM에 남습니다.
+  자동 갱신·범위 변경 후에도 유지되는 것을 테스트로 확인합니다.
+- **OwnerReference 체인을 그대로 보여줍니다.** 롤아웃 중이면 ReplicaSet 두 세대가 함께 표시되고
+  현재 세대가 표시됩니다.
+- Pod 상세에서 Logs Explorer로 이동할 때 **같은 시간 범위와 Pod UID**를 그대로 넘깁니다.
+
 ### 스타일
 
 - 원시 hex·임의 픽셀값을 쓰지 않습니다. `design-system/tokens`의 역할 토큰만 참조합니다.
@@ -92,6 +119,8 @@ src/
 ## 남은 것
 
 - 실제 API 연결 (`#8` Informer, `#9` Query Catalog, `#10` OIDC/RBAC 이후)
-- Namespace·Workload·Pod 상세 (`#15`), Logs Explorer (`#16`), Alerts (`#17`)
-- 표·차트 가상화 — 목록이 수천 건이 되면 필요합니다
+- Logs Explorer와 상관분석 (`#16`), Alerts (`#17`)
+- Node 상세 화면 — 현재 Overview의 Node 항목은 Namespace 목록으로 되돌립니다
+- 가상 스크롤을 라이브러리(TanStack Virtual)로 교체할지 결정 — 지금은 최소 구현
+- 서버 측 pagination — 현재는 전체를 받아 클라이언트에서 가상화합니다
 - 린트·테스트 도구 확정 (`#21`)

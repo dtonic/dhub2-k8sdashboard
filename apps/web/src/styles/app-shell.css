@@ -273,3 +273,92 @@ a:hover { text-decoration: underline; }
   white-space: nowrap;
   border: 0;
 }
+
+/* --- Breadcrumb ----------------------------------------------------------- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font: var(--type-meta); }
+.crumbs__item { display: inline-flex; align-items: center; gap: var(--space-3); }
+.crumbs__sep { color: var(--color-text-muted); }
+.crumbs [aria-current="page"] { color: var(--color-text-secondary); }
+
+/* --- 필터 칩 -------------------------------------------------------------- */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.chip {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-1);
+  color: var(--color-text-secondary);
+  font: var(--type-label);
+  cursor: pointer;
+}
+.chip:hover { background: var(--color-surface-hover); }
+.chip[aria-pressed="true"] {
+  background: var(--color-surface-selected);
+  border-color: var(--color-border-focus);
+  color: var(--color-text-primary);
+}
+.chip__count { color: var(--color-text-muted); }
+
+/* --- 사용량 막대 ---------------------------------------------------------- */
+.usage { display: inline-flex; align-items: center; gap: var(--space-3); }
+.usage__track {
+  position: relative;
+  display: inline-block;
+  width: 84px; height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-active);
+  overflow: hidden;
+}
+.usage__fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--radius-full); background: var(--_c); }
+.usage__track--healthy  { --_c: var(--status-healthy); }
+.usage__track--warning  { --_c: var(--status-warning); }
+.usage__track--critical { --_c: var(--status-critical); }
+/* 100% 기준선 */
+.usage__mark { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--color-border-strong); }
+.usage__text { font: var(--type-meta); color: var(--color-text-secondary); min-width: 34px; text-align: right; }
+
+/* --- OwnerReference 체인 -------------------------------------------------- */
+.owner-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.owner-chain__item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font: var(--type-table-cell);
+}
+.owner-chain__item--current { border-color: var(--color-border-focus); }
+.owner-chain__kind {
+  font: var(--type-label);
+  color: var(--color-text-muted);
+  min-width: 88px;
+}
+.owner-chain__badge {
+  padding: 0 var(--space-3); height: 20px;
+  display: inline-flex; align-items: center;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-selected);
+  color: var(--color-text-primary);
+  font: var(--type-meta);
+}
+.owner-chain__uid { margin-left: auto; max-width: 260px; }
+
+/* --- 가상 스크롤 테이블 --------------------------------------------------- */
+.vtable { display: flex; flex-direction: column; min-width: 0; }
+.vtable__head { table-layout: fixed; }
+.vtable__body { table-layout: fixed; }
+.vtable__viewport { overflow: auto; border-top: var(--border-hairline) solid var(--color-border-subtle); }
+.vtable__viewport:focus-visible { outline: var(--focus-ring-width) solid var(--color-border-focus); outline-offset: -2px; }
+.vtable__footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-hairline) solid var(--color-border-subtle);
+  font: var(--type-meta);
+  color: var(--color-text-muted);
+}
+
+/* --- 상세 화면 요약 그리드 ------------------------------------------------ */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-5); }
+.fact { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.fact__label { font: var(--type-label); color: var(--color-text-muted); }
+.fact__value { font: var(--type-body-strong); overflow-wrap: anywhere; }

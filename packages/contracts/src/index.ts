@@ -224,3 +224,172 @@ export interface ApiError {
   code: "unauthorized" | "forbidden" | "upstream_unavailable" | "invalid_range" | "internal";
   message: string;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Drill-down — 이슈 #15
+   Cluster → Namespace → Workload → Pod → Container
+   화면 하나당 요청 하나 원칙(ADR 0002)을 그대로 따릅니다.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** 리소스 사용량과 Request/Limit 대비 비율. 비율은 서버가 계산해 내려줍니다. */
+export interface ResourceUsage {
+  /** CPU millicore */
+  cpuMilli: number;
+  cpuRequestMilli: number;
+  cpuLimitMilli: number | null;
+  /** Memory MiB */
+  memoryMib: number;
+  memoryRequestMib: number;
+  memoryLimitMib: number | null;
+  /** 0~1 이상이면 과사용. limit이 없으면 null */
+  cpuVsRequest: number;
+  cpuVsLimit: number | null;
+  memoryVsRequest: number;
+  memoryVsLimit: number | null;
+}
+
+export type WorkloadKind = "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet" | "CronJob";
+
+/** Cluster Overview에서 정규화한 상태 어휘를 그대로 씁니다. */
+export type PodPhase = "Running" | "Pending" | "Succeeded" | "Failed" | "Unknown";
+
+/** 필터 칩에 쓰이는 정규화 사유. 서버가 정규화해 내려줍니다. */
+export type IssueReason =
+  | "CrashLoopBackOff"
+  | "ImagePullBackOff"
+  | "Pending"
+  | "ReplicaMismatch"
+  | "RolloutStalled"
+  | "Restarting"
+  | "OOMKilled"
+  | "ProbeFailed";
+
+export interface NamespaceSummary {
+  name: string;
+  severity: Severity;
+  workloads: { total: number; unhealthy: number };
+  pods: { total: number; running: number; pending: number; failed: number; restarts: number };
+  usage: ResourceUsage;
+  /** 이 Namespace에서 관측된 문제 사유. 목록 화면 필터에 씁니다. */
+  issues: IssueReason[];
+}
+
+export interface NamespaceListResponse {
+  clusterId: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  namespaces: Section<NamespaceSummary[]>;
+}
+
+export interface WorkloadSummary {
+  ref: EntityRef;
+  name: string;
+  kind: WorkloadKind;
+  namespace: string;
+  severity: Severity;
+  /** DaemonSet은 desired가 노드 수입니다. */
+  replicas: { desired: number; ready: number; available: number; updated: number };
+  rollout: { status: "Complete" | "Progressing" | "Stalled" | "Paused"; message?: string };
+  restarts: number;
+  usage: ResourceUsage;
+  images: string[];
+  issues: IssueReason[];
+  ageSeconds: number;
+}
+
+export interface NamespaceDetailResponse {
+  clusterId: string;
+  namespace: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  summary: Section<NamespaceSummary>;
+  workloads: Section<WorkloadSummary[]>;
+  trends: Section<TrendPanel[]>;
+  events: Section<ClusterEvent[]>;
+}
+
+/** OwnerReference 체인. Deployment → ReplicaSet → Pod 관계를 그대로 표현합니다. */
+export interface OwnerRef {
+  kind: WorkloadKind | "Node" | "Job";
+  name: string;
+  uid: string;
+  /** 현재 활성 ReplicaSet인지. 롤아웃 중에는 여러 개가 공존합니다. */
+  current?: boolean;
+  /** 이 소유자에 속한 Pod 수 */
+  pods?: number;
+  revision?: string;
+}
+
+export interface ContainerStatus {
+  name: string;
+  image: string;
+  /** 이미지 태그가 아니라 실제 배포된 digest. 롤백 판단에 필요합니다. */
+  imageId?: string;
+  ready: boolean;
+  started: boolean;
+  restarts: number;
+  state: "Running" | "Waiting" | "Terminated";
+  /** Waiting/Terminated일 때의 사유. CrashLoopBackOff 등 */
+  reason?: string;
+  message?: string;
+  lastTerminated?: { reason: string; exitCode: number; finishedAt: string };
+  usage?: { cpuMilli: number; memoryMib: number };
+  probes: { liveness: "passing" | "failing" | "none"; readiness: "passing" | "failing" | "none" };
+}
+
+export interface PodSummary {
+  ref: EntityRef;
+  name: string;
+  /** Pod UID. 이름이 같아도 재생성되면 다른 인스턴스입니다. (이슈 #15 완료 기준) */
+  uid: string;
+  namespace: string;
+  phase: PodPhase;
+  severity: Severity;
+  ready: string;
+  restarts: number;
+  node: string;
+  /** 소유 체인의 직접 부모(대개 ReplicaSet) */
+  owner?: OwnerRef;
+  issues: IssueReason[];
+  usage: ResourceUsage;
+  startedAt: string;
+  /** 이미 삭제된 인스턴스면 종료 시각이 있습니다. */
+  finishedAt?: string;
+}
+
+export interface WorkloadDetailResponse {
+  clusterId: string;
+  namespace: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  workload: Section<WorkloadSummary>;
+  /** Deployment → ReplicaSet 체인. DaemonSet/StatefulSet은 비어 있습니다. */
+  ownerChain: Section<OwnerRef[]>;
+  pods: Section<PodSummary[]>;
+  trends: Section<TrendPanel[]>;
+  events: Section<ClusterEvent[]>;
+}
+
+export interface PodDetailResponse {
+  clusterId: string;
+  namespace: string;
+  range: { key: RangeKey; from: string; to: string; stepSeconds: number };
+  generatedAt: string;
+  pod: Section<PodSummary>;
+  /** Pod → ReplicaSet → Deployment 순서의 상위 체인 */
+  ownerChain: Section<OwnerRef[]>;
+  containers: Section<ContainerStatus[]>;
+  trends: Section<TrendPanel[]>;
+  events: Section<ClusterEvent[]>;
+}
+
+export const ISSUE_LABEL: Record<IssueReason, string> = {
+  CrashLoopBackOff: "CrashLoopBackOff",
+  ImagePullBackOff: "ImagePullBackOff",
+  Pending: "Pending",
+  ReplicaMismatch: "Replica 불일치",
+  RolloutStalled: "Rollout 지연",
+  Restarting: "재시작 발생",
+  OOMKilled: "OOMKilled",
+  ProbeFailed: "Probe 실패",
+};

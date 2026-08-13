@@ -491,6 +491,7 @@ Custom Range의 최대 폭은 30일입니다.
 
 - Design System 컴포넌트 확장 (로그 뷰어, 표·차트 가상화)
 - Cluster Overview *(선행 구현됨 — 실제 API 연결 대기)*
+- Namespace / Workload / Pod Drill-down *(선행 구현됨 — 실제 API 연결 대기)*
 - Namespace Overview
 - Workload/Pod Detail
 - Logs Explorer
@@ -572,6 +573,7 @@ MVP는 다음 조건을 모두 만족할 때 완료된 것으로 판단합니다
 - 저장소 구조
 - Design System 기반 *(완료 — 토큰, 7개 컴포넌트, preview 8종)*
 - Cluster Overview 화면 *(mock API 위에서 동작 · 이슈 #14)*
+- Namespace / Workload / Pod Drill-down *(mock API 위에서 동작 · 이슈 #15)*
 - Unified Entity Model
 - API 계약
 - 인증 및 권한 모델
