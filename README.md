@@ -150,16 +150,17 @@ React와 TypeScript를 기반으로 구축합니다.
 ### 4.3 Cluster State Adapter
 
 Kubernetes API를 매 요청마다 직접 조회하지 않고 Shared Informer Cache를 사용합니다.
+**요청당 API 서버 호출은 0회입니다.** 구현과 근거는 [`apps/api/README.md`](./apps/api/README.md)와
+[ADR 0004](./docs/adr/0004-backend-language-go.md)에 있습니다. *(구현됨)*
 
-초기 대상 리소스:
+| 리소스 | informer | 이유 |
+|---|---|---|
+| Pod · Node · Deployment · StatefulSet · DaemonSet · CronJob | typed (protobuf 협상) | spec/status가 화면에 필요합니다 |
+| ReplicaSet | **metadata-only** (`PartialObjectMetadata`) | 소유 관계와 revision 애노테이션만 씁니다 |
+| Kubernetes Event | typed + `type=Warning` 필드 셀렉터 | 수가 가장 많은 리소스라 범위를 좁혀 watch합니다 |
 
-- Pod
-- Deployment
-- StatefulSet
-- DaemonSet
-- ReplicaSet
-- Node
-- Kubernetes Event
+인덱스 세 개(`podByOwner` · `replicaSetByOwner` · `eventByInvolved`)로 Deployment → Pod 조회가
+전체 순회 대신 인덱스 두 번으로 끝납니다.
 
 주요 정규화 대상:
 
@@ -472,20 +473,21 @@ Custom Range의 최대 폭은 30일입니다.
 ### Phase 1 — Architecture & Foundation
 
 - MVP 범위와 ADR 확정
-- Monorepo Bootstrap *(Node workspace 구성 완료 · Go workspace 예정)*
+- Monorepo Bootstrap *(Node workspace · Go 모듈 구성 완료)*
 - Design System 기반 정립 (토큰, 핵심 컴포넌트, Claude Design 동기화) *(완료)*
 - React 앱 셸과 데이터 접근 계층 *(완료 — mock API 기준)*
 - Unified Entity Model
-- Go API/BFF 기본 구조
+- Go API/BFF 기본 구조 *(완료 — 화면 단위 엔드포인트 · Scope 강제 · Section 봉투)*
 
 ### Phase 2 — Data Access
 
-- GreptimeDB Adapter
-- Quickwit Adapter
-- Kubernetes Informer Adapter
+- 데이터소스 어댑터 경계 정의 *(완료 — 인터페이스 + 결정적 데모 구현)*
+- Kubernetes Informer Adapter *(완료)*
+- GreptimeDB Adapter *(실제 클라이언트 연결 대기)*
+- Quickwit Adapter *(실제 클라이언트 연결 대기)*
 - Query Catalog
-- OIDC/RBAC
-- Redis Cache 및 Query Guardrail
+- OIDC/RBAC *(`scope.Resolver` 인터페이스까지 준비됨)*
+- Redis Cache 및 Query Guardrail *(프로세스 내 TTL + singleflight까지 구현됨)*
 
 ### Phase 3 — Core UI
 
@@ -534,19 +536,24 @@ make install
 # Web 실행 — MSW mock API 위에서 단독으로 동작합니다 (http://localhost:5173)
 make dev
 
+# API 실행 — kubeconfig 또는 in-cluster 설정을 자동으로 찾습니다 (http://localhost:8080)
+make dev-api
+
 # 디자인 시스템 미리보기 빌드 (Claude Design 업로드 대상)
 make design
 
 # 검증
 make check          # 타입체크 + preview 빌드 검증
 make build          # 전체 빌드
+make test           # Web E2E(Playwright) + Go 테스트
 ```
 
-`make dev`는 지금 바로 동작합니다. Go API(`apps/api`)와 개발용 인프라 구성은
-Bootstrap 이슈에서 이어서 추가합니다.
+Web과 API는 각각 단독으로 돌아갑니다. Web은 MSW mock 위에서, API는 `USE_DEMO_DATA=true`로
+GreptimeDB/Quickwit/Alertmanager 없이 뜹니다. CI는 로컬과 **같은 명령**을 씁니다.
 
 화면 상태(부분 장애 · 권한 없음 · 빈 결과)는 URL 쿼리로 재현할 수 있습니다.
-자세한 내용은 [`apps/web/README.md`](./apps/web/README.md)를 참고하세요.
+자세한 내용은 [`apps/web/README.md`](./apps/web/README.md)와 [`apps/api/README.md`](./apps/api/README.md)를
+참고하세요.
 
 ---
 

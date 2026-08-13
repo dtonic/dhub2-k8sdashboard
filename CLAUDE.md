@@ -12,11 +12,12 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 (장애 발견 → Namespace/Workload 확인 → Pod/Container 확인 → Metric/Log/Event/Alert 상관분석)에
 특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
 
-현재 단계: **Architecture / Initial Planning** — 구현보다 결정을 먼저 확정하는 중입니다.
-다만 `design-system/`과 `apps/web`의 **MVP UI 화면 전체**(Cluster Overview,
-Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts — 모두 mock API 기준)는
-선행 구현되어 있습니다. 남은 것은 실제 API 연결입니다.
-전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`, 프런트엔드 규칙은 `apps/web/README.md`에 있습니다.
+현재 단계: `design-system/`, `apps/web`의 **MVP UI 화면 전체**(Cluster Overview,
+Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts)와
+`apps/api`의 **Go Observability API/BFF**가 구현되어 있습니다.
+남은 것은 GreptimeDB·Quickwit·Alertmanager 실제 클라이언트와 OIDC/RBAC 연결입니다.
+전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`,
+프런트엔드 규칙은 `apps/web/README.md`, 백엔드 규칙은 `apps/api/README.md`에 있습니다.
 
 작업 단위는 GitHub Issues를 따릅니다. 화면·기능 작업을 시작하기 전에 해당 이슈의
 **작업 범위와 완료 기준**을 먼저 읽고, 완료 기준을 만족했는지 실제로 확인한 뒤 끝냅니다.
@@ -59,7 +60,20 @@ Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts — 모�
 - 큰 목록은 가상 스크롤을 씁니다. 전체를 한 번에 DOM에 그리지 않습니다.
 - **알림 화면은 조회 전용입니다.** Rule 편집·Silence·Routing 변경 UI를 만들지 않습니다.
 - mock에서 Pod 이름·UID를 새로 지어내지 않습니다. `mocks/drilldown.ts`의 `primaryPod()`를 씁니다.
-  각 mock이 따로 신원을 만들면 화면 간 deep link가 404가 됩니다.
+  백엔드도 같습니다 — 데이터소스 어댑터는 `clusterstate.Store.CatalogPods()`에서 신원을 빌려옵니다.
+  각자 신원을 만들면 화면 간 deep link가 404가 됩니다.
+
+### 백엔드 (ADR 0004, `apps/api/README.md`)
+
+- **요청 처리 경로에서 Kubernetes API를 호출하지 않습니다.** 항상 informer 캐시(lister)에서 읽습니다.
+  요청당 API 서버 호출은 0회여야 하며, `TestQueriesNeverCallTheAPIServer`가 이를 셉니다.
+- **폴링을 만들지 않습니다.** 자동 갱신은 브라우저 → 백엔드까지이고, 백엔드 → API 서버는 watch 하나입니다.
+- resync를 짧게 두지 않습니다(기본 10분). 쓰지 않는 리소스에 informer를 붙이지 않습니다.
+- 관계만 필요한 리소스(ReplicaSet)는 **metadata-only informer**를 씁니다.
+- 내장 타입은 **protobuf로 협상**합니다. 이 설정을 끄는 변경은 ADR 0004의 1순위 기준을 되돌립니다.
+- Event는 전부 watch하지 않습니다. 기본 필드 셀렉터는 `type=Warning`입니다.
+- 섹션 degraded 사유에 내부 주소·질의·스택트레이스를 담지 않습니다.
+- Scope는 `scope.Resolver` 뒤에서만 정합니다. 핸들러가 요청 파라미터로 권한을 판단하지 않습니다.
 
 ### 엔티티 식별 (README §5)
 
@@ -96,5 +110,6 @@ UI 작업 시 **`design-system/README.md`를 먼저 읽습니다.**
 
 ## 작성 언어
 
-문서와 주석은 한국어, 코드 식별자는 영어로 씁니다. 커밋 메시지는 Conventional Commits
+문서와 주석은 한국어, 코드 식별자는 영어로 씁니다. Go 코드도 같습니다 — 주석은 한국어로 쓰되
+`godoc` 관례대로 선언 이름으로 시작합니다. 커밋 메시지는 Conventional Commits
 (`feat:`, `fix:`, `docs:`, `chore:`) 형식의 영어 제목을 사용합니다.
