@@ -1,0 +1,49 @@
+# Deterministic render/protocol-test evidence only. Never use this file for a cluster cutover.
+api:
+  config:
+    USE_DEMO_DATA: "false"
+    GREPTIME_URL: http://greptime-query.invalid:4000
+    QUICKWIT_URL: http://quickwit-search.invalid:7280
+telemetry:
+  mode: cutover
+  collectorBuildVerified: true
+  image:
+    repository: registry.local/observability-dashboard-otelcol
+    tag: 0.158.0-dashboard.1
+    # Render-only placeholder. Production must use the pushed OCI manifest digest,
+    # never the local binary reproducibility hash.
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  clusterName: fixture-cluster
+  existingLogCollectionDisabled: true
+  existingMetricCollectionDisabled: true
+  existingSecret: {name: fixture-secret-never-created}
+  agent:
+    kubeletCidrs: [192.0.2.32/32]
+  clusterCollector:
+    kubeStateMetrics:
+      endpoint: kube-state-metrics.monitoring.svc:8080
+      namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: kube-state-metrics}}
+  backends:
+    greptime: {endpoint: http://greptime.invalid:4000/v1/otlp, database: public, insecure: true}
+    quickwit: {endpoint: quickwit-otlp.invalid:7281, index: otel-logs-v0_7, insecure: true}
+    egress:
+      - {cidr: 192.0.2.22/32, port: 4000, purpose: greptime}
+      - {cidr: 192.0.2.23/32, port: 7281, purpose: quickwit}
+  comparison:
+    recorded: true
+    kind: local-deterministic-validation
+    evidenceId: local-fixture/0000000000000000000000000000000000000000000000000000000000000000
+    artifactHash: "0000000000000000000000000000000000000000000000000000000000000000"
+    startedAt: "2026-08-15T00:00:00Z"
+    endedAt: "2026-08-15T00:30:00Z"
+    windowMinutes: 30
+    baselineEvents: 1000
+    candidateEvents: 1000
+    lossPermille: 0
+    p95LatencyMs: 10
+    collectorCpuMillicores: 100
+    collectorMemoryMiB: 128
+    egressBytesPerHour: 1024
+    storageBytesPerDay: 2048
+    estimatedCostMicrosPerDay: 0

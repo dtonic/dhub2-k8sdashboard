@@ -74,3 +74,78 @@ networkPolicy:
   kubernetesApiCidrs: ["10.96.0.1/32"]
   external: []
   internal: []
+
+# OpenTelemetry 수집 전환은 명시적 opt-in입니다. validate는 backend write 없이
+# Agent→Gateway 경로만 검증하고, cutover는 아래 승인/측정 gate를 모두 요구합니다.
+telemetry:
+  mode: disabled # disabled | validate | cutover
+  clusterName: ""
+  image:
+    repository: registry.invalid/observability-dashboard-otelcol
+    tag: "0.158.0-dashboard.1"
+    digest: ""
+  collectorBuildVerified: false
+  existingLogCollectionDisabled: false
+  existingMetricCollectionDisabled: false
+  existingSecret:
+    name: ""
+    keys:
+      greptimeAuthorization: GREPTIME_OTLP_AUTHORIZATION
+      quickwitAuthorization: QUICKWIT_OTLP_AUTHORIZATION
+  memoryLimiter:
+    limitMiB: 400
+    spikeLimitMiB: 100
+  agent:
+    kubeletCidrs: []
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+  gateway:
+    replicas: 2
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+    pdb: {minAvailable: 1}
+  clusterCollector:
+    kubeStateMetrics:
+      endpoint: kube-state-metrics.monitoring.svc:8080
+      namespaceSelector: {}
+      podSelector: {}
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 512Mi}
+  backends:
+    greptime:
+      endpoint: ""
+      database: public
+      insecure: false
+    quickwit:
+      endpoint: ""
+      index: otel-logs-v0_7
+      insecure: false
+    egress: []
+  comparison:
+    recorded: false
+    kind: ""
+    evidenceId: ""
+    artifactHash: ""
+    startedAt: ""
+    endedAt: ""
+    windowMinutes: 0
+    baselineEvents: 0
+    candidateEvents: 0
+    lossPermille: -1
+    p95LatencyMs: -1
+    collectorCpuMillicores: -1
+    collectorMemoryMiB: -1
+    egressBytesPerHour: -1
+    storageBytesPerDay: -1
+    estimatedCostMicrosPerDay: -1
+    limits:
+      maxLossPermille: 10
+      maxP95LatencyMs: 5000
+      maxCollectorCpuMillicores: 500
+      maxCollectorMemoryMiB: 512
+      maxEgressBytesPerHour: 10000000000
+      maxStorageBytesPerDay: 1000000000000
+      maxEstimatedCostMicrosPerDay: 100000000000

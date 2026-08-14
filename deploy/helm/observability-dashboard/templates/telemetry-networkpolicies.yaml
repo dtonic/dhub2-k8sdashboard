@@ -1,0 +1,120 @@
+{{- if ne .Values.telemetry.mode "disabled" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-agent
+  policyTypes: [Ingress, Egress]
+  {{- if .Values.networkPolicy.monitoring.enabled }}
+  ingress:
+    - from:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports: [{protocol: TCP, port: 8888}]
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: otel-gateway
+      ports: [{protocol: TCP, port: 4317}]
+    - to:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- range .Values.networkPolicy.kubernetesApiCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+    {{- range .Values.telemetry.agent.kubeletCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: TCP, port: 10250}]
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: otel-agent
+      ports: [{protocol: TCP, port: 4317}]
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: otel-cluster
+      ports: [{protocol: TCP, port: 4317}]
+    {{- if .Values.networkPolicy.monitoring.enabled }}
+    - from:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports: [{protocol: TCP, port: 8888}]
+    {{- end }}
+  egress:
+    - to:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- if eq .Values.telemetry.mode "cutover" }}
+    {{- range .Values.telemetry.backends.egress }}
+    - to: [{ipBlock: {cidr: {{ .cidr | quote }}}}]
+      ports: [{protocol: TCP, port: {{ .port }}}]
+    {{- end }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-cluster
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-cluster
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: otel-gateway
+      ports: [{protocol: TCP, port: 4317}]
+    - to:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- range .Values.networkPolicy.kubernetesApiCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+    {{- if and (not (empty .Values.telemetry.clusterCollector.kubeStateMetrics.namespaceSelector)) (not (empty .Values.telemetry.clusterCollector.kubeStateMetrics.podSelector)) }}
+    - to:
+        - namespaceSelector: {{ toYaml .Values.telemetry.clusterCollector.kubeStateMetrics.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.telemetry.clusterCollector.kubeStateMetrics.podSelector | nindent 12 }}
+      ports: [{protocol: TCP, port: {{ regexFind "[0-9]+$" .Values.telemetry.clusterCollector.kubeStateMetrics.endpoint }}}]
+    {{- end }}
+{{- end }}

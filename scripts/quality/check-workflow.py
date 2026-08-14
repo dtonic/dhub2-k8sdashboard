@@ -14,6 +14,11 @@ GO_WORK = ROOT / "go.work"
 API_GO_MOD = ROOT / "apps" / "api" / "go.mod"
 README = ROOT / "README.md"
 NPM_TOOLCHAIN_CHECK = ROOT / "scripts" / "quality" / "check-npm-toolchain.mjs"
+COLLECTOR_DOCKERFILE = ROOT / "deploy" / "telemetry" / "Dockerfile.collector"
+COLLECTOR_BUILDER = ROOT / "deploy" / "telemetry" / "collector-builder.yaml"
+MOCK_DOCKERFILE = ROOT / "deploy" / "telemetry" / "Dockerfile.mock"
+COLLECTOR_BUILD_CHECK = ROOT / "deploy" / "scripts" / "build-telemetry-collector.sh"
+TELEMETRY_IMAGE_CHECK = ROOT / "deploy" / "scripts" / "check-telemetry-images.sh"
 ACTION_PINS = {
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
     "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
@@ -31,6 +36,18 @@ NPM_FIXED_DEPS = "brace-expansion@5.0.9 ip-address@10.3.1"
 WEB_BUILDER_TAG = "observability-dashboard-web-builder:ci"
 GITLEAKS = "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 TRIVY = "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+TELEMETRY_SUPPLY_PINS = (
+    "golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df",
+    "gcr.io/distroless/static-debian13@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6",
+    "go.opentelemetry.io/collector/cmd/builder@v0.158.0",
+    "alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+    "https://dl-cdn.alpinelinux.org/alpine/v3.24/main",
+    "python3=3.14.7-r0",
+    TRIVY,
+    "bff6e429b67b94bc95659387ac4240fa19c3ca3f49e7a8afcd2a1dbc35ccd442",
+    "42d03618eaf737b778612108b0352a506ea3625830189dd5a77f8f44c7dcf503",
+    "c544e7cf18f0f44c82917877dd664dda943f52a36a1dda1d948f94a5244f5030",
+)
 GOVULN = "golang.org/x/vuln/cmd/govulncheck@v1.1.4"
 REQUIRED_JOBS = {
     "Web (typecheck · build · e2e)",
@@ -40,7 +57,8 @@ REQUIRED_JOBS = {
 REQUIRED_JOB_IDS = {"web", "api", "deploy"}
 
 def validate(text, makefile, security_scan, package_source=None, docker_source=None, npm_tool_source=None,
-             go_work_source=None, go_mod_source=None, api_docker_source=None, readme_source=None):
+             go_work_source=None, go_mod_source=None, api_docker_source=None, readme_source=None,
+             telemetry_supply_source=None):
     errors = []
     if not re.search(r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$", text):
         errors.append("top-level contents: read permission is missing")
@@ -121,6 +139,20 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         errors.append("gitleaks image is not pinned to the approved digest")
     if "make security-scan" not in text or TRIVY not in security_scan:
         errors.append("Trivy image is not pinned to the approved digest")
+    if telemetry_supply_source is None:
+        telemetry_supply_source = "\n".join(path.read_text(encoding="utf-8") for path in (
+            COLLECTOR_DOCKERFILE, COLLECTOR_BUILDER, MOCK_DOCKERFILE, COLLECTOR_BUILD_CHECK, TELEMETRY_IMAGE_CHECK,
+        ))
+    for pin in TELEMETRY_SUPPLY_PINS:
+        if telemetry_supply_source.count(pin) == 0:
+            errors.append(f"telemetry supply-chain pin drifted: {pin}")
+    component_versions = re.findall(r"(?m)^\s*- gomod: \S+ (v\S+)$", telemetry_supply_source)
+    if len(component_versions) != 15 or set(component_versions) != {"v0.158.0"}:
+        errors.append("telemetry OCB component versions drifted")
+    if telemetry_supply_source.count("builder --skip-compilation --config /src/collector-builder.yaml") != 1:
+        errors.append("telemetry OCB generation must skip its implicit compilation")
+    if "skip_compilation:" in telemetry_supply_source:
+        errors.append("unsupported telemetry OCB manifest skip_compilation key is present")
     return errors
 
 parser = argparse.ArgumentParser()
@@ -196,6 +228,26 @@ if args.self_test:
         if not validate(source, makefile_source, security_source, npm_tool_source=mutated_tool):
             raise SystemExit(f"{label} mutation was masked")
         print(f"negative mutation passed: {label} was rejected")
+    telemetry_supply = "\n".join(path.read_text(encoding="utf-8") for path in (
+        COLLECTOR_DOCKERFILE, COLLECTOR_BUILDER, MOCK_DOCKERFILE, COLLECTOR_BUILD_CHECK, TELEMETRY_IMAGE_CHECK,
+    ))
+    for index, pin in enumerate(TELEMETRY_SUPPLY_PINS):
+        mutated = telemetry_supply.replace(pin, f"telemetry-drift-{index}")
+        if not validate(source, makefile_source, security_source, telemetry_supply_source=mutated):
+            raise SystemExit(f"telemetry supply pin mutation was masked: {pin}")
+        print(f"negative mutation passed: telemetry supply pin {index + 1} was rejected")
+    module_drift = telemetry_supply.replace(" v0.158.0", " v0.157.0", 1)
+    if not validate(source, makefile_source, security_source, telemetry_supply_source=module_drift):
+        raise SystemExit("telemetry OCB module version mutation was masked")
+    print("negative mutation passed: telemetry OCB module version drift was rejected")
+    compile_drift = telemetry_supply.replace("builder --skip-compilation --config", "builder --config", 1)
+    if not validate(source, makefile_source, security_source, telemetry_supply_source=compile_drift):
+        raise SystemExit("telemetry OCB skip-compilation mutation was masked")
+    print("negative mutation passed: telemetry OCB skip-compilation drift was rejected")
+    manifest_drift = telemetry_supply + "\ndist:\n  skip_compilation: true\n"
+    if not validate(source, makefile_source, security_source, telemetry_supply_source=manifest_drift):
+        raise SystemExit("unsupported telemetry OCB manifest key mutation was masked")
+    print("negative mutation passed: unsupported telemetry OCB manifest key was rejected")
     raise SystemExit(0)
 errors = validate(source, makefile_source, security_source)
 if errors:

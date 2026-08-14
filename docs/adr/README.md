@@ -13,6 +13,7 @@
 | [0005](./0005-mvp-hybrid-architecture.md) | MVP는 기존 관측 스택과 전용 BFF/UI를 결합한 하이브리드 아키텍처로 구성한다 | Accepted | 2026-08-14 |
 | [0006](./0006-quickwit-scroll-cursor.md) | Quickwit 로그 페이징에 TTL scroll capability를 사용한다 | Accepted | 2026-08-14 |
 | [0007](./0007-sse-replay-reset-backpressure.md) | SSE 상태 변경 스트림은 프로세스 로컬 재생 링 · reset 폴백 · 연결 절단 backpressure로 유계를 유지한다 | Accepted | 2026-08-14 |
+| [0008](./0008-opentelemetry-agent-gateway-pipeline.md) | OpenTelemetry Agent/Gateway 수집 소유권과 fail-closed cutover를 표준화한다 | Proposed | 2026-08-15 |
 
 ## 상태 값
 

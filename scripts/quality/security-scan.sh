@@ -5,7 +5,12 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 TMP_ROOT=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 TMP=$(mktemp -d "$TMP_ROOT/dashboard-security.XXXXXX")
 cleanup() {
-  rm -rf "$TMP"
+  resolved=$(realpath "$TMP" 2>/dev/null || true)
+  base=$(realpath "$TMP_ROOT")
+  case "$resolved" in
+    "$base"/dashboard-security.*) [ ! -d "$resolved" ] || rm -rf -- "$resolved" ;;
+    *) echo "refusing to clean unexpected security temp path: $resolved" >&2 ;;
+  esac
   docker image rm observability-dashboard-web-builder:ci >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
@@ -108,3 +113,5 @@ docker save --output "$TMP/web-builder-image.tar" observability-dashboard-web-bu
 docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/web-builder-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress
 docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/web-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress
 docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/api-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress
+TELEMETRY_TRIVY_CACHE="$TRIVY_CACHE" TELEMETRY_TRIVY_CACHE_ROOT="$TMP" \
+  sh "$ROOT/deploy/scripts/check-telemetry-images.sh"

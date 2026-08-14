@@ -1,0 +1,20 @@
+FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS build
+ENV CGO_ENABLED=0 \
+    GOTOOLCHAIN=local \
+    GOPROXY=https://proxy.golang.org \
+    GOSUMDB=sum.golang.org
+WORKDIR /src
+RUN go install go.opentelemetry.io/collector/cmd/builder@v0.158.0
+COPY collector-builder.yaml /src/collector-builder.yaml
+RUN builder --skip-compilation --config /src/collector-builder.yaml
+RUN cd /src/build && go build -trimpath -ldflags='-s -w -buildid=' -o /out/dashboard-otelcol .
+
+FROM scratch AS evidence
+COPY --from=build /src/build/go.mod /go.mod
+COPY --from=build /src/build/go.sum /go.sum
+COPY --from=build /out/dashboard-otelcol /dashboard-otelcol
+
+FROM gcr.io/distroless/static-debian13@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6 AS runtime
+COPY --from=build /out/dashboard-otelcol /dashboard-otelcol
+USER 65532:65532
+ENTRYPOINT ["/dashboard-otelcol"]

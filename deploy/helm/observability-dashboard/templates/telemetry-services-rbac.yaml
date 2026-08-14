@@ -1,0 +1,97 @@
+{{- if ne .Values.telemetry.mode "disabled" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: otel-gateway
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: metrics, port: 8888, targetPort: metrics}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-cluster
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent-read
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent-read
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "dashboard.fullname" . }}-otel-agent-read}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "dashboard.fullname" . }}-otel-agent, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-cluster-read
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-cluster-read
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "dashboard.fullname" . }}-otel-cluster-read}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "dashboard.fullname" . }}-otel-cluster, namespace: {{ .Release.Namespace }}}
+{{- end }}

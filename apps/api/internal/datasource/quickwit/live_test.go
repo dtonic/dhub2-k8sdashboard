@@ -44,6 +44,64 @@ func liveSource(t *testing.T, index string) *Source {
 	return s
 }
 
+func TestLiveQuickwitOTLPSchemaCompatibility(t *testing.T) {
+	if os.Getenv("QUICKWIT_OTEL_SCHEMA") != "1" {
+		t.Skip("QUICKWIT_OTEL_SCHEMA=1 enables the dedicated OTLP schema fixture")
+	}
+	s, err := New(Config{BaseURL: liveBase(t), Index: "otel-logs-v0_7", Fields: FieldMap{
+		Timestamp: "timestamp_nanos", Level: "severity_text", Message: "body.message",
+		Namespace: "resource_attributes.k8s.namespace.name", PodName: "resource_attributes.k8s.pod.name",
+		PodUID: "resource_attributes.k8s.pod.uid", Container: "resource_attributes.k8s.container.name",
+		WorkloadKind: "resource_attributes.k8s.workload.kind", WorkloadName: "resource_attributes.k8s.workload.name",
+		Node: "resource_attributes.k8s.node.name", EventID: "attributes.event_id",
+	}}, fakeCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := datasource.LogQuery{Target: datasource.Target{ClusterID: "fixture", Namespace: "payments"},
+		Window: datasource.Window{From: time.Now().Add(-5 * time.Minute), To: time.Now().Add(time.Minute), Step: time.Minute}, PageSize: 1}
+	page, err := s.Search(context.Background(), q)
+	if err != nil || len(page.Lines) != 1 || page.Next == "" {
+		t.Fatalf("OTLP first page: lines=%d next=%q err=%v", len(page.Lines), page.Next, err)
+	}
+	first := page.Lines[0]
+	for _, sensitive := range []string{"hunter2", "abcdefghijklmnop", "4111 1111", "user@example.com", "10.20.30.40"} {
+		if strings.Contains(first.Message, sensitive) {
+			t.Fatalf("OTLP sensitive value escaped masking: %q", first.Message)
+		}
+	}
+	if first.ID != "event-2" || first.T == 0 || first.Message == "" || first.Namespace != "payments" || first.PodName != "checkout-2" ||
+		first.PodUID != "pod-2" || first.ContainerName != "api" || first.WorkloadKind != "Deployment" || first.WorkloadName != "checkout" ||
+		first.NodeName != "node-a" || first.TraceID != "0123456789abcdef0123456789abcdef" || first.SpanID != "0123456789abcdef" || first.Level != contract.LevelError {
+		t.Fatalf("OTLP field/scope/masking mismatch: %+v", first)
+	}
+	q.Cursor = page.Next
+	second, err := s.Search(context.Background(), q)
+	if err != nil || len(second.Lines) != 1 || second.Lines[0].ID == first.ID {
+		t.Fatalf("OTLP cursor duplicate: first=%+v second=%+v err=%v", first, second.Lines, err)
+	}
+	filtered := q
+	filtered.Cursor = ""
+	filtered.PageSize = 10
+	filtered.Target.PodUID = "pod-1"
+	filtered.Target.WorkloadKind = "Deployment"
+	filtered.Target.WorkloadName = "checkout"
+	filtered.Container = "api"
+	filtered.Levels = []contract.LogLevel{contract.LevelError}
+	filteredPage, err := s.Search(context.Background(), filtered)
+	if err != nil || len(filteredPage.Lines) != 1 || filteredPage.Lines[0].PodUID != "pod-1" {
+		t.Fatalf("OTLP pod/workload/container/level filter: %+v err=%v", filteredPage, err)
+	}
+	facets, err := s.Facets(context.Background(), datasource.LogQuery{Target: q.Target, Window: q.Window})
+	if err != nil || len(facets.Workloads) != 1 || facets.Workloads[0].Name != "checkout" || facets.Workloads[0].Count != 2 || len(facets.Pods) != 2 || len(facets.Containers) != 1 {
+		t.Fatalf("OTLP facets: %+v err=%v", facets, err)
+	}
+	hist, err := s.Histogram(context.Background(), datasource.LogQuery{Target: q.Target, Window: q.Window})
+	if err != nil || len(hist) == 0 {
+		t.Fatalf("OTLP histogram: %+v err=%v", hist, err)
+	}
+}
+
 // TestLiveQuickwitCursorAdvancesWithoutDuplicates — 운영 인덱스의 실데이터 위에서
 // 커서가 전진하고, 페이지 간 중복이 없고, 정렬이 내림차순인지 확인합니다.
 // 읽기 전용입니다. 데이터가 없으면 그 사실만 기록하고 통과합니다.

@@ -19,7 +19,10 @@ def check(text: str, environment: str) -> list[str]:
     require("kind: Secret" not in text and "kind: ExternalSecret" not in text, "chart must not create secrets", errors)
     require("privileged: true" not in text, "privileged containers are forbidden", errors)
     require("allowPrivilegeEscalation: false" in text and "allowPrivilegeEscalation: true" not in text, "privilege escalation must be disabled", errors)
-    expected_containers = 3 if "kind: StatefulSet" in text else 2
+    # Every current Pod template has one container. Counting rendered images keeps
+    # this policy correct when opt-in telemetry adds Agent/Gateway workloads.
+    expected_containers = len(re.findall(r'^\s*image:\s*"?[^"\s]+"?\s*$', text, re.M))
+    require(expected_containers >= 2, "rendered workload containers missing", errors)
     require(text.count('drop: ["ALL"]') >= expected_containers, "all containers must drop capabilities", errors)
     require("runAsNonRoot: true" in text and "readOnlyRootFilesystem: true" in text, "nonroot/read-only workload contexts required", errors)
     require('resources: ["pods", "nodes", "events"]' in text, "RBAC core allowlist drift", errors)

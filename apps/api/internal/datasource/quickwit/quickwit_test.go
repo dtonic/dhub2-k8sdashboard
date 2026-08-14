@@ -877,6 +877,83 @@ func TestMessagesAreMaskedBeforeLeavingTheServer(t *testing.T) {
 	}
 }
 
+func TestLineAtResolvesOTLPNestedFieldsWithExactKeyPrecedence(t *testing.T) {
+	s := &Source{cfg: Config{Fields: FieldMap{
+		Timestamp: "timestamp_nanos", Level: "severity_text", Message: "body.message",
+		Namespace: "resource_attributes.k8s.namespace.name", PodName: "resource_attributes.k8s.pod.name",
+		PodUID: "resource_attributes.k8s.pod.uid", Container: "resource_attributes.k8s.container.name",
+		WorkloadKind: "resource_attributes.k8s.workload.kind", WorkloadName: "resource_attributes.k8s.workload.name",
+		Node: "resource_attributes.k8s.node.name", EventID: "attributes.event_id",
+	}}.withDefaults()}
+	hit := esHit{Source: map[string]any{
+		"timestamp_nanos": float64(1_720_000_000_000_000_000), "severity_text": "WARN",
+		"body": map[string]any{"message": "nested body"},
+		"resource_attributes": map[string]any{
+			"k8s.namespace.name": "payments", "k8s.pod.name": "api-0", "k8s.pod.uid": "pod-1",
+			"k8s.container.name": "api", "k8s.workload.kind": "StatefulSet",
+			"k8s.workload.name": "api", "k8s.node.name": "node-a",
+		},
+		"attributes":   map[string]any{"event_id": "event-1"},
+		"body.message": "legacy exact key",
+	}}
+	line, ok := s.lineAt(hit, "unused", 0)
+	if !ok || line.Message != "legacy exact key" || line.Namespace != "payments" || line.PodUID != "pod-1" || line.ID != "event-1" {
+		t.Fatalf("OTLP nested field mapping failed: ok=%v line=%+v", ok, line)
+	}
+}
+
+func BenchmarkFieldResolution(b *testing.B) {
+	legacy := map[string]any{"namespace": "payments"}
+	nested := map[string]any{"resource_attributes": map[string]any{"k8s.namespace.name": "payments"}}
+	worst := map[string]any{}
+	current := worst
+	segments := make([]string, maxFieldPathSegments)
+	for i := range segments {
+		segments[i] = fmt.Sprintf("s%d", i)
+		if i == len(segments)-1 {
+			current[segments[i]] = "value"
+			continue
+		}
+		next := map[string]any{}
+		current[segments[i]] = next
+		current = next
+	}
+	b.Run("legacy-exact", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if field(legacy, "namespace") == nil {
+				b.Fatal("missing")
+			}
+		}
+	})
+	b.Run("otel-nested", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if field(nested, "resource_attributes.k8s.namespace.name") == nil {
+				b.Fatal("missing")
+			}
+		}
+	})
+	b.Run("otel-worst-bounded", func(b *testing.B) {
+		path := strings.Join(segments, ".")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if field(worst, path) == nil {
+				b.Fatal("missing")
+			}
+		}
+	})
+}
+
+func TestFieldPathBoundsAndLongInputDoNotRecurse(t *testing.T) {
+	long := strings.Repeat("segment.", maxFieldPathSegments+1) + "leaf"
+	if field(map[string]any{}, long) != nil {
+		t.Fatal("unexpected long path match")
+	}
+	_, err := New(Config{BaseURL: "http://quickwit.invalid", Fields: FieldMap{Message: long}}, fakeCatalog{})
+	if err == nil {
+		t.Fatal("unbounded field path was accepted")
+	}
+}
+
 // TestPageSizeIsCapped — 브라우저가 아무리 큰 PageSize를 보내도 상한을 넘는
 // 요청이 upstream으로 나가지 않습니다. (README §11)
 func TestPageSizeIsCapped(t *testing.T) {

@@ -70,3 +70,14 @@ probe 출발점 처리가 다르므로 배포 전 해당 CNI에서 `/healthz`와
 # 플랫폼 모니터링 자산
 
 `networkPolicy.monitoring.enabled=true`일 때만 API Service scrape annotation, Prometheus ingress NetworkPolicy, Grafana sidecar-discovery ConfigMap이 함께 생성됩니다. Grafana JSON의 단일 정본은 chart의 `files/dashboard.json`입니다. Alert rule은 CRD를 생성하지 않는 repo-owned 자산이며 운영 Prometheus rule loader가 `deploy/monitoring/alerts.yaml`을 별도로 소유·설치합니다.
+
+## OpenTelemetry 수집 전환
+
+`telemetry.mode` 기본값은 `disabled`이며 기존 dev/stage/prod render를 바꾸지 않습니다. `validate`는 backend write 없이 Agent/singleton cluster collector→Gateway 경로만 검증하고, `cutover`는 기존 signal별 collector 중지 승인과 실제 comparison evidence가 있어야 render됩니다.
+
+- 설계와 위협/실패 흐름: [`docs/telemetry/architecture.md`](../docs/telemetry/architecture.md)
+- 현재 source/query/schema inventory: [`docs/telemetry/current-path-inventory.md`](../docs/telemetry/current-path-inventory.md)
+- preflight·측정·cutover·rollback: [`docs/telemetry/cutover-runbook.md`](../docs/telemetry/cutover-runbook.md)
+- 결정 상태: [ADR 0008](../docs/adr/0008-opentelemetry-agent-gateway-pipeline.md) — Proposed
+
+stage/prod values에는 `check-telemetry-evidence.py --helm-values-out`이 생성한 comparison overlay만 사용합니다. Helm은 hash의 진위를 자체 검증하지 못하므로 수기 복사한 측정값은 운영 cutover evidence로 인정하지 않습니다.

@@ -1,0 +1,255 @@
+{{- if ne .Values.telemetry.mode "disabled" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      filelog:
+        include: [/var/log/pods/*/*/*.log]
+        exclude: [/var/log/pods/{{ .Release.Namespace }}_*_*/collector/*.log]
+        start_at: end
+        include_file_path: true
+        operators:
+          - id: path-metadata
+            type: regex_parser
+            parse_from: attributes["log.file.path"]
+            regex: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod_name>[^_]+)_(?P<pod_uid>[a-f0-9-]+)/(?P<container_name>[^/]+)/(?P<restart_count>\d+)\.log$'
+          - id: cri
+            type: container
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          memory: {}
+          network: {}
+      prometheus/cadvisor:
+        config:
+          scrape_configs:
+            - job_name: kubelet-cadvisor
+              scheme: https
+              metrics_path: /metrics/cadvisor
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              static_configs:
+                - targets: ["${env:K8S_NODE_IP}:10250"]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_transmit_bytes_total'
+                  action: keep
+    processors:
+      filter/catalog:
+        error_mode: propagate
+        metrics:
+          metric:
+            - 'not (name == "container_cpu_usage_seconds_total" or name == "container_memory_working_set_bytes" or name == "container_network_receive_bytes_total" or name == "container_network_transmit_bytes_total")'
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.telemetry.memoryLimiter.limitMiB }}
+        spike_limit_mib: {{ .Values.telemetry.memoryLimiter.spikeLimitMiB }}
+      transform/file_metadata:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - set(resource.attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["namespace"] != nil
+              - set(resource.attributes["k8s.pod.name"], attributes["pod_name"]) where attributes["pod_name"] != nil
+              - set(resource.attributes["k8s.pod.uid"], attributes["pod_uid"]) where attributes["pod_uid"] != nil
+              - set(resource.attributes["k8s.container.name"], attributes["container_name"]) where attributes["container_name"] != nil
+      resource/cluster:
+        attributes:
+          - {key: k8s.cluster.name, value: {{ .Values.telemetry.clusterName | quote }}, action: upsert}
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.container.name
+            - k8s.node.name
+            - k8s.node.uid
+            - k8s.cluster.uid
+            - k8s.deployment.name
+            - k8s.deployment.uid
+            - k8s.daemonset.name
+            - k8s.daemonset.uid
+            - k8s.statefulset.name
+            - k8s.statefulset.uid
+            - k8s.job.name
+            - k8s.job.uid
+            - k8s.cronjob.name
+            - k8s.cronjob.uid
+        pod_association:
+          - sources: [{from: resource_attribute, name: k8s.pod.uid}]
+          - sources: [{from: resource_attribute, name: k8s.pod.ip}]
+          - sources: [{from: connection}]
+      batch:
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+        timeout: 5s
+    exporters:
+      otlp_grpc/gateway:
+        endpoint: {{ printf "%s-otel-gateway:4317" (include "dashboard.fullname" .) }}
+        tls: {insecure: true}
+        timeout: 5s
+        sending_queue: {enabled: true, num_consumers: 2, queue_size: 2048}
+        retry_on_failure: {enabled: true, initial_interval: 1s, max_interval: 10s, max_elapsed_time: 60s}
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus: {host: 0.0.0.0, port: 8888}
+      pipelines:
+        logs:
+          receivers: [filelog]
+          processors: [memory_limiter, transform/file_metadata, resource/cluster, k8sattributes, batch]
+          exporters: [otlp_grpc/gateway]
+        metrics/node:
+          receivers: [hostmetrics]
+          processors: [memory_limiter, resource/cluster, k8sattributes, batch]
+          exporters: [otlp_grpc/gateway]
+        metrics/catalog:
+          receivers: [prometheus/cadvisor]
+          processors: [memory_limiter, filter/catalog, resource/cluster, k8sattributes, batch]
+          exporters: [otlp_grpc/gateway]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-gateway
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: 0.0.0.0:4317}
+          http: {endpoint: 0.0.0.0:4318}
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.telemetry.memoryLimiter.limitMiB }}
+        spike_limit_mib: {{ .Values.telemetry.memoryLimiter.spikeLimitMiB }}
+      transform/schema:
+        error_mode: ignore
+        metric_statements:
+          - context: resource
+            statements:
+              - set(attributes["k8s.cluster.name"], {{ .Values.telemetry.clusterName | quote }})
+              - set(attributes["k8s.workload.kind"], "Deployment") where attributes["k8s.deployment.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.deployment.name"]) where attributes["k8s.deployment.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.deployment.uid"]) where attributes["k8s.deployment.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "StatefulSet") where attributes["k8s.statefulset.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.statefulset.name"]) where attributes["k8s.statefulset.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.statefulset.uid"]) where attributes["k8s.statefulset.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "DaemonSet") where attributes["k8s.daemonset.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.daemonset.name"]) where attributes["k8s.daemonset.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.daemonset.uid"]) where attributes["k8s.daemonset.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "Job") where attributes["k8s.job.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.job.name"]) where attributes["k8s.job.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.job.uid"]) where attributes["k8s.job.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "CronJob") where attributes["k8s.cronjob.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.cronjob.name"]) where attributes["k8s.cronjob.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.cronjob.uid"]) where attributes["k8s.cronjob.uid"] != nil
+              - set(attributes["service.name"], attributes["k8s.container.name"]) where attributes["service.name"] == nil and attributes["k8s.container.name"] != nil
+              - keep_keys(attributes, ["k8s.cluster.name", "k8s.cluster.uid", "k8s.namespace.name", "k8s.workload.kind", "k8s.workload.name", "k8s.workload.uid", "k8s.pod.name", "k8s.pod.uid", "k8s.container.name", "k8s.node.name", "k8s.node.uid", "service.name", "service.namespace", "service.instance.id", "service.version"])
+          - context: datapoint
+            statements:
+              - keep_keys(attributes, ["container", "cpu", "device", "direction", "interface", "namespace", "pod", "resource", "state", "type", "unit"])
+        log_statements:
+          - context: resource
+            statements:
+              - set(attributes["k8s.cluster.name"], {{ .Values.telemetry.clusterName | quote }})
+              - set(attributes["k8s.workload.kind"], "Deployment") where attributes["k8s.deployment.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.deployment.name"]) where attributes["k8s.deployment.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.deployment.uid"]) where attributes["k8s.deployment.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "StatefulSet") where attributes["k8s.statefulset.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.statefulset.name"]) where attributes["k8s.statefulset.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.statefulset.uid"]) where attributes["k8s.statefulset.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "DaemonSet") where attributes["k8s.daemonset.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.daemonset.name"]) where attributes["k8s.daemonset.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.daemonset.uid"]) where attributes["k8s.daemonset.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "Job") where attributes["k8s.job.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.job.name"]) where attributes["k8s.job.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.job.uid"]) where attributes["k8s.job.uid"] != nil
+              - set(attributes["k8s.workload.kind"], "CronJob") where attributes["k8s.cronjob.name"] != nil
+              - set(attributes["k8s.workload.name"], attributes["k8s.cronjob.name"]) where attributes["k8s.cronjob.name"] != nil
+              - set(attributes["k8s.workload.uid"], attributes["k8s.cronjob.uid"]) where attributes["k8s.cronjob.uid"] != nil
+              - set(attributes["service.name"], attributes["k8s.container.name"]) where attributes["service.name"] == nil and attributes["k8s.container.name"] != nil
+              - keep_keys(attributes, ["k8s.cluster.name", "k8s.cluster.uid", "k8s.namespace.name", "k8s.workload.kind", "k8s.workload.name", "k8s.workload.uid", "k8s.pod.name", "k8s.pod.uid", "k8s.container.name", "k8s.node.name", "k8s.node.uid", "service.name", "service.namespace", "service.instance.id", "service.version"])
+          - context: log
+            statements:
+              - 'replace_pattern(body, "(?i)(authorization|password|passwd|token|api[_-]?key)[=: ]+[^ ,;]+", "[REDACTED_SECRET]") where IsString(body)'
+              - 'replace_pattern(body, "(?i)bearer\\s+[A-Za-z0-9._-]{12,}|eyJ[A-Za-z0-9._-]{16,}", "[REDACTED_TOKEN]") where IsString(body)'
+              - 'replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[REDACTED_EMAIL]") where IsString(body)'
+              - 'replace_pattern(body, "(?:\\d[ -]?){13,19}", "[REDACTED_CARD]") where IsString(body)'
+              - 'replace_pattern(body, "(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?:(?::[0-9A-Fa-f]{1,4}){1,6})|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)", "[REDACTED_IP]") where IsString(body)'
+              - 'replace_pattern(body, "(?:\\d{1,3}\\.){3}\\d{1,3}", "[REDACTED_IP]") where IsString(body)'
+              - set(cache["message"], body) where IsString(body)
+              - set(body, cache) where IsString(body)
+              - keep_keys(attributes, ["event_id"])
+      batch:
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+        timeout: 5s
+    exporters:
+      nop: {}
+      {{- if eq .Values.telemetry.mode "cutover" }}
+      otlp_http/greptime:
+        endpoint: {{ .Values.telemetry.backends.greptime.endpoint | quote }}
+        headers:
+          X-Greptime-DB-Name: {{ .Values.telemetry.backends.greptime.database | quote }}
+          x-greptime-otlp-metric-translation-strategy: NoTranslation
+          Authorization: ${env:GREPTIME_OTLP_AUTHORIZATION}
+        tls: {insecure: {{ .Values.telemetry.backends.greptime.insecure }}}
+        timeout: 10s
+        sending_queue: {enabled: true, num_consumers: 4, queue_size: 4096}
+        retry_on_failure: {enabled: true, initial_interval: 1s, max_interval: 15s, max_elapsed_time: 120s}
+      otlp_grpc/quickwit:
+        endpoint: {{ .Values.telemetry.backends.quickwit.endpoint | quote }}
+        headers:
+          qw-otel-logs-index: {{ .Values.telemetry.backends.quickwit.index | quote }}
+          Authorization: ${env:QUICKWIT_OTLP_AUTHORIZATION}
+        tls: {insecure: {{ .Values.telemetry.backends.quickwit.insecure }}}
+        compression: gzip
+        timeout: 10s
+        sending_queue: {enabled: true, num_consumers: 4, queue_size: 4096}
+        retry_on_failure: {enabled: true, initial_interval: 1s, max_interval: 15s, max_elapsed_time: 120s}
+      {{- end }}
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus: {host: 0.0.0.0, port: 8888}
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/schema, batch]
+          exporters: [{{ ternary "otlp_http/greptime" "nop" (eq .Values.telemetry.mode "cutover") }}]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/schema, batch]
+          exporters: [{{ ternary "otlp_grpc/quickwit" "nop" (eq .Values.telemetry.mode "cutover") }}]
+{{- end }}

@@ -76,6 +76,23 @@ func (f FieldMap) withDefaults() FieldMap {
 	return f
 }
 
+const (
+	maxFieldPathBytes    = 256
+	maxFieldPathSegments = 16
+)
+
+func (f FieldMap) validate() error {
+	paths := []string{f.Timestamp, f.Level, f.Message, f.Namespace, f.PodName, f.PodUID, f.Container,
+		f.WorkloadKind, f.WorkloadName, f.Node, f.TraceID, f.SpanID, f.EventID}
+	for _, path := range paths {
+		if len(path) > maxFieldPathBytes || strings.Count(path, ".") >= maxFieldPathSegments ||
+			strings.HasPrefix(path, ".") || strings.HasSuffix(path, ".") || strings.Contains(path, "..") {
+			return fmt.Errorf("Quickwit field path exceeds the bounded format")
+		}
+	}
+	return nil
+}
+
 // Config는 어댑터 구성입니다.
 type Config struct {
 	// BaseURL은 Quickwit 주소입니다. 예: http://quickwit:7280
@@ -127,6 +144,9 @@ type Source struct {
 // New는 어댑터를 만듭니다. catalog는 facet의 Pod 신원(UID) 변환에 필요합니다.
 func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
 	cfg = cfg.withDefaults()
+	if err := cfg.Fields.validate(); err != nil {
+		return nil, err
+	}
 	client, err := upstream.New(upstream.Config{
 		BaseURL:  cfg.BaseURL,
 		What:     "Quickwit",
@@ -348,14 +368,14 @@ func (s *Source) lineAt(hit esHit, idPrefix string, ordinal int) (contract.LogLi
 	}
 	f := s.cfg.Fields
 
-	ts, ok := parseTimestamp(src[f.Timestamp])
+	ts, ok := parseTimestamp(field(src, f.Timestamp))
 	if !ok {
 		return contract.LogLine{}, false
 	}
-	raw := str(src[f.Message])
+	raw := str(field(src, f.Message))
 	masked, spans := mask.Apply(raw)
 
-	id := str(src[f.EventID])
+	id := str(field(src, f.EventID))
 	if id == "" {
 		id = traversalID(idPrefix, ordinal)
 	}
@@ -363,19 +383,40 @@ func (s *Source) lineAt(hit esHit, idPrefix string, ordinal int) (contract.LogLi
 	return contract.LogLine{
 		ID:            id,
 		T:             ts,
-		Level:         normalizeLevel(str(src[f.Level])),
+		Level:         normalizeLevel(str(field(src, f.Level))),
 		Message:       masked,
 		Masked:        spans,
-		Namespace:     str(src[f.Namespace]),
-		PodName:       str(src[f.PodName]),
-		PodUID:        str(src[f.PodUID]),
-		ContainerName: str(src[f.Container]),
-		WorkloadKind:  str(src[f.WorkloadKind]),
-		WorkloadName:  str(src[f.WorkloadName]),
-		NodeName:      str(src[f.Node]),
-		TraceID:       str(src[f.TraceID]),
-		SpanID:        str(src[f.SpanID]),
+		Namespace:     str(field(src, f.Namespace)),
+		PodName:       str(field(src, f.PodName)),
+		PodUID:        str(field(src, f.PodUID)),
+		ContainerName: str(field(src, f.Container)),
+		WorkloadKind:  str(field(src, f.WorkloadKind)),
+		WorkloadName:  str(field(src, f.WorkloadName)),
+		NodeName:      str(field(src, f.Node)),
+		TraceID:       str(field(src, f.TraceID)),
+		SpanID:        str(field(src, f.SpanID)),
 	}, true
+}
+
+// field resolves Quickwit's nested OTLP JSON while preserving legacy flat keys.
+// Exact keys win at every level because semantic-convention keys contain dots.
+func field(src map[string]any, path string) any {
+	current := src
+	remaining := path
+	for {
+		if value, ok := current[remaining]; ok {
+			return value
+		}
+		key, rest, ok := strings.Cut(remaining, ".")
+		if !ok {
+			return nil
+		}
+		nested, ok := current[key].(map[string]any)
+		if !ok {
+			return nil
+		}
+		current, remaining = nested, rest
+	}
 }
 
 func traversalIDPrefix(key []byte, nonce string) string {

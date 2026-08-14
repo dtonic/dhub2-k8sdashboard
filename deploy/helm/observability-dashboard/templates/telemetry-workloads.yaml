@@ -1,0 +1,212 @@
+{{- if ne .Values.telemetry.mode "disabled" }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-agent
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+spec:
+  minReadySeconds: 10
+  updateStrategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 1}}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-agent
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: otel-agent
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/telemetry-configmaps.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-otel-agent
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: collector
+          image: {{ printf "%s@%s" .Values.telemetry.image.repository .Values.telemetry.image.digest | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--config=/conf/config.yaml"]
+          env:
+            - name: K8S_NODE_IP
+              valueFrom: {fieldRef: {fieldPath: status.hostIP}}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          ports:
+            - {name: health, containerPort: 13133}
+            - {name: metrics, containerPort: 8888}
+          startupProbe: {httpGet: {path: /, port: health}, periodSeconds: 2, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /, port: health}, periodSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /, port: health}, periodSeconds: 10, failureThreshold: 3}
+          resources:
+            {{- toYaml .Values.telemetry.agent.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+            - {name: podlogs, mountPath: /var/log/pods, readOnly: true}
+            - {name: hostproc, mountPath: /hostfs/proc, readOnly: true}
+            - {name: hostsys, mountPath: /hostfs/sys, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "dashboard.fullname" . }}-otel-agent}
+        - name: podlogs
+          hostPath: {path: /var/log/pods, type: Directory}
+        - name: hostproc
+          hostPath: {path: /proc, type: Directory}
+        - name: hostsys
+          hostPath: {path: /sys, type: Directory}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-gateway
+spec:
+  replicas: {{ .Values.telemetry.gateway.replicas }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: otel-gateway
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/telemetry-configmaps.yaml") . | sha256sum }}
+        secret-revision: {{ .Values.secretRevision | quote }}
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-otel-gateway
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: otel-gateway
+      containers:
+        - name: collector
+          image: {{ printf "%s@%s" .Values.telemetry.image.repository .Values.telemetry.image.digest | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--config=/conf/config.yaml"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: health, containerPort: 13133}
+            - {name: metrics, containerPort: 8888}
+          {{- if eq .Values.telemetry.mode "cutover" }}
+          env:
+            - name: GREPTIME_OTLP_AUTHORIZATION
+              valueFrom: {secretKeyRef: {name: {{ .Values.telemetry.existingSecret.name }}, key: {{ .Values.telemetry.existingSecret.keys.greptimeAuthorization }}, optional: false}}
+            - name: QUICKWIT_OTLP_AUTHORIZATION
+              valueFrom: {secretKeyRef: {name: {{ .Values.telemetry.existingSecret.name }}, key: {{ .Values.telemetry.existingSecret.keys.quickwitAuthorization }}, optional: false}}
+          {{- end }}
+          startupProbe: {httpGet: {path: /, port: health}, periodSeconds: 2, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /, port: health}, periodSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /, port: health}, periodSeconds: 10, failureThreshold: 3}
+          resources:
+            {{- toYaml .Values.telemetry.gateway.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "dashboard.fullname" . }}-otel-gateway}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-cluster
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-cluster
+spec:
+  replicas: 1
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 0}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-cluster
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: otel-cluster
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/telemetry-cluster-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-otel-cluster
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: collector
+          image: {{ printf "%s@%s" .Values.telemetry.image.repository .Values.telemetry.image.digest | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--config=/conf/config.yaml"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          ports:
+            - {name: health, containerPort: 13133}
+            - {name: metrics, containerPort: 8888}
+          startupProbe: {httpGet: {path: /, port: health}, periodSeconds: 2, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /, port: health}, periodSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /, port: health}, periodSeconds: 10, failureThreshold: 3}
+          resources:
+            {{- toYaml .Values.telemetry.clusterCollector.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "dashboard.fullname" . }}-otel-cluster}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "dashboard.fullname" . }}-otel-gateway
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.telemetry.gateway.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: otel-gateway
+{{- end }}

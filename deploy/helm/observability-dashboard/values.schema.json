@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["environment", "ui", "api", "redis", "networkPolicy"],
+  "required": ["environment", "ui", "api", "redis", "networkPolicy", "telemetry"],
   "properties": {
     "environment": {"enum": ["dev", "stage", "prod"]},
     "imagePullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]},
@@ -52,6 +52,61 @@
           "properties": {"namespaceSelector": {"type": "object", "minProperties": 1}, "podSelector": {"type": "object", "minProperties": 1}}
         }
       }
+    },
+    "telemetry": {
+      "type": "object",
+      "required": ["mode", "clusterName", "image", "collectorBuildVerified", "existingLogCollectionDisabled", "existingMetricCollectionDisabled", "existingSecret", "memoryLimiter", "agent", "gateway", "clusterCollector", "backends", "comparison"],
+      "properties": {
+        "mode": {"enum": ["disabled", "validate", "cutover"]},
+        "clusterName": {"type": "string", "maxLength": 128},
+        "image": {"$ref": "#/definitions/image"},
+        "collectorBuildVerified": {"type": "boolean"},
+        "existingLogCollectionDisabled": {"type": "boolean"},
+        "existingMetricCollectionDisabled": {"type": "boolean"},
+        "existingSecret": {
+          "type": "object", "required": ["name", "keys"],
+          "properties": {
+            "name": {"type": "string"},
+            "keys": {
+              "type": "object", "required": ["greptimeAuthorization", "quickwitAuthorization"],
+              "properties": {"greptimeAuthorization": {"type": "string", "minLength": 1}, "quickwitAuthorization": {"type": "string", "minLength": 1}}
+            }
+          }
+        },
+        "memoryLimiter": {"type": "object", "required": ["limitMiB", "spikeLimitMiB"], "properties": {"limitMiB": {"type": "integer", "minimum": 32, "maximum": 65536}, "spikeLimitMiB": {"type": "integer", "minimum": 1, "maximum": 65535}}},
+        "agent": {
+          "type": "object",
+          "required": ["kubeletCidrs", "resources"],
+          "properties": {
+            "kubeletCidrs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/cidr"}},
+            "resources": {"$ref": "#/definitions/resources"}
+          }
+        },
+        "gateway": {
+          "type": "object", "required": ["replicas", "resources", "pdb"],
+          "properties": {
+            "replicas": {"type": "integer", "minimum": 2, "maximum": 10},
+            "resources": {"$ref": "#/definitions/resources"},
+            "pdb": {"type": "object", "required": ["minAvailable"], "properties": {"minAvailable": {"type": "integer", "minimum": 1}}}
+          }
+        },
+        "clusterCollector": {
+          "type": "object", "required": ["kubeStateMetrics", "resources"],
+          "properties": {
+            "kubeStateMetrics": {"type": "object", "required": ["endpoint", "namespaceSelector", "podSelector"], "properties": {"endpoint": {"type": "string", "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"}, "namespaceSelector": {"type": "object"}, "podSelector": {"type": "object"}}},
+            "resources": {"$ref": "#/definitions/resources"}
+          }
+        },
+        "backends": {
+          "type": "object", "required": ["greptime", "quickwit", "egress"],
+          "properties": {
+            "greptime": {"$ref": "#/definitions/telemetryBackend"},
+            "quickwit": {"allOf": [{"$ref": "#/definitions/telemetryBackend"}, {"type": "object", "required": ["index"], "properties": {"endpoint": {"pattern": "^(?:|[A-Za-z0-9.-]+:[0-9]{1,5})$"}, "index": {"const": "otel-logs-v0_7"}}}]},
+            "egress": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/definitions/telemetryDestination"}}
+          }
+        },
+        "comparison": {"$ref": "#/definitions/telemetryComparison"}
+      }
     }
   },
   "allOf": [
@@ -78,6 +133,30 @@
     {
       "if": {"properties": {"environment": {"const": "prod"}}},
       "then": {"properties": {"networkPolicy": {"properties": {"external": {"minItems": 1}}}}}
+    },
+    {
+      "if": {"properties": {"telemetry": {"properties": {"mode": {"const": "cutover"}}, "required": ["mode"]}}},
+      "then": {"properties": {"telemetry": {"properties": {
+        "clusterName": {"minLength": 1},
+        "existingLogCollectionDisabled": {"const": true},
+        "existingMetricCollectionDisabled": {"const": true},
+        "existingSecret": {"properties": {"name": {"minLength": 1}}},
+        "backends": {"properties": {
+          "greptime": {"properties": {"endpoint": {"minLength": 1, "pattern": "^https?://[A-Za-z0-9.-]+:[0-9]{1,5}/v1/otlp$"}}},
+          "quickwit": {"properties": {"endpoint": {"minLength": 1}}},
+          "egress": {"minItems": 2, "maxItems": 2}
+        }},
+        "agent": {"properties": {"kubeletCidrs": {"minItems": 1}}},
+        "clusterCollector": {"properties": {"kubeStateMetrics": {"properties": {"namespaceSelector": {"minProperties": 1}, "podSelector": {"minProperties": 1}}}}},
+        "comparison": {"properties": {
+          "recorded": {"const": true}, "evidenceId": {"minLength": 1}, "windowMinutes": {"minimum": 30},
+          "baselineEvents": {"minimum": 1}, "candidateEvents": {"minimum": 1},
+          "lossPermille": {"minimum": 0}, "p95LatencyMs": {"minimum": 0},
+          "collectorCpuMillicores": {"minimum": 0}, "collectorMemoryMiB": {"minimum": 0},
+          "egressBytesPerHour": {"minimum": 0}, "storageBytesPerDay": {"minimum": 0},
+          "estimatedCostMicrosPerDay": {"minimum": 0}
+        }}
+      }}}}
     }
   ],
   "definitions": {
@@ -85,6 +164,32 @@
     "resources": {"type": "object", "required": ["requests", "limits"], "properties": {"requests": {"type": "object", "required": ["cpu", "memory"]}, "limits": {"type": "object", "required": ["cpu", "memory"]}}},
     "workload": {"type": "object", "required": ["image", "replicas", "resources", "autoscaling", "pdb"], "properties": {"image": {"$ref": "#/definitions/image"}, "replicas": {"type": "integer", "minimum": 1}, "resources": {"$ref": "#/definitions/resources"}, "autoscaling": {"type": "object", "required": ["enabled", "minReplicas", "maxReplicas", "targetCPUUtilizationPercentage"]}, "pdb": {"type": "object", "required": ["enabled", "minAvailable"]}}},
     "cidr": {"type": "string", "pattern": "^.+/.+$", "not": {"enum": ["0.0.0.0/0", "::/0"]}},
-    "destination": {"type": "object", "required": ["cidr", "port", "purpose"], "properties": {"cidr": {"$ref": "#/definitions/cidr"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "protocol": {"enum": ["TCP", "UDP"]}, "purpose": {"enum": ["greptime", "quickwit", "oidc", "redis"]}}}
+    "destination": {"type": "object", "required": ["cidr", "port", "purpose"], "properties": {"cidr": {"$ref": "#/definitions/cidr"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "protocol": {"enum": ["TCP", "UDP"]}, "purpose": {"enum": ["greptime", "quickwit", "oidc", "redis"]}}},
+    "telemetryBackend": {"type": "object", "required": ["endpoint", "insecure"], "properties": {"endpoint": {"type": "string", "maxLength": 512}, "database": {"type": "string", "minLength": 1, "maxLength": 128}, "insecure": {"type": "boolean"}}},
+    "telemetryDestination": {"type": "object", "required": ["cidr", "port", "purpose"], "properties": {"cidr": {"$ref": "#/definitions/cidr"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "purpose": {"enum": ["greptime", "quickwit"]}}},
+    "telemetryComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recorded", "kind", "evidenceId", "artifactHash", "startedAt", "endedAt", "windowMinutes", "baselineEvents", "candidateEvents", "lossPermille", "p95LatencyMs", "collectorCpuMillicores", "collectorMemoryMiB", "egressBytesPerHour", "storageBytesPerDay", "estimatedCostMicrosPerDay", "limits"],
+      "properties": {
+        "recorded": {"type": "boolean"}, "kind": {"enum": ["", "local-deterministic-validation", "production-comparison"]},
+        "evidenceId": {"type": "string", "pattern": "^(?:|[A-Za-z0-9][A-Za-z0-9._/-]{0,255})$"},
+        "artifactHash": {"type": "string", "pattern": "^(?:|[a-f0-9]{64})$"},
+        "startedAt": {"type": "string", "pattern": "^(?:|[0-9]{4}-[0-9]{2}-[0-9]{2}T.+Z)$"},
+        "endedAt": {"type": "string", "pattern": "^(?:|[0-9]{4}-[0-9]{2}-[0-9]{2}T.+Z)$"},
+        "windowMinutes": {"type": "integer", "minimum": 0, "maximum": 10080},
+        "baselineEvents": {"type": "integer", "minimum": 0}, "candidateEvents": {"type": "integer", "minimum": 0},
+        "lossPermille": {"type": "integer", "minimum": -1}, "p95LatencyMs": {"type": "integer", "minimum": -1},
+        "collectorCpuMillicores": {"type": "integer", "minimum": -1}, "collectorMemoryMiB": {"type": "integer", "minimum": -1},
+        "egressBytesPerHour": {"type": "integer", "minimum": -1}, "storageBytesPerDay": {"type": "integer", "minimum": -1},
+        "estimatedCostMicrosPerDay": {"type": "integer", "minimum": -1},
+        "limits": {"type": "object", "required": ["maxLossPermille", "maxP95LatencyMs", "maxCollectorCpuMillicores", "maxCollectorMemoryMiB", "maxEgressBytesPerHour", "maxStorageBytesPerDay", "maxEstimatedCostMicrosPerDay"], "additionalProperties": false, "properties": {
+          "maxLossPermille": {"type": "integer", "minimum": 0, "maximum": 1000}, "maxP95LatencyMs": {"type": "integer", "minimum": 1},
+          "maxCollectorCpuMillicores": {"type": "integer", "minimum": 1}, "maxCollectorMemoryMiB": {"type": "integer", "minimum": 1},
+          "maxEgressBytesPerHour": {"type": "integer", "minimum": 1}, "maxStorageBytesPerDay": {"type": "integer", "minimum": 1},
+          "maxEstimatedCostMicrosPerDay": {"type": "integer", "minimum": 1}
+        }}
+      }
+    }
   }
 }
