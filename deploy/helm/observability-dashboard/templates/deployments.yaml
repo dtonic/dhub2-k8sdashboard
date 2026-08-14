@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dashboard.fullname" . }}-ui
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: ui
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: ui
+      annotations:
+        checksum/nginx: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+        secret-revision: {{ .Values.secretRevision | quote }}
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-ui
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: ui
+      containers:
+        - name: ui
+          image: {{ printf "%s%s" .Values.ui.image.repository (ternary (printf "@%s" .Values.ui.image.digest) (printf ":%s" .Values.ui.image.tag) (ne .Values.ui.image.digest "")) | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          ports: [{name: http, containerPort: 8080}]
+          lifecycle: {preStop: {sleep: {seconds: 5}}}
+          startupProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - {name: nginx-config, mountPath: /etc/nginx/conf.d, readOnly: true}
+            - {name: nginx-cache, mountPath: /var/cache/nginx}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: nginx-config
+          configMap: {name: {{ include "dashboard.fullname" . }}-nginx}
+        - {name: nginx-cache, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dashboard.fullname" . }}-api
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+        secret-revision: {{ .Values.secretRevision | quote }}
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-api
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      containers:
+        - name: api
+          image: {{ printf "%s%s" .Values.api.image.repository (ternary (printf "@%s" .Values.api.image.digest) (printf ":%s" .Values.api.image.tag) (ne .Values.api.image.digest "")) | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          ports: [{name: http, containerPort: 8080}]
+          envFrom: [{configMapRef: {name: {{ include "dashboard.fullname" . }}-api}}]
+          {{- with .Values.api.existingSecret.name }}
+          env:
+            {{- range $env, $key := dict "GREPTIME_USERNAME" $.Values.api.existingSecret.keys.greptimeUsername "GREPTIME_PASSWORD" $.Values.api.existingSecret.keys.greptimePassword "QUICKWIT_USERNAME" $.Values.api.existingSecret.keys.quickwitUsername "QUICKWIT_PASSWORD" $.Values.api.existingSecret.keys.quickwitPassword }}
+            - name: {{ $env }}
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $key }}, optional: true}}
+            {{- end }}
+            {{- if not $.Values.redis.enabled }}
+            - name: REDIS_ADDR
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.api.existingSecret.keys.redisAddr }}, optional: false}}
+            {{- end }}
+          {{- end }}
+          lifecycle: {preStop: {sleep: {seconds: 5}}}
+          startupProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

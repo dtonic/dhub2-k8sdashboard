@@ -1,0 +1,7 @@
+apiVersion: v2
+name: observability-dashboard
+description: Kubernetes operations observability UI, API, and optional Redis
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"

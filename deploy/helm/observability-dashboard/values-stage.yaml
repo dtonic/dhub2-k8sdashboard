@@ -1,0 +1,27 @@
+environment: stage
+secretRevision: "1"
+ui:
+  image: {repository: registry.example.invalid/observability-dashboard-web, tag: "", digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+  replicas: 2
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+  pdb: {enabled: true, minAvailable: 1}
+api:
+  image: {repository: registry.example.invalid/observability-dashboard-api, tag: "", digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+  replicas: 2
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+  pdb: {enabled: true, minAvailable: 1}
+  config:
+    CLUSTER_ID: stage
+    CLUSTER_NAME: Staging
+    AUTH_MODE: oidc
+    USE_DEMO_DATA: "false"
+    OIDC_ISSUER: https://idp.example.invalid
+    OIDC_AUDIENCE: observability-dashboard
+redis:
+  image: {repository: redis, tag: "", digest: sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e}
+  persistence: {enabled: true, size: 8Gi, storageClass: ""}
+networkPolicy:
+  ingress: {namespaceSelector: {}, podSelector: {}, cidrs: ["10.0.0.0/8"]}
+  kubernetesApiCidrs: ["10.96.0.1/32"]
+  external:
+    - {cidr: "192.0.2.10/32", port: 443, protocol: TCP, purpose: oidc}

@@ -1,0 +1,3 @@
+Render-only chart. Before deployment replace example repositories, digests, URLs, CIDRs,
+and existing Secret names with environment-owned values. The only public backend is the UI
+Service/Ingress; nginx proxies same-origin API and SSE traffic to the private API Service.

@@ -1,0 +1,76 @@
+environment: dev
+nameOverride: ""
+fullnameOverride: ""
+imagePullPolicy: IfNotPresent
+secretRevision: ""
+
+ui:
+  image: {repository: observability-dashboard-web, tag: dev, digest: ""}
+  replicas: 1
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+  pdb: {enabled: false, minAvailable: 1}
+
+api:
+  image: {repository: observability-dashboard-api, tag: dev, digest: ""}
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  autoscaling: {enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70}
+  pdb: {enabled: false, minAvailable: 1}
+  config:
+    ADDR: ":8080"
+    CLUSTER_ID: dev
+    CLUSTER_NAME: Development
+    AUTH_MODE: none
+    SCOPE_NAMESPACES: "*"
+    USE_DEMO_DATA: "true"
+    OIDC_ISSUER: ""
+    OIDC_AUDIENCE: ""
+    GREPTIME_URL: ""
+    GREPTIME_DB: public
+    QUICKWIT_URL: ""
+    QUICKWIT_INDEX: k8s-logs
+  existingSecret:
+    name: ""
+    keys:
+      greptimeUsername: GREPTIME_USERNAME
+      greptimePassword: GREPTIME_PASSWORD
+      quickwitUsername: QUICKWIT_USERNAME
+      quickwitPassword: QUICKWIT_PASSWORD
+      redisAddr: REDIS_ADDR
+
+redis:
+  enabled: true
+  image: {repository: redis, tag: 8.2.6-alpine, digest: ""}
+  persistence: {enabled: false, size: 8Gi, storageClass: ""}
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: dashboard.example.invalid
+  tls: {enabled: false, secretName: ""}
+
+networkPolicy:
+  enabled: true
+  ingress:
+    namespaceSelector: {}
+    podSelector: {}
+    cidrs: ["10.0.0.0/8"]
+  monitoring:
+    enabled: false
+    namespaceSelector: {}
+    podSelector: {}
+  dns:
+    namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+    podSelector: {matchLabels: {k8s-app: kube-dns}}
+  kubernetesApiCidrs: ["10.96.0.1/32"]
+  external: []
+  internal: []

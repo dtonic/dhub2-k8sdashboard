@@ -31,3 +31,6 @@ apps/web/dist/
 # Playwright
 apps/web/playwright-report/
 apps/web/test-results/
+
+# Exact deployment render scratch path (scripts clean it on exit)
+.tmp/deploy.*

@@ -1,0 +1,51 @@
+{{- include "dashboard.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dashboard.fullname" . }}-api
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.api.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- if .Values.redis.enabled }}
+  REDIS_ADDR: {{ printf "%s-redis:6379" (include "dashboard.fullname" .) | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dashboard.fullname" . }}-nginx
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      server_name _;
+      root /usr/share/nginx/html;
+
+      location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+      }
+
+      location /api/ {
+        proxy_pass http://{{ include "dashboard.fullname" . }}-api:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header Last-Event-ID $http_last_event_id;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        add_header X-Accel-Buffering no always;
+      }
+
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+    }

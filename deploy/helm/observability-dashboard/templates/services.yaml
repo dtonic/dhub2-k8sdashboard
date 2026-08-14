@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-ui
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-api
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  ports: [{name: http, port: 8080, targetPort: http}]
+{{- if .Values.redis.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-redis
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports: [{name: redis, port: 6379, targetPort: redis}]
+{{- end }}

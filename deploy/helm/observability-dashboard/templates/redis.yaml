@@ -1,0 +1,52 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "dashboard.fullname" . }}-redis
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ include "dashboard.fullname" . }}-redis
+  replicas: 1
+  updateStrategy: {type: RollingUpdate}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      serviceAccountName: {{ include "dashboard.fullname" . }}-redis
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, fsGroup: 999, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: redis
+          image: {{ printf "%s%s" .Values.redis.image.repository (ternary (printf "@%s" .Values.redis.image.digest) (printf ":%s" .Values.redis.image.tag) (ne .Values.redis.image.digest "")) | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["redis-server", "--appendonly", "yes", "--dir", "/data"]
+          securityContext: {runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
+          ports: [{name: redis, containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: redis}, periodSeconds: 5}
+          livenessProbe: {tcpSocket: {port: redis}, periodSeconds: 10}
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts: [{name: data, mountPath: /data}]
+      {{- if not .Values.redis.persistence.enabled }}
+      volumes: [{name: data, emptyDir: {}}]
+      {{- end }}
+  {{- if .Values.redis.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.redis.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources: {requests: {storage: {{ .Values.redis.persistence.size }}}}
+  {{- end }}
+{{- end }}

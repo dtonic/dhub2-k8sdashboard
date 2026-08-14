@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["environment", "ui", "api", "redis", "networkPolicy"],
+  "properties": {
+    "environment": {"enum": ["dev", "stage", "prod"]},
+    "imagePullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]},
+    "secretRevision": {"type": "string"},
+    "ui": {"$ref": "#/definitions/workload"},
+    "api": {
+      "allOf": [
+        {"$ref": "#/definitions/workload"},
+        {"type": "object", "required": ["config", "existingSecret"], "properties": {
+          "config": {"type": "object", "required": ["ADDR", "AUTH_MODE", "USE_DEMO_DATA"], "additionalProperties": {"type": ["string", "number", "boolean"]}},
+          "existingSecret": {"type": "object", "required": ["name", "keys"], "properties": {"name": {"type": "string"}, "keys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}}}
+        }}
+      ]
+    },
+    "redis": {
+      "type": "object", "required": ["enabled", "image", "persistence", "resources"],
+      "properties": {
+        "enabled": {"type": "boolean"}, "image": {"$ref": "#/definitions/image"},
+        "persistence": {"type": "object", "required": ["enabled", "size"], "properties": {"enabled": {"type": "boolean"}, "size": {"type": "string", "minLength": 1}, "storageClass": {"type": "string"}}},
+        "resources": {"$ref": "#/definitions/resources"}
+      }
+    },
+    "networkPolicy": {
+      "type": "object", "required": ["enabled", "ingress", "dns", "kubernetesApiCidrs", "external", "internal"],
+      "properties": {
+        "enabled": {"const": true},
+        "kubernetesApiCidrs": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/cidr"}},
+        "external": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/destination"}},
+        "internal": {"type": "array", "items": {"type": "object", "required": ["namespaceSelector", "podSelector", "port"], "properties": {"namespaceSelector": {"type": "object", "minProperties": 1}, "podSelector": {"type": "object", "minProperties": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "protocol": {"enum": ["TCP", "UDP"]}}}},
+        "ingress": {
+          "type": "object", "required": ["namespaceSelector", "podSelector", "cidrs"],
+          "properties": {
+            "namespaceSelector": {"type": "object"}, "podSelector": {"type": "object"},
+            "cidrs": {"type": "array", "items": {"$ref": "#/definitions/cidr"}}
+          },
+          "anyOf": [
+            {"properties": {"cidrs": {"minItems": 1}}},
+            {"properties": {"namespaceSelector": {"minProperties": 1}, "podSelector": {"minProperties": 1}}}
+          ]
+        },
+        "monitoring": {
+          "type": "object", "required": ["enabled", "namespaceSelector", "podSelector"],
+          "properties": {"enabled": {"type": "boolean"}, "namespaceSelector": {"type": "object"}, "podSelector": {"type": "object"}},
+          "allOf": [{"if": {"properties": {"enabled": {"const": true}}}, "then": {"properties": {"namespaceSelector": {"minProperties": 1}, "podSelector": {"minProperties": 1}}}}]
+        },
+        "dns": {
+          "type": "object", "required": ["namespaceSelector", "podSelector"],
+          "properties": {"namespaceSelector": {"type": "object", "minProperties": 1}, "podSelector": {"type": "object", "minProperties": 1}}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"environment": {"enum": ["stage", "prod"]}}},
+      "then": {
+        "properties": {
+          "ui": {
+            "properties": {
+              "replicas": {"minimum": 2},
+              "image": {"required": ["digest"], "properties": {"digest": {"pattern": "^sha256:[a-f0-9]{64}$"}}}
+            }
+          },
+          "api": {
+            "properties": {
+              "replicas": {"minimum": 2},
+              "image": {"required": ["digest"], "properties": {"digest": {"pattern": "^sha256:[a-f0-9]{64}$"}}},
+              "config": {"properties": {"AUTH_MODE": {"const": "oidc"}, "USE_DEMO_DATA": {"const": "false"}}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"environment": {"const": "prod"}}},
+      "then": {"properties": {"networkPolicy": {"properties": {"external": {"minItems": 1}}}}}
+    }
+  ],
+  "definitions": {
+    "image": {"type": "object", "required": ["repository", "tag", "digest"], "properties": {"repository": {"type": "string", "minLength": 1}, "tag": {"type": "string", "not": {"const": "latest"}}, "digest": {"type": "string"}}},
+    "resources": {"type": "object", "required": ["requests", "limits"], "properties": {"requests": {"type": "object", "required": ["cpu", "memory"]}, "limits": {"type": "object", "required": ["cpu", "memory"]}}},
+    "workload": {"type": "object", "required": ["image", "replicas", "resources", "autoscaling", "pdb"], "properties": {"image": {"$ref": "#/definitions/image"}, "replicas": {"type": "integer", "minimum": 1}, "resources": {"$ref": "#/definitions/resources"}, "autoscaling": {"type": "object", "required": ["enabled", "minReplicas", "maxReplicas", "targetCPUUtilizationPercentage"]}, "pdb": {"type": "object", "required": ["enabled", "minAvailable"]}}},
+    "cidr": {"type": "string", "pattern": "^.+/.+$", "not": {"enum": ["0.0.0.0/0", "::/0"]}},
+    "destination": {"type": "object", "required": ["cidr", "port", "purpose"], "properties": {"cidr": {"$ref": "#/definitions/cidr"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "protocol": {"enum": ["TCP", "UDP"]}, "purpose": {"enum": ["greptime", "quickwit", "oidc", "redis"]}}}
+  }
+}

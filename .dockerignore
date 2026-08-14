@@ -1,0 +1,12 @@
+.git
+.github
+.sync
+node_modules
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+.env
+.env.*
+*.pem
+*.key

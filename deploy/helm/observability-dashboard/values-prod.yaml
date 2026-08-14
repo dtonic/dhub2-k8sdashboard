@@ -1,0 +1,30 @@
+environment: prod
+secretRevision: "1"
+ui:
+  image: {repository: registry.example.invalid/observability-dashboard-web, tag: "", digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}
+  replicas: 2
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 65}
+  pdb: {enabled: true, minAvailable: 1}
+api:
+  image: {repository: registry.example.invalid/observability-dashboard-api, tag: "", digest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}
+  replicas: 2
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 8, targetCPUUtilizationPercentage: 65}
+  pdb: {enabled: true, minAvailable: 1}
+  config:
+    CLUSTER_ID: prod
+    CLUSTER_NAME: Production
+    AUTH_MODE: oidc
+    USE_DEMO_DATA: "false"
+    OIDC_ISSUER: https://idp.example.invalid
+    OIDC_AUDIENCE: observability-dashboard
+  existingSecret:
+    name: observability-dashboard-api
+redis:
+  enabled: false
+  image: {repository: redis, tag: "", digest: sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e}
+networkPolicy:
+  ingress: {namespaceSelector: {}, podSelector: {}, cidrs: ["10.0.0.0/8"]}
+  kubernetesApiCidrs: ["10.96.0.1/32"]
+  external:
+    - {cidr: "192.0.2.10/32", port: 443, protocol: TCP, purpose: oidc}
+    - {cidr: "192.0.2.20/32", port: 6379, protocol: TCP, purpose: redis}

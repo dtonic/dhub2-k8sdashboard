@@ -1,5 +1,8 @@
 # K8s Dashboard
 
+배포 기준은 UI/API/선택적 Redis를 함께 선언하는 단일 Helm chart입니다. 환경별 render-only 검증과
+운영 제약은 [`deploy/README.md`](./deploy/README.md)를 참고합니다.
+
 Kubernetes 운영자가 클러스터 이상을 빠르게 발견하고, 관련 Workload·Pod·Container의 메트릭·로그·이벤트·알림까지 일관된 흐름으로 분석할 수 있도록 구축하는 커스텀 Observability Dashboard입니다.
 
 이 프로젝트는 Grafana를 대체하는 범용 시각화 도구를 새로 만드는 것이 목적이 아닙니다. 기존의 안정적인 수집·저장·알림 계층을 유지하면서, Kubernetes 운영 업무에 특화된 사용자 경험과 통합 조회 계층을 추가하는 것을 목표로 합니다.

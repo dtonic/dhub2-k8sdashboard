@@ -60,3 +60,13 @@ jobs:
         env:
           REDIS_ITEST_ADDR: 127.0.0.1:6379
       - run: make api-build
+
+  deploy:
+    name: Deploy (images · Helm · schema · policy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build non-push images
+        run: make deploy-images
+      - name: Lint, deterministic render, schema and policy
+        run: make deploy-check

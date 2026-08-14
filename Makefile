@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-redis-itest api-vet clean
+.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-redis-itest api-vet deploy-check deploy-images clean
 
 install:            ## 의존성 설치
 	npm install
@@ -55,6 +55,13 @@ api-redis-itest:    ## Redis protocol/cache integration (REDIS_ITEST_ADDR requir
 
 api-vet:            ## Go 정적 검사
 	cd apps/api && go vet ./...
+
+deploy-check:       ## Helm lint/render, Kubernetes schema, repository policy
+	sh deploy/scripts/check-deploy.sh
+
+deploy-images:      ## Build release images locally without pushing
+	docker build --file Dockerfile.web --tag observability-dashboard-web:ci .
+	docker build --file Dockerfile.api --tag observability-dashboard-api:ci --build-arg VERSION=ci --build-arg COMMIT=$${GITHUB_SHA:-local} --build-arg BUILD_DATE=1970-01-01T00:00:00Z .
 
 design:             ## design-system preview 빌드 (Claude Design 업로드 대상)
 	npm run build --workspace @k8s-dashboard/design-system

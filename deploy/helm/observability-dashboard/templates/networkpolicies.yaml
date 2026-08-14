@@ -1,0 +1,122 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-default-deny
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-ui
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: ui
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.ingress.cidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+        {{- if or .Values.networkPolicy.ingress.namespaceSelector .Values.networkPolicy.ingress.podSelector }}
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.ingress.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.ingress.podSelector | nindent 12 }}
+        {{- end }}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports: [{protocol: TCP, port: 8080}]
+    - to:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-api
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: ui
+      ports: [{protocol: TCP, port: 8080}]
+    {{- if .Values.networkPolicy.monitoring.enabled }}
+    - from:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports: [{protocol: TCP, port: 8080}]
+    {{- end }}
+  egress:
+    - to:
+        - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- range .Values.networkPolicy.kubernetesApiCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" $ | nindent 14 }}
+              app.kubernetes.io/component: redis
+      ports: [{protocol: TCP, port: 6379}]
+    {{- end }}
+    {{- range .Values.networkPolicy.internal }}
+    - to:
+        - namespaceSelector: {{ toYaml .namespaceSelector | nindent 12 }}
+          podSelector: {{ toYaml .podSelector | nindent 12 }}
+      ports: [{protocol: {{ default "TCP" .protocol }}, port: {{ .port }}}]
+    {{- end }}
+    {{- range .Values.networkPolicy.external }}
+    - to: [{ipBlock: {cidr: {{ .cidr | quote }}}}]
+      ports: [{protocol: {{ default "TCP" .protocol }}, port: {{ .port }}}]
+    {{- end }}
+{{- if .Values.redis.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-redis
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports: [{protocol: TCP, port: 6379}]
+{{- end }}
+{{- end }}
