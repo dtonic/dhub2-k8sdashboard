@@ -23,6 +23,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
 )
 
@@ -39,6 +40,13 @@ type Deps struct {
 	ProtectionMetrics *queryprotect.Metrics
 	CacheTTL          cache.TTLPolicy
 	Logger            *slog.Logger
+	// Stream은 상태 변경 SSE 허브입니다. nil이면 SSE 경로는 503을 반환합니다.
+	Stream *stream.Hub
+	// StreamMetrics는 /metrics로 나가는 스트림 계측입니다. Stream을 직접 만들어
+	// 넘길 때는 그 허브의 Observer와 같은 인스턴스여야 값이 한 곳에 모입니다.
+	StreamMetrics *stream.Metrics
+	// StreamOptions는 SSE 전송 동작(heartbeat·write 유휴 상한·재연결 힌트)입니다.
+	StreamOptions StreamOptions
 	// AllowedOrigin이 있으면 CORS 헤더를 붙입니다. 개발 중 Vite 오리진용입니다.
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
@@ -78,6 +86,10 @@ func NewServer(d Deps) *Server {
 	if d.NewRequestID == nil {
 		d.NewRequestID = newRequestID
 	}
+	if d.StreamMetrics == nil {
+		d.StreamMetrics = stream.NewMetrics()
+	}
+	d.StreamOptions.setDefaults()
 	s := &Server{deps: d, mux: http.NewServeMux()}
 	s.routes()
 	return s
@@ -103,6 +115,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_ = s.deps.ProtectionMetrics.WritePrometheus(r.Context(), w)
+		if s.deps.StreamMetrics != nil {
+			_ = s.deps.StreamMetrics.WritePrometheus(w)
+		}
 	})
 
 	m.HandleFunc("GET /api/v1/scope", s.handleScope)
@@ -115,6 +130,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology", s.handleTopology)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series", s.handleEdgeSeries)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/alerts", s.handleAlerts)
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
 }
 
 // operationalPath는 인증 없이 접근 가능한 운영 경로입니다. probe·버전 확인은
@@ -180,7 +196,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Pattern = pattern
-	if !operationalPath[r.URL.Path] {
+	// SSE 스트림은 질의가 아니라 연결입니다 — query guard의 12s budget·rate·slow
+	// 계측을 타면 스트림이 강제 종료됩니다. 스트림 전용 상한이 자원을 지킵니다. (#12)
+	isStream := pattern == streamRoute
+	if !operationalPath[r.URL.Path] && !isStream {
 		user := sc.Subject
 		if user == "" {
 			user = "auth-none"
@@ -205,7 +224,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	s.mux.ServeHTTP(rec, r.WithContext(scope.With(r.Context(), sc)))
-	if !operationalPath[r.URL.Path] && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
+	if !operationalPath[r.URL.Path] && !isStream && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
 		s.deps.ProtectionMetrics.Slow(pattern)
 	}
 	s.audit(r, sc, rec.status, started)
@@ -221,6 +240,10 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap은 http.ResponseController가 원본 writer의 Flush·SetWriteDeadline을
+// 찾을 수 있게 합니다. SSE 핸들러(#12)가 이 경로에 의존합니다.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 /* ── 공통 처리 ──────────────────────────────────────────────────────────── */
 

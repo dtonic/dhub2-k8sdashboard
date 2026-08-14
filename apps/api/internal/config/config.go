@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 )
 
 type Config struct {
@@ -56,6 +57,18 @@ type Config struct {
 	QueryDashboardBurst      int
 	QueryUserConcurrent      int
 	QueryDashboardConcurrent int
+
+	// Stream은 상태 변경 SSE(#12)의 유계 상한입니다.
+	StreamMaxConnections int
+	StreamMaxPerSubject  int
+	StreamReplayEvents   int
+	StreamSubBuffer      int
+	StreamHeartbeat      time.Duration
+	StreamWriteIdle      time.Duration
+	// AlertPoll은 알림 스냅숏 diff 폴러(#12)의 주기·상한입니다.
+	AlertPollInterval   time.Duration
+	AlertPollMaxBackoff time.Duration
+	AlertSnapshotMax    int
 
 	// UseDemoData는 GreptimeDB/Quickwit/Alertmanager 없이 결정적 값을 씁니다.
 	// 실주소(GREPTIME_URL·QUICKWIT_URL)가 설정된 데이터소스는 이 값과 무관하게
@@ -155,6 +168,15 @@ func Load() Config {
 		QueryDashboardBurst:      envInt("QUERY_DASHBOARD_BURST", 200),
 		QueryUserConcurrent:      envInt("QUERY_USER_CONCURRENT", 8),
 		QueryDashboardConcurrent: envInt("QUERY_DASHBOARD_CONCURRENT", 32),
+		StreamMaxConnections:     envInt("STREAM_MAX_CONNECTIONS", 256),
+		StreamMaxPerSubject:      envInt("STREAM_MAX_PER_SUBJECT", 8),
+		StreamReplayEvents:       envInt("STREAM_REPLAY_EVENTS", 1024),
+		StreamSubBuffer:          envInt("STREAM_SUB_BUFFER", 64),
+		StreamHeartbeat:          envDuration("STREAM_HEARTBEAT", 15*time.Second),
+		StreamWriteIdle:          envDuration("STREAM_WRITE_IDLE", 60*time.Second),
+		AlertPollInterval:        envDuration("ALERT_POLL_INTERVAL", 30*time.Second),
+		AlertPollMaxBackoff:      envDuration("ALERT_POLL_MAX_BACKOFF", 5*time.Minute),
+		AlertSnapshotMax:         envInt("ALERT_SNAPSHOT_MAX", 2000),
 		UseDemoData:              envBool("USE_DEMO_DATA", true),
 		QueryCatalogDir:          env("QUERY_CATALOG_DIR", ""),
 		Auth: AuthConfig{
@@ -243,6 +265,38 @@ func (c Config) Validate() error {
 	}
 	if c.CacheMaxLocalBytes < c.CacheMaxValueBytes {
 		errs = append(errs, errors.New("CACHE_MAX_LOCAL_BYTES must be at least CACHE_MAX_VALUE_BYTES"))
+	}
+	for name, value := range map[string]int{"STREAM_MAX_CONNECTIONS": c.StreamMaxConnections, "STREAM_MAX_PER_SUBJECT": c.StreamMaxPerSubject, "STREAM_REPLAY_EVENTS": c.StreamReplayEvents, "STREAM_SUB_BUFFER": c.StreamSubBuffer, "ALERT_SNAPSHOT_MAX": c.AlertSnapshotMax} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s은 0보다 커야 합니다: %d", name, value))
+		}
+	}
+	for name, value := range map[string]time.Duration{"STREAM_HEARTBEAT": c.StreamHeartbeat, "STREAM_WRITE_IDLE": c.StreamWriteIdle, "ALERT_POLL_INTERVAL": c.AlertPollInterval, "ALERT_POLL_MAX_BACKOFF": c.AlertPollMaxBackoff} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s은 0보다 커야 합니다: %v", name, value))
+		}
+	}
+	// heartbeat가 idle 한도보다 짧아야 살아 있는 연결이 write deadline에 걸리지 않습니다.
+	if c.StreamHeartbeat >= c.StreamWriteIdle {
+		errs = append(errs, errors.New("STREAM_HEARTBEAT must be less than STREAM_WRITE_IDLE"))
+	}
+	if c.StreamMaxPerSubject > c.StreamMaxConnections {
+		errs = append(errs, errors.New("STREAM_MAX_PER_SUBJECT must not exceed STREAM_MAX_CONNECTIONS"))
+	}
+	if c.StreamReplayEvents > stream.MaxRingSize {
+		errs = append(errs, fmt.Errorf("STREAM_REPLAY_EVENTS must not exceed %d", stream.MaxRingSize))
+	}
+	if c.StreamMaxConnections > stream.MaxConnections {
+		errs = append(errs, fmt.Errorf("STREAM_MAX_CONNECTIONS must not exceed %d", stream.MaxConnections))
+	}
+	if c.StreamSubBuffer > stream.MaxSubscriberBuffer {
+		errs = append(errs, fmt.Errorf("STREAM_SUB_BUFFER must not exceed %d", stream.MaxSubscriberBuffer))
+	}
+	if int64(c.StreamMaxConnections)*int64(c.StreamSubBuffer) > stream.MaxSubscriberSlots {
+		errs = append(errs, fmt.Errorf("STREAM_MAX_CONNECTIONS*STREAM_SUB_BUFFER must not exceed %d slots", stream.MaxSubscriberSlots))
+	}
+	if c.AlertPollMaxBackoff < c.AlertPollInterval {
+		errs = append(errs, errors.New("ALERT_POLL_MAX_BACKOFF must be at least ALERT_POLL_INTERVAL"))
 	}
 	if c.RedisAddr != "" {
 		host, port, err := net.SplitHostPort(c.RedisAddr)

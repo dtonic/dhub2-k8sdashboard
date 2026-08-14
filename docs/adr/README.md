@@ -12,6 +12,7 @@
 | [0004](./0004-backend-language-go.md) | Observability API/BFF는 Go로 구현한다 | Accepted | 2026-08-13 |
 | [0005](./0005-mvp-hybrid-architecture.md) | MVP는 기존 관측 스택과 전용 BFF/UI를 결합한 하이브리드 아키텍처로 구성한다 | Accepted | 2026-08-14 |
 | [0006](./0006-quickwit-scroll-cursor.md) | Quickwit 로그 페이징에 TTL scroll capability를 사용한다 | Accepted | 2026-08-14 |
+| [0007](./0007-sse-replay-reset-backpressure.md) | SSE 상태 변경 스트림은 프로세스 로컬 재생 링 · reset 폴백 · 연결 절단 backpressure로 유계를 유지한다 | Accepted | 2026-08-14 |
 
 ## 상태 값
 

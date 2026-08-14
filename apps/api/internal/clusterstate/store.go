@@ -11,6 +11,7 @@ package clusterstate
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -84,6 +85,13 @@ type Store struct {
 	rsIndexer    cache.Indexer
 	eventIndexer cache.Indexer
 
+	// changeSources는 OnChange(#12)가 핸들러를 붙일 informer 목록입니다.
+	// stream 패키지를 임포트하지 않고 변경만 밖으로 내보냅니다.
+	changeSources []changeSource
+	// observer는 등록된 변경 관찰자입니다(observe.go). atomic이라 Start 전후
+	// 어느 시점에 등록해도 안전합니다.
+	observer atomic.Pointer[ChangeObserver]
+
 	synced []cache.InformerSynced
 
 	// usage는 메트릭 데이터소스에서 온 현재 사용량 조회원입니다. 없으면 request/limit만 채웁니다.
@@ -135,6 +143,18 @@ func New(c Clients, opts Options) (*Store, error) {
 	}
 	if err := s.eventIndexer.AddIndexers(cache.Indexers{IndexEventByInvolved: eventInvolvedIndex}); err != nil {
 		return nil, fmt.Errorf("event 인덱스 등록 실패: %w", err)
+	}
+
+	s.changeSources = []changeSource{
+		{informer: podInformer.Informer(), convert: s.podChange},
+		{informer: depInformer.Informer(), convert: workloadChange(opts.ClusterID, "Deployment")},
+		{informer: stsInformer.Informer(), convert: workloadChange(opts.ClusterID, "StatefulSet")},
+		{informer: dsInformer.Informer(), convert: workloadChange(opts.ClusterID, "DaemonSet")},
+		{informer: cjInformer.Informer(), convert: workloadChange(opts.ClusterID, "CronJob")},
+		{informer: evInformer.Informer(), convert: s.eventChange},
+	}
+	if err := s.registerChangeSources(); err != nil {
+		return nil, err
 	}
 
 	s.synced = []cache.InformerSynced{

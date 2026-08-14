@@ -41,4 +41,27 @@ func (s *Store) CatalogPods(namespace string, limit int) []datasource.CatalogPod
 	return out
 }
 
+// StreamEntityNamespaces returns a server-owned UID-to-namespace snapshot for
+// alert stream authorization. Alert labels and EntityRef.Namespace are upstream
+// input and must never establish an SSE namespace boundary.
+func (s *Store) StreamEntityNamespaces() map[string]string {
+	out := make(map[string]string)
+	for _, p := range s.CatalogPods("", 0) {
+		if p.UID != "" {
+			out["pod:"+p.UID] = p.Namespace
+		}
+		if p.WorkloadUID != "" {
+			out["workload:"+p.WorkloadUID] = p.Namespace
+		}
+	}
+	if workloads, err := s.Workloads(NamespaceFilter{All: true}); err == nil {
+		for _, w := range workloads {
+			if w.Ref.WorkloadUID != "" {
+				out["workload:"+w.Ref.WorkloadUID] = w.Namespace
+			}
+		}
+	}
+	return out
+}
+
 var _ datasource.PodCatalog = (*Store)(nil)

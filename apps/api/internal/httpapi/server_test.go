@@ -80,6 +80,21 @@ func (f fixture) get(t *testing.T, path string, out any) *httptest.ResponseRecor
 
 const base = "/api/v1/clusters/" + testcluster.ClusterID
 
+func TestSSEWithoutConfiguredHubReturnsContracted503(t *testing.T) {
+	f := newFixture(t)
+	rec := f.get(t, base+"/events/stream", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want 503", rec.Code)
+	}
+	var e contract.APIError
+	if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Code != "upstream_unavailable" {
+		t.Fatalf("code=%q", e.Code)
+	}
+}
+
 /* ── 권한 ───────────────────────────────────────────────────────────────── */
 
 func TestUnknownClusterIsRejectedWithoutData(t *testing.T) {

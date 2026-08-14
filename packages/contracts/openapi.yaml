@@ -466,6 +466,52 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/events/stream:
+    get:
+      operationId: streamClusterEvents
+      summary: 상태 변경 SSE 스트림 (#12)
+      description: >-
+        Pod · Workload · Kubernetes Event · Alert 상태 변경을 text/event-stream으로
+        내려보냅니다. 각 메시지의 data는 EventEnvelope JSON
+        (정본: packages/contracts/schema/stream.schema.json)이며, id는 재연결 시
+        Last-Event-ID 헤더로 되돌려 보냅니다. 같은 서버 인스턴스가 보존 중인 구간이면
+        놓친 이벤트를 순서대로 재생하고, 인스턴스가 바뀌었거나 보존 구간을 벗어났으면
+        kind=reset 이벤트를 보냅니다 — 브라우저는 reset을 받으면 현재 상태를 기존 HTTP
+        계약으로 다시 조회해야 합니다. 시계열 Metrics는 이 스트림에 실리지 않습니다
+        (ADR 0005). 이 경로는 질의 보호(#11)의 timeout·rate·cache 대상이 아니며,
+        대신 전역·주체별 연결 상한을 넘으면 429와 Retry-After로 거절합니다.
+        주기적으로 comment(heartbeat)와 retry 힌트가 내려옵니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/LastEventID"
+      responses:
+        "200":
+          description: >-
+            SSE 스트림. 각 이벤트는 id·event(kind)·data(EventEnvelope JSON) 필드를 갖습니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "data 본문의 정본: packages/contracts/schema/stream.schema.json의 EventEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "429":
+          $ref: "#/components/responses/StreamCapacity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -523,7 +569,33 @@ components:
             format: date-time
           - type: string
             pattern: "^-?[0-9]+$"
+    LastEventID:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: >-
+        마지막으로 수신한 SSE id. 브라우저 EventSource가 재연결 시 자동으로 보냅니다.
+        서버가 만든 형식(`<hex 인스턴스>-<십진 시퀀스>`, 최대 64자)이 아니면 400입니다.
+      schema:
+        type: string
+        maxLength: 64
+        pattern: "^[0-9a-f]{32}-[0-9]{1,20}$"
   responses:
+    StreamCapacity:
+      description: >-
+        스트림 연결 상한(전역 또는 주체별) 초과입니다. Retry-After 이후 재시도하세요.
+        질의 보호(#11)의 429와 달리 스트림 전용 상한입니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+        Retry-After:
+          description: 재시도까지 대기할 초
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
     BadRequest:
       description: 요청이 성립하지 않습니다 (예 invalid_range).
       headers:
@@ -582,6 +654,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/APIError"
+    ServiceUnavailable:
+      description: 스트림 런타임이 준비되지 않았습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
   schemas:
     APIError:
       type: object
@@ -600,6 +681,8 @@ components:
             - method_not_allowed
             - upstream_unavailable
             - invalid_range
+            - bad_last_event_id
+            - stream_capacity
             - internal
         message:
           type: string

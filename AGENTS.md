@@ -56,7 +56,7 @@ GPT-5.6-Sol이 이 저장소에서 정확도를 유지하면서 작업당 총 �
 - `packages/contracts`: 공통 계약
 - `docs/adr`: 확정된 설계 결정
 
-2026-08-14 기준, UI #14~#17과 Informer #8, Query Catalog #9는 닫혔습니다. GreptimeDB #6, Quickwit #7, OIDC/RBAC #10은 구현 커밋이 있으나 Issue는 열려 있으므로 완료로 추정하지 말고 현재 체크리스트를 확인합니다. Alert UI #17은 닫혔지만 Alertmanager 실제 클라이언트는 남아 있습니다. 주요 후속 작업은 Web-API 실연결, Redis #11, SSE #12, 배포·운영·통합 E2E #19~#22입니다.
+2026-08-14 기준, UI #14~#17과 Informer #8, Query Catalog #9, Redis 캐시·질의 보호 #11(유계 L1 + Redis L2, Scope 포함 캐시 키)은 닫혔습니다. GreptimeDB #6, Quickwit #7, OIDC/RBAC #10은 구현 커밋이 있으나 Issue는 열려 있으므로 완료로 추정하지 말고 현재 체크리스트를 확인합니다. SSE #12의 백엔드 프로토콜은 구현되어 있습니다(`internal/stream` 허브 + `/events/stream`, 재생·reset·Scope 필터, 실제 HTTP 재접속 테스트, ADR 0007 Accepted). 제품 UI 배선은 별도 Web-API 실연결 후속입니다. Alert UI #17은 닫혔지만 Alertmanager 실제 클라이언트는 남아 있어 알림 스트림의 실소스가 없습니다. 주요 후속 작업은 Web-API 실연결, Alertmanager 실클라이언트, 배포·운영·통합 E2E #19~#22입니다.
 
 세부 규칙은 중복 적재하지 않고 작업 범위에 따라 다음 원문만 읽습니다.
 

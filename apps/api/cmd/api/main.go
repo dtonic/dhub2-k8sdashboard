@@ -31,6 +31,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 )
 
 // 빌드 정보 — GET /version이 그대로 돌려줍니다. 릴리스 빌드는 ldflags로 덮어씁니다:
@@ -86,6 +87,25 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	// 상태 변경 SSE 허브 (#12). informer가 watch를 시작하기 전에 관찰자를 등록해
+	// 어떤 변경도 놓치지 않습니다. 최초 LIST는 observe.go가 억제합니다.
+	streamMetrics := stream.NewMetrics()
+	hub, err := stream.New(stream.Config{
+		RingSize:         cfg.StreamReplayEvents,
+		SubscriberBuffer: cfg.StreamSubBuffer,
+		MaxConnections:   cfg.StreamMaxConnections,
+		MaxPerSubject:    cfg.StreamMaxPerSubject,
+	}, streamMetrics)
+	if err != nil {
+		return err
+	}
+	defer hub.Close()
+	if err := store.OnChange(func(c clusterstate.Change) {
+		hub.Publish(stream.EnvelopeFromChange(cfg.ClusterID, c))
+	}); err != nil {
+		return err
+	}
+
 	logger.Info("informer 시작",
 		"resync", cfg.Resync.String(),
 		"eventFieldSelector", cfg.EventFieldSelector,
@@ -117,6 +137,18 @@ func run(logger *slog.Logger) error {
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
 	go refreshUsage(ctx, logger, store, metrics, cfg.ClusterID)
 
+	// 알림 변경은 push 원천이 없어 datasource.Alerts 스냅숏 diff로 만듭니다. (#12)
+	// Alertmanager 실클라이언트(#17 잔여)가 생겨도 이 배선은 그대로입니다.
+	// 소스가 Unavailable이어도 백오프로 물러날 뿐 스핀하지 않습니다.
+	alertPoller := stream.NewAlertPoller(stream.AlertPollerConfig{
+		ClusterID:         cfg.ClusterID,
+		Interval:          cfg.AlertPollInterval,
+		MaxBackoff:        cfg.AlertPollMaxBackoff,
+		MaxAlerts:         cfg.AlertSnapshotMax,
+		TrustedNamespaces: store.StreamEntityNamespaces,
+	}, alerts, hub, logger)
+	go alertPoller.Run(ctx)
+
 	protectionMetrics := queryprotect.NewMetrics()
 	responseCache := cache.New(cache.Config{DefaultTTL: cfg.CacheTTL, MaxEntries: cfg.CacheMaxEntries, MaxValueBytes: cfg.CacheMaxValueBytes, MaxLocalBytes: cfg.CacheMaxLocalBytes, RedisAddr: cfg.RedisAddr, RedisOpTimeout: cfg.RedisOpTimeout, RedisCooldown: cfg.RedisCooldown, LockTTL: cfg.QueryTimeout + time.Second, LockWait: cfg.QueryTimeout, Observer: protectionMetrics})
 	defer responseCache.Close()
@@ -141,6 +173,9 @@ func run(logger *slog.Logger) error {
 		ProtectionMetrics: protectionMetrics,
 		CacheTTL:          cache.TTLPolicy{State: cfg.CacheTTL, Short: cfg.CacheShortTTL, Historical: cfg.CacheHistoricalTTL, HistoricalSafety: cfg.CacheHistoricalSafety},
 		Logger:            logger,
+		Stream:            hub,
+		StreamMetrics:     streamMetrics,
+		StreamOptions:     httpapi.StreamOptions{Heartbeat: cfg.StreamHeartbeat, WriteIdleTimeout: cfg.StreamWriteIdle},
 		AllowedOrigin:     cfg.AllowedOrigin,
 		Version:           contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
@@ -166,6 +201,9 @@ func run(logger *slog.Logger) error {
 		return err
 	case <-ctx.Done():
 		logger.Info("종료 신호 수신 · 진행 중인 요청을 정리합니다")
+		// SSE 핸들러는 구독 채널이 닫혀야 빠져나옵니다. Shutdown보다 먼저
+		// 허브를 닫지 않으면 스트림 연결 수만큼 Shutdown이 타임아웃까지 기다립니다.
+		hub.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)

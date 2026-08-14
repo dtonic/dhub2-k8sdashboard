@@ -197,6 +197,12 @@ func podBase(ns, name, uid, ownerKind, ownerName, ownerUID string) *corev1.Pod {
 	}
 }
 
+// NewPod는 테스트가 동기화 이후에 추가할 정상 Pod를 만듭니다. (#12 SSE 테스트 등)
+// 픽스처와 같은 규칙으로 만들어 신원·소유 체인이 화면 조회와 일치합니다.
+func NewPod(ns, name, uid, ownerKind, ownerName, ownerUID string) *corev1.Pod {
+	return healthyPod(ns, name, uid, ownerKind, ownerName, ownerUID)
+}
+
 func healthyPod(ns, name, uid, ownerKind, ownerName, ownerUID string) *corev1.Pod {
 	p := podBase(ns, name, uid, ownerKind, ownerName, ownerUID)
 	started := true

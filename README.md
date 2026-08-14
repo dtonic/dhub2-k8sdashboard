@@ -487,7 +487,10 @@ Custom Range의 최대 폭은 30일입니다.
 - Quickwit Adapter *(완료 — ES 호환 검색 · 커서 페이징 · 서버 마스킹)*
 - Query Catalog *(완료 — `apps/api/internal/querycatalog`. Git 임베디드 YAML, $__scope 강제, 변수 allowlist, 시작·CI 검증)*
 - OIDC/RBAC *(완료 — `apps/api/internal/auth`. 표준 OIDC JWT 검증, 역할 4종 → Scope, 401/403 구분, 감사 로그, mock IdP)*
-- Redis Cache 및 Query Guardrail *(프로세스 내 TTL + singleflight까지 구현됨)*
+- Redis Cache 및 Query Guardrail *(완료 — #11. 유계 L1 + Redis L2 캐시, Scope 포함 캐시 키,
+  사용자·화면별 rate/동시성 상한, 12s 질의 budget)*
+- 상태 변경 SSE *(백엔드 구현됨 — #12. `/events/stream`, 프로세스 로컬 재생 링과 Last-Event-ID
+  복구, reset 폴백, Scope 필터, 연결 상한. ADR 0007 Accepted. UI EventSource 연결은 Web-API 실연결과 함께)*
 
 ### Phase 3 — Core UI
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xenx96/k8s-dashboard/packages/contracts/schema/stream.schema.json",
+  "title": "SSE 상태 변경 스트림 계약 (이슈 #12)",
+  "$comment": "정본입니다. Go(apps/api/internal/contract/stream.go)는 stream_parity_test.go가, TypeScript(src/index.ts)는 test/stream-parity.test.mjs가 이 파일과의 동등성을 증명합니다. Envelope는 무효화 신호이며 Kubernetes 원본 객체·Alert annotation·시계열 샘플을 싣지 않습니다.",
+  "$defs": {
+    "StreamEventKind": {
+      "enum": ["pod", "workload", "kubeevent", "alert", "reset"]
+    },
+    "StreamEventAction": {
+      "enum": ["added", "updated", "deleted", "reset"]
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "required": ["id", "kind", "action", "clusterId", "observedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "$comment": "불투명 · 프로세스 인스턴스 인지 · 단조 증가. Last-Event-ID로 되돌아옵니다."
+        },
+        "kind": { "$ref": "#/$defs/StreamEventKind" },
+        "action": { "$ref": "#/$defs/StreamEventAction" },
+        "clusterId": { "type": "string", "minLength": 1 },
+        "observedAt": { "type": "string", "format": "date-time", "$comment": "RFC3339" },
+        "namespace": {
+          "type": "string",
+          "$comment": "비어 있으면(부재) 클러스터 범위 신호 — 전체 Scope에게만 전달됩니다."
+        },
+        "entity": {
+          "$ref": "./telemetry.schema.json#/$defs/EntityRef",
+          "$comment": "UID 우선 참조만 싣습니다. 원본 객체 금지."
+        },
+        "resourceVersion": { "type": "string" }
+      }
+    }
+  }
+}

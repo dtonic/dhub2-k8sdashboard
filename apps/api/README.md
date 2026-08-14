@@ -50,6 +50,12 @@ KUBECONFIG=~/.kube/config make dev-api
 | `QUERY_USER_RATE` / `QUERY_USER_BURST` | `20` / `40` | 보안 Subject별 초당 허용량과 token burst. `AUTH_MODE=none`은 고정 identity를 사용합니다 |
 | `QUERY_DASHBOARD_RATE` / `QUERY_DASHBOARD_BURST` | `100` / `200` | 고정 mux dashboard pattern별 rate/burst. 동적 ID는 label/state key가 아닙니다 |
 | `QUERY_USER_CONCURRENT` / `QUERY_DASHBOARD_CONCURRENT` | `8` / `32` | 사용자·dashboard별 동시 요청 상한. 거절은 upstream 전 429와 `Retry-After`입니다 |
+| `STREAM_MAX_CONNECTIONS` / `STREAM_MAX_PER_SUBJECT` | `256` / `8` | SSE 동시 연결의 전역·주체(사용자)별 hard cap. 전역 절대 상한은 4096이며, 초과는 429와 `Retry-After`입니다 (#12) |
+| `STREAM_REPLAY_EVENTS` | `1024` | 프로세스 로컬 재생 링 크기(절대 상한 65536). 이 창을 벗어난 Last-Event-ID는 reset이 됩니다 |
+| `STREAM_SUB_BUFFER` | `64` | 구독자별 채널 크기(절대 상한 4096, 전역 연결×버퍼 합계 262144 slots). 가득 차면 구독자를 끊으며 발행은 slow-client I/O를 기다리지 않습니다 |
+| `STREAM_HEARTBEAT` / `STREAM_WRITE_IDLE` | `15s` / `60s` | heartbeat comment 주기와 write 유휴 데드라인. heartbeat < idle이어야 하며, 살아 있는 스트림은 write마다 데드라인을 연장해 `WRITE_TIMEOUT`에 죽지 않습니다 |
+| `ALERT_POLL_INTERVAL` / `ALERT_POLL_MAX_BACKOFF` | `30s` / `5m` | 알림 스냅숏 diff 폴링 주기와 실패 시 최대 backoff. Kubernetes API가 아니라 알림 데이터소스 방향입니다 |
+| `ALERT_SNAPSHOT_MAX` | `2000` | 알림 스냅숏 상한. 초과 poll은 false add/delete를 막기 위해 diff 전체를 보류하고 이전 complete snapshot을 유지합니다 |
 | `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행. **실주소가 설정된 데이터소스는 이 값과 무관하게 실제 어댑터를 씁니다** |
 | `ALLOWED_ORIGIN` | (비움) | 개발 중 Vite 오리진 허용 |
 
@@ -135,7 +141,8 @@ internal/
   auth/                  OIDC 인증 · 역할 → Scope 계산 (#10) · 로컬 mock IdP
   querycatalog/          등록형 쿼리 카탈로그 (#9) — 실행 가능한 질의의 유일한 원천
     defaults/              Git에 커밋되고 바이너리에 임베드되는 기본 카탈로그(YAML)
-  httpapi/               화면 단위 엔드포인트 · Scope 강제 · 섹션 봉투
+  stream/                상태 변경 SSE 허브 (#12) — 유계 재생 링 · Scope 필터 · 알림 스냅숏 diff
+  httpapi/               화면 단위 엔드포인트 · Scope 강제 · 섹션 봉투 · SSE 스트림
   contract/              packages/contracts와 같은 JSON을 만드는 Go 타입
   timerange/             범위별 강제 Step, Custom 30일 상한
   scope/                 서버가 강제하는 조회 범위
@@ -169,6 +176,7 @@ GET /api/v1/clusters/{clusterId}/logs?ns=&levels=&q=&cursor=
 GET /api/v1/clusters/{clusterId}/topology?ns=
 GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series
 GET /api/v1/clusters/{clusterId}/alerts?ns=
+GET /api/v1/clusters/{clusterId}/events/stream        (SSE · #12)
 GET /healthz   GET /readyz   GET /version   GET /metrics
 ```
 
@@ -183,6 +191,24 @@ go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDa
 등록된 전체 라우트의 계약은 [`packages/contracts/openapi.yaml`](../../packages/contracts/openapi.yaml)에
 있습니다. 라우트를 바꾸면 그 문서도 고칩니다 — 어긋나면 `TestOpenAPIMatchesRouter`가 실패합니다.
 화면 응답 DTO의 원본은 여전히 `packages/contracts/src/index.ts`입니다.
+
+### 상태 변경 SSE (#12)
+
+`/events/stream`은 Pod · Workload · Kubernetes Event · Alert의 **무효화 신호**를
+`text/event-stream`으로 내려보냅니다. data 본문은 `EventEnvelope`
+(정본: `packages/contracts/schema/stream.schema.json`)이며 원본 객체·Alert annotation·
+시계열은 싣지 않습니다 — 화면은 신호를 받고 기존 HTTP 계약으로 다시 조회합니다 (ADR 0005).
+
+- 인증·클러스터 권한·감사 로그는 다른 `/api/v1` 경로와 같습니다. 전달되는 모든
+  이벤트(라이브·재생)는 서버가 해석한 Scope로 필터링됩니다.
+- 재연결 시 `Last-Event-ID`를 보내면 같은 프로세스 인스턴스가 보존 중인 구간
+  (`STREAM_REPLAY_EVENTS`)을 순서대로 재생합니다. 인스턴스가 바뀌었거나 구간을
+  벗어나면 `kind=reset` 이벤트가 옵니다 — 현재 상태를 HTTP로 다시 조회하세요.
+- 이 경로는 질의 보호(#11)의 12s budget·rate·cache를 타지 않습니다. 대신
+  스트림 전용 연결 상한과 write 유휴 데드라인이 자원을 지킵니다 (ADR 0007).
+- 브라우저 기본 `EventSource`는 `Authorization: Bearer` 헤더를 설정할 수 없습니다.
+  OIDC UI 연결은 토큰 query parameter를 쓰지 않고, 후속 authenticated fetch-stream
+  또는 same-origin HttpOnly cookie proxy로 배선해야 합니다.
 
 ### 응답 규칙
 
@@ -392,7 +418,7 @@ curl -X POST 'http://127.0.0.1:8091/token?sub=dev&roles=platform.admin'
 curl -X POST 'http://127.0.0.1:8091/token?sub=kim&roles=namespace.viewer:payments'
 ```
 
-SSE 이벤트의 Scope 반영은 #12(SSE)에서 함께 구현합니다.
+SSE의 라이브·재생 이벤트에도 위 Scope가 서버에서 동일하게 강제됩니다.
 
 ### 쿼리 카탈로그 (#9)
 
@@ -447,7 +473,12 @@ ITEST_KUBECONFIG=~/.kube/config \
   `GREPTIME_ITEST_URL`/`QUICKWIT_ITEST_URL`로 `make api-itest`가 수행합니다).
 - SubjectAccessReview 연동 Scope. OIDC 역할 기반 Scope는 #10으로 구현되었고
   (`internal/auth`, `AUTH_MODE=oidc`), K8s RBAC와의 대조는 후속 과제입니다.
-- SSE의 Scope 반영 (#12와 함께).
-- Redis 캐시 (#11). 지금은 프로세스 내 TTL + singleflight입니다.
+- UI의 SSE 연결. 백엔드 스트림은 #12로 구현되어 있습니다 — 기본 `EventSource`는
+  OIDC Bearer 헤더를 붙이지 못하므로 token query 없이 authenticated fetch-stream 또는
+  same-origin HttpOnly cookie proxy가 필요합니다.
+  `GET /api/v1/clusters/{clusterId}/events/stream`, `internal/stream` 허브
+  (재생 링 · Last-Event-ID 복구 · reset 폴백 · Scope 필터 · 연결 상한, ADR 0007).
+  알림 스트림의 **실소스**는 Alertmanager 실클라이언트가 생겨야 합니다 — 지금은
+  데모 소스 또는 조용한 degraded입니다.
 - 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
 - 멀티 클러스터. 지금은 프로세스당 클러스터 하나입니다.

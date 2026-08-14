@@ -633,3 +633,33 @@ export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = {
   resolved: "해소됨",
   pending: "평가 중",
 };
+
+/* ── 상태 변경 SSE (이슈 #12) ───────────────────────────────────────────── */
+
+/**
+ * SSE 무효화 대상 종류. `reset`은 데이터가 아니라 제어 신호로,
+ * 브라우저가 현재 상태를 HTTP로 다시 조회해야 함을 뜻합니다.
+ * 정본 스키마: packages/contracts/schema/stream.schema.json
+ */
+export type StreamEventKind = "pod" | "workload" | "kubeevent" | "alert" | "reset";
+
+/** SSE 변경 종류. */
+export type StreamEventAction = "added" | "updated" | "deleted" | "reset";
+
+/**
+ * `GET /api/v1/clusters/{clusterId}/events/stream` 각 SSE 메시지의 data 본문입니다.
+ * 무효화 신호이며 raw Kubernetes 객체·Secret·Alert annotation·시계열 샘플은 싣지 않습니다.
+ * `id`는 불투명 값입니다 — 재연결 시 Last-Event-ID로 되돌려 보내기만 합니다.
+ * 서버 인스턴스가 바뀌었거나 보존 창을 벗어난 ID면 `kind: "reset"`이 내려옵니다.
+ */
+export interface EventEnvelope {
+  id: string;
+  kind: StreamEventKind;
+  action: StreamEventAction;
+  clusterId: string;
+  observedAt: string;
+  /** 비어 있으면 클러스터 전역 변경 — Scope All 구독자에게만 전달됩니다. */
+  namespace?: string;
+  entity?: EntityRef;
+  resourceVersion?: string;
+}

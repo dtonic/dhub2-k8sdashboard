@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 )
 
 // TestLoadDefaultsAreClusterSafe — 기본값은 클러스터에 가장 안전한 쪽입니다.
@@ -60,6 +62,58 @@ func TestProtectionPolicyRelationships(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("invalid relationship %d passed", i)
 		}
+	}
+}
+
+func TestStreamPolicyRelationships(t *testing.T) {
+	tests := []struct {
+		mutate func(*Config)
+		want   string
+	}{
+		{func(c *Config) { c.StreamHeartbeat = c.StreamWriteIdle }, "STREAM_HEARTBEAT"},
+		{func(c *Config) { c.StreamMaxPerSubject = c.StreamMaxConnections + 1 }, "STREAM_MAX_PER_SUBJECT"},
+		{func(c *Config) { c.AlertPollMaxBackoff = c.AlertPollInterval - time.Nanosecond }, "ALERT_POLL_MAX_BACKOFF"},
+		{func(c *Config) { c.StreamReplayEvents = 0 }, "STREAM_REPLAY_EVENTS"},
+	}
+	for _, tc := range tests {
+		cfg := Load()
+		tc.mutate(&cfg)
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("invalid stream config %s: %v", tc.want, err)
+		}
+	}
+}
+
+func TestStreamAbsoluteCaps(t *testing.T) {
+	tests := []struct {
+		mutate func(*Config)
+		want   string
+	}{
+		{func(c *Config) { c.StreamReplayEvents = stream.MaxRingSize + 1 }, "STREAM_REPLAY_EVENTS"},
+		{func(c *Config) { c.StreamMaxConnections = stream.MaxConnections + 1 }, "STREAM_MAX_CONNECTIONS"},
+		{func(c *Config) { c.StreamSubBuffer = stream.MaxSubscriberBuffer + 1 }, "STREAM_SUB_BUFFER"},
+		{func(c *Config) { c.StreamMaxConnections, c.StreamSubBuffer = stream.MaxConnections, 65 }, "slots"},
+	}
+	for _, tc := range tests {
+		cfg := Load()
+		tc.mutate(&cfg)
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("absolute cap %s: %v", tc.want, err)
+		}
+	}
+	cfg := Load()
+	cfg.StreamReplayEvents = stream.MaxRingSize
+	cfg.StreamMaxConnections = stream.MaxConnections
+	cfg.StreamMaxPerSubject = stream.MaxConnections
+	cfg.StreamSubBuffer = 64
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("exact stream cap boundary: %v", err)
+	}
+	cfg = Load()
+	cfg.StreamReplayEvents = 1
+	cfg.StreamSubBuffer = 2
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("subscriber buffer need not be <= replay ring: %v", err)
 	}
 }
 
