@@ -8,15 +8,20 @@
 //   - Scope(namespace·pod UID·workload)는 **서버가 filter로 강제 삽입**합니다.
 //     사용자 검색어는 match 질의의 값으로만 들어가므로 연산자를 끼워 넣어
 //     필터를 우회할 수 없습니다. (README §10)
-//   - offset 페이징을 만들지 않습니다. 커서는 (timestamp, 경계 id 집합)이고,
-//     다음 페이지는 timestamp 상한 + 경계 중복 제거로 계산합니다. (ADR 0003)
+//   - offset 페이징을 만들지 않습니다. Quickwit TTL scroll snapshot과 HMAC-bound
+//     cursor로 다음 페이지를 계산합니다. (ADR 0006)
 //   - 마스킹은 서버에서만 합니다. 원문은 응답에 실리지 않습니다. (ADR 0003)
 package quickwit
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"hash/fnv"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +51,7 @@ type FieldMap struct {
 	Node         string
 	TraceID      string
 	SpanID       string
+	EventID      string
 }
 
 func (f FieldMap) withDefaults() FieldMap {
@@ -66,6 +72,7 @@ func (f FieldMap) withDefaults() FieldMap {
 	def(&f.Node, "node")
 	def(&f.TraceID, "trace_id")
 	def(&f.SpanID, "span_id")
+	def(&f.EventID, "event_id")
 	return f
 }
 
@@ -106,11 +113,14 @@ func (c Config) withDefaults() Config {
 // DefaultPageSize는 커서 한 페이지 크기입니다. 데모 어댑터와 같습니다.
 const DefaultPageSize = 100
 
+const scrollTTL = "1m"
+
 // Source는 datasource.Logs 구현입니다.
 type Source struct {
 	cfg     Config
 	client  *upstream.Client
 	catalog datasource.PodCatalog
+	hmacKey [32]byte
 }
 
 // New는 어댑터를 만듭니다. catalog는 facet의 Pod 신원(UID) 변환에 필요합니다.
@@ -126,17 +136,23 @@ func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Source{cfg: cfg, client: client, catalog: catalog}, nil
+	s := &Source{cfg: cfg, client: client, catalog: catalog}
+	if _, err := rand.Read(s.hmacKey[:]); err != nil {
+		return nil, fmt.Errorf("Quickwit 커서 키를 만들 수 없습니다: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Source) searchPath() string {
 	return "/api/v1/_elastic/" + s.cfg.Index + "/_search"
 }
 
+func (s *Source) scrollPath() string { return "/api/v1/_elastic/_search/scroll" }
+
 /* ── Search ─────────────────────────────────────────────────────────────── */
 
 func (s *Source) Search(ctx context.Context, q datasource.LogQuery) (datasource.LogPage, error) {
-	cur, ok := decodeCursor(q.Cursor)
+	cur, ok := decodeCursor(q.Cursor, s.cfg.MaxLines, s.hmacKey[:])
 	if !ok {
 		return datasource.LogPage{}, fmt.Errorf("커서를 해석할 수 없습니다")
 	}
@@ -147,56 +163,72 @@ func (s *Source) Search(ctx context.Context, q datasource.LogQuery) (datasource.
 	if size > s.cfg.MaxPageSize {
 		size = s.cfg.MaxPageSize
 	}
+	if size > s.cfg.MaxLines {
+		size = s.cfg.MaxLines
+	}
+	queryHash := s.queryHash(q, size)
+	if q.Cursor != "" && !hmac.Equal([]byte(cur.QueryHash), []byte(queryHash)) {
+		return datasource.LogPage{}, fmt.Errorf("커서가 현재 조회 범위와 일치하지 않습니다")
+	}
+	scanRemaining := s.cfg.MaxLines - cur.Scanned
+	if q.Cursor != "" && scanRemaining < size {
+		return datasource.LogPage{
+			Lines:     []contract.LogLine{},
+			MaxLines:  s.cfg.MaxLines,
+			Truncated: cur.Total > cur.Scanned,
+		}, nil
+	}
 
-	// 경계 timestamp의 이미 본 문서를 다시 받게 되므로 그만큼 더 요청합니다.
-	body := s.searchBody(q, cur, size+len(cur.IDs))
 	var res esResponse
-	if err := s.client.PostJSON(ctx, s.searchPath(), body, &res); err != nil {
-		return datasource.LogPage{}, err
+	if q.Cursor == "" {
+		body := s.searchBody(q, size)
+		if err := s.client.PostJSONQuery(ctx, s.searchPath(), url.Values{"scroll": {scrollTTL}}, body, &res); err != nil {
+			return datasource.LogPage{}, err
+		}
+		cur.QueryHash = queryHash
+		cur.Total = res.Hits.Total.Value
+		nonce := make([]byte, nonceBytes)
+		if _, err := rand.Read(nonce); err != nil {
+			return datasource.LogPage{}, fmt.Errorf("Quickwit 조회 nonce를 만들 수 없습니다: %w", err)
+		}
+		cur.Nonce = base64.RawURLEncoding.EncodeToString(nonce)
+	} else {
+		if err := s.client.GetJSONBodyOnce(ctx, s.scrollPath(), map[string]any{"scroll_id": cur.ScrollID}, &res); err != nil {
+			return datasource.LogPage{}, err
+		}
+	}
+	if len(res.Hits.Hits) > scanRemaining {
+		return datasource.LogPage{}, fmt.Errorf("Quickwit scroll page exceeded scan limit: %w", datasource.ErrUnavailable)
 	}
 
-	seen := make(map[string]struct{}, len(cur.IDs))
-	for _, id := range cur.IDs {
-		seen[id] = struct{}{}
-	}
-
-	page := datasource.LogPage{Lines: make([]contract.LogLine, 0, size), MaxLines: s.cfg.MaxLines}
-	dropped := 0
-	for _, hit := range res.Hits.Hits {
-		line, ok := s.line(hit)
+	page := datasource.LogPage{Lines: make([]contract.LogLine, 0, len(res.Hits.Hits)), MaxLines: s.cfg.MaxLines}
+	idPrefix := traversalIDPrefix(s.hmacKey[:], cur.Nonce)
+	for i, hit := range res.Hits.Hits {
+		line, ok := s.lineAt(hit, idPrefix, cur.Scanned+i)
 		if !ok {
 			continue
 		}
-		if _, dup := seen[line.ID]; dup {
-			dropped++
-			continue
+		page.Lines = append(page.Lines, line)
+	}
+
+	cur.Returned += len(page.Lines)
+	cur.Scanned += len(res.Hits.Hits)
+	cur.ScrollID = res.ScrollID
+	scanRemaining = s.cfg.MaxLines - cur.Scanned
+	more := cur.Scanned < cur.Total
+	cur.Truncated = cur.Total > s.cfg.MaxLines || (more && scanRemaining < size)
+	page.Truncated = cur.Truncated
+	if more && scanRemaining >= size && len(res.Hits.Hits) > 0 {
+		if len(cur.ScrollID) == 0 || len(cur.ScrollID) > maxScrollIDBytes {
+			return datasource.LogPage{}, fmt.Errorf("Quickwit scroll cursor: %w", datasource.ErrUnavailable)
 		}
-		if len(page.Lines) < size {
-			page.Lines = append(page.Lines, line)
+		if next, ok := encodeCursor(cur, s.hmacKey[:]); ok {
+			page.Next = next
+		} else {
+			page.Truncated = true
 		}
 	}
 
-	// 다음 페이지 유무 — 요청한 만큼 다 왔다면 더 있을 수 있습니다.
-	gotFull := len(res.Hits.Hits) >= size+len(cur.IDs)
-	if gotFull && len(page.Lines) > 0 {
-		last := page.Lines[len(page.Lines)-1]
-		next := cursor{T: last.T}
-		for _, l := range page.Lines {
-			if l.T == last.T {
-				next.IDs = append(next.IDs, l.ID)
-			}
-		}
-		// 경계가 이전 커서와 같은 timestamp면 본 것 목록을 이어받습니다.
-		// 같은 timestamp가 페이지보다 긴 경우에도 중복이 나가지 않습니다.
-		if cur.T == last.T {
-			next.IDs = append(next.IDs, cur.IDs...)
-		}
-		page.Next = encodeCursor(next)
-	}
-
-	if res.Hits.Total.Value > s.cfg.MaxLines {
-		page.Truncated = true
-	}
 	return page, nil
 }
 
@@ -208,7 +240,7 @@ func (s *Source) Histogram(ctx context.Context, q datasource.LogQuery) ([]contra
 	}
 	body := map[string]any{
 		"size":  0,
-		"query": s.boolQuery(q, cursor{}),
+		"query": s.boolQuery(q),
 		"aggs": map[string]any{
 			"over_time": map[string]any{
 				"date_histogram": map[string]any{
@@ -252,7 +284,7 @@ func (s *Source) Facets(ctx context.Context, q datasource.LogQuery) (contract.Lo
 	}
 	body := map[string]any{
 		"size":  0,
-		"query": s.boolQuery(q, cursor{}),
+		"query": s.boolQuery(q),
 		"aggs": map[string]any{
 			"workloads":  termsAgg(s.cfg.Fields.WorkloadName),
 			"pods":       termsAgg(s.cfg.Fields.PodName),
@@ -306,7 +338,7 @@ func (s *Source) Facets(ctx context.Context, q datasource.LogQuery) (contract.Lo
 
 /* ── 문서 → LogLine ─────────────────────────────────────────────────────── */
 
-func (s *Source) line(hit esHit) (contract.LogLine, bool) {
+func (s *Source) lineAt(hit esHit, idPrefix string, ordinal int) (contract.LogLine, bool) {
 	src := hit.Source
 	if src == nil {
 		return contract.LogLine{}, false
@@ -320,9 +352,9 @@ func (s *Source) line(hit esHit) (contract.LogLine, bool) {
 	raw := str(src[f.Message])
 	masked, spans := mask.Apply(raw)
 
-	id := hit.ID
+	id := str(src[f.EventID])
 	if id == "" {
-		id = stableID(ts, src, f)
+		id = traversalID(idPrefix, ordinal)
 	}
 
 	return contract.LogLine{
@@ -343,12 +375,29 @@ func (s *Source) line(hit esHit) (contract.LogLine, bool) {
 	}, true
 }
 
-// stableID는 _id가 없을 때의 결정적 신원입니다. 같은 문서는 재조회해도
-// 같은 id가 되어야 커서 경계의 중복 제거가 성립합니다.
-func stableID(ts int64, src map[string]any, f FieldMap) string {
-	h := fnv.New64a()
-	fmt.Fprintf(h, "%d|%s|%s|%s|%s", ts, str(src[f.PodUID]), str(src[f.PodName]), str(src[f.Container]), str(src[f.Message]))
-	return strconv.FormatInt(ts, 10) + "-" + strconv.FormatUint(h.Sum64(), 36)
+func traversalIDPrefix(key []byte, nonce string) string {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(nonce))
+	return "scroll-" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func traversalID(prefix string, ordinal int) string {
+	return prefix + "-" + strconv.Itoa(ordinal)
+}
+
+func (s *Source) queryHash(q datasource.LogQuery, pageSize int) string {
+	q.Target.Namespaces = append([]string(nil), q.Target.Namespaces...)
+	sort.Strings(q.Target.Namespaces)
+	q.Levels = append([]contract.LogLevel(nil), q.Levels...)
+	sort.Slice(q.Levels, func(i, j int) bool { return q.Levels[i] < q.Levels[j] })
+	canonical := struct {
+		Index, ClusterID string
+		PageSize         int
+		Query            map[string]any
+	}{s.cfg.Index, q.Target.ClusterID, pageSize, s.boolQuery(q)}
+	raw, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(raw)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func str(v any) string {

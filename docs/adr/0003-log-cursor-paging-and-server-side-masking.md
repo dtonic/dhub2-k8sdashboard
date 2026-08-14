@@ -1,9 +1,9 @@
 # ADR 0003 — 로그는 커서로 페이징하고, 마스킹은 서버에서만 한다
 
-- 상태: Accepted
+- 상태: Superseded by 0006
 - 날짜: 2026-08-13
 - 결정자: @xenx96
-- 관련: 이슈 [#16](https://github.com/xenx96/k8s-dashboard/issues/16), [#7](https://github.com/xenx96/k8s-dashboard/issues/7) · README §10 보안 원칙, §11 성능 원칙 · ADR 0002
+- 관련: 이슈 [#16](https://github.com/xenx96/k8s-dashboard/issues/16), [#7](https://github.com/xenx96/k8s-dashboard/issues/7) · README §10 보안 원칙, §11 성능 원칙 · ADR 0002 · ADR 0006
 
 ## 배경
 

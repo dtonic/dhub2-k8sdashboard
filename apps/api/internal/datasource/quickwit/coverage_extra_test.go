@@ -2,6 +2,8 @@ package quickwit
 
 import (
 	"context"
+	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,42 +35,33 @@ func TestTimestampNormalization(t *testing.T) {
 	}
 }
 
-// TestStableIDIsDeterministic — _id가 없는 인덱스에서도 같은 문서는 재조회 시
-// 같은 id여야 커서 경계의 중복 제거가 성립합니다.
-func TestStableIDIsDeterministic(t *testing.T) {
-	fields := FieldMap{}.withDefaults()
-	src := map[string]any{
-		"pod_uid": "uid-a", "pod_name": "p", "container": "app", "message": "hello",
+func TestTraversalIDIsDeterministicAndOrdinalUnique(t *testing.T) {
+	key := make([]byte, 32)
+	prefix := traversalIDPrefix(key, "nonce")
+	a := traversalID(prefix, 1)
+	if a != traversalID(prefix, 1) {
+		t.Fatal("같은 traversal ordinal의 id가 달라졌습니다")
 	}
-	a := stableID(1000, src, fields)
-	b := stableID(1000, src, fields)
-	if a != b {
-		t.Fatalf("같은 문서의 id가 다릅니다: %s %s", a, b)
-	}
-	src2 := map[string]any{
-		"pod_uid": "uid-a", "pod_name": "p", "container": "app", "message": "world",
-	}
-	if a == stableID(1000, src2, fields) {
-		t.Fatal("다른 문서가 같은 id를 받았습니다")
+	if a == traversalID(prefix, 2) {
+		t.Fatal("다른 ordinal이 같은 id를 받았습니다")
 	}
 }
 
-// TestHitWithoutIDGetsStableID — 실제 검색 경로에서 _id 없는 hit이
-// 결정적 id를 받는지 확인합니다.
-func TestHitWithoutIDGetsStableID(t *testing.T) {
+// TestHitWithoutEventIDGetsTraversalID는 event_id 없는 hit이 traversal ID를 받는지 확인합니다.
+func TestHitWithoutEventIDGetsTraversalID(t *testing.T) {
 	s := &Source{cfg: Config{}.withDefaults()}
-	line, ok := s.line(esHit{Source: map[string]any{
+	line, ok := s.lineAt(esHit{Source: map[string]any{
 		"timestamp": float64(1_700_000_000_000), "message": "m", "level": "info",
 		"namespace": "payments", "pod_name": "p", "pod_uid": "u", "container": "app",
-	}})
+	}}, traversalIDPrefix(s.hmacKey[:], "nonce"), 0)
 	if !ok || line.ID == "" {
 		t.Fatalf("id가 비었습니다: %+v", line)
 	}
 	// 타임스탬프 없는 문서는 버립니다 — 정렬 키가 없으면 커서가 성립하지 않습니다.
-	if _, ok := s.line(esHit{Source: map[string]any{"message": "m"}}); ok {
+	if _, ok := s.lineAt(esHit{Source: map[string]any{"message": "m"}}, "prefix", 0); ok {
 		t.Fatal("타임스탬프 없는 문서가 통과했습니다")
 	}
-	if _, ok := s.line(esHit{}); ok {
+	if _, ok := s.lineAt(esHit{}, "prefix", 0); ok {
 		t.Fatal("_source 없는 hit이 통과했습니다")
 	}
 }
@@ -87,32 +80,69 @@ func TestLevelNormalizationTable(t *testing.T) {
 	}
 }
 
-// TestCursorRoundTripAndRejection — 커서 인코딩 왕복과 변조 거절입니다.
-func TestCursorRoundTripAndRejection(t *testing.T) {
-	c := cursor{T: 1234, IDs: []string{"a", "b"}}
-	enc := encodeCursor(c)
-	dec, ok := decodeCursor(enc)
-	if !ok || dec.T != 1234 || len(dec.IDs) != 2 {
+// TestCursorHMACRoundTripAndRejection은 커서 왕복과 payload splice/HMAC 불일치를 검증합니다.
+func TestCursorHMACRoundTripAndRejection(t *testing.T) {
+	key := make([]byte, 32)
+	q := base64.RawURLEncoding.EncodeToString(make([]byte, digestBytes))
+	nonce := base64.RawURLEncoding.EncodeToString(make([]byte, nonceBytes))
+	c := cursor{ScrollID: "scroll-1", QueryHash: q, Nonce: nonce, Returned: 2, Scanned: 2, Total: 10}
+	enc, ok := encodeCursor(c, key)
+	if !ok {
+		t.Fatal("커서가 8KiB 상한을 넘었습니다")
+	}
+	for _, invalid := range []string{"", strings.Repeat("s", maxScrollIDBytes+1)} {
+		bad := c
+		bad.ScrollID = invalid
+		if _, ok := encodeCursor(bad, key); ok {
+			t.Fatal("invalid scroll id cursor가 발행됐습니다")
+		}
+	}
+	dec, ok := decodeCursor(enc, 100, key)
+	if !ok || dec.ScrollID != "scroll-1" || dec.Returned != 2 {
 		t.Fatalf("왕복 실패: %+v", dec)
 	}
-	if _, ok := decodeCursor("!!!"); ok {
+	allMalformed := c
+	allMalformed.Returned = 0
+	allMalformed.Scanned = 1
+	encMalformed, ok := encodeCursor(allMalformed, key)
+	if !ok {
+		t.Fatal("all-malformed page cursor encoding failed")
+	}
+	if decoded, ok := decodeCursor(encMalformed, 100, key); !ok || decoded.Returned != 0 || decoded.Scanned != 1 {
+		t.Fatalf("all-malformed page cursor rejected: %+v", decoded)
+	}
+	if _, ok := decodeCursor("!!!", 100, key); ok {
 		t.Fatal("base64 아닌 커서가 통과했습니다")
 	}
-	if _, ok := decodeCursor("bm90LWpzb24"); ok { // "not-json"
+	if _, ok := decodeCursor("bm90LWpzb24", 100, key); ok { // "not-json"
 		t.Fatal("JSON 아닌 커서가 통과했습니다")
 	}
-	if c, ok := decodeCursor(""); !ok || c.T != 0 {
+	if c, ok := decodeCursor("", 100, key); !ok || c.ScrollID != "" {
 		t.Fatal("빈 커서는 첫 페이지입니다")
 	}
 
-	// 경계 id 상한 — 커서가 무한히 자라지 않습니다.
-	big := cursor{T: 1}
-	for i := 0; i < maxBoundaryIDs+100; i++ {
-		big.IDs = append(big.IDs, "id")
+	// payload만 바꿔 checksum이 불일치한 입력과 oversized/malformed 입력을 거절합니다.
+	raw, err := base64.RawURLEncoding.DecodeString(enc)
+	if err != nil {
+		t.Fatal(err)
 	}
-	dec, _ = decodeCursor(encodeCursor(big))
-	if len(dec.IDs) > maxBoundaryIDs {
-		t.Fatalf("경계 id가 상한을 넘습니다: %d", len(dec.IDs))
+	tampered := strings.Replace(string(raw), `"n":2`, `"n":3`, 1)
+	if _, ok := decodeCursor(base64.RawURLEncoding.EncodeToString([]byte(tampered)), 100, key); ok {
+		t.Fatal("HMAC이 불일치한 커서가 통과했습니다")
+	}
+	if _, ok := decodeCursor(strings.Repeat("A", maxEncodedCursorBytes+1), 100, key); ok {
+		t.Fatal("oversized 커서가 통과했습니다")
+	}
+	bad := c
+	bad.QueryHash = "not-a-digest"
+	badEncoded, _ := encodeCursor(bad, key)
+	if _, ok := decodeCursor(badEncoded, 100, key); ok {
+		t.Fatal("malformed query digest가 통과했습니다")
+	}
+	wrongKey := make([]byte, 32)
+	wrongKey[0] = 1
+	if _, ok := decodeCursor(enc, 100, wrongKey); ok {
+		t.Fatal("다른 Source의 HMAC key로 커서가 통과했습니다")
 	}
 }
 

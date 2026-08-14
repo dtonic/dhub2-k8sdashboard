@@ -29,17 +29,29 @@ type doc struct {
 	level     string
 	msg       string
 	workload  string
+	kind      string
+	eventID   string
 	container string
+	malformed bool
 }
 
 // fakeQuickwit은 ES 호환 검색을 최소한으로 구현합니다 — range·term·terms 필터,
 // match(AND), timestamp desc 정렬, size. 정렬 동률은 id로 고정해 결정적입니다.
 type fakeQuickwit struct {
+	docs       []doc
+	mu         sync.Mutex
+	bodies     []map[string]any
+	scrolls    map[string]fakeScroll
+	nextScroll int
+	fail       atomic.Int32
+	hits       atomic.Int32
+	scanSizes  []int
+}
+
+type fakeScroll struct {
 	docs   []doc
-	mu     sync.Mutex
-	bodies []map[string]any
-	fail   atomic.Int32
-	hits   atomic.Int32
+	size   int
+	offset int
 }
 
 func (f *fakeQuickwit) handler(t *testing.T) http.Handler {
@@ -48,6 +60,25 @@ func (f *fakeQuickwit) handler(t *testing.T) http.Handler {
 		if f.fail.Load() > 0 {
 			f.fail.Add(-1)
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path == "/api/v1/_elastic/_search/scroll" {
+			var request struct {
+				ScrollID string `json:"scroll_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "bad scroll", http.StatusBadRequest)
+				return
+			}
+			f.mu.Lock()
+			state, found := f.scrolls[request.ScrollID]
+			delete(f.scrolls, request.ScrollID)
+			f.mu.Unlock()
+			if !found {
+				http.Error(w, "expired", http.StatusInternalServerError)
+				return
+			}
+			f.writeScrollPage(w, state)
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/_elastic/") || !strings.HasSuffix(r.URL.Path, "/_search") {
@@ -80,12 +111,18 @@ func (f *fakeQuickwit) handler(t *testing.T) http.Handler {
 		if len(page) > size {
 			page = page[:size]
 		}
-
-		res := map[string]any{
-			"hits": map[string]any{
-				"total": map[string]any{"value": len(matched)},
-				"hits":  hitsJSON(page),
-			},
+		res := map[string]any{"hits": map[string]any{"total": map[string]any{"value": len(matched)}, "hits": hitsJSON(page)}}
+		if r.URL.Query().Get("scroll") != "" {
+			f.mu.Lock()
+			f.scanSizes = append(f.scanSizes, len(page))
+			if f.scrolls == nil {
+				f.scrolls = map[string]fakeScroll{}
+			}
+			f.nextScroll++
+			id := fmt.Sprintf("scroll-%d", f.nextScroll)
+			f.scrolls[id] = fakeScroll{docs: matched, size: size, offset: len(page)}
+			f.mu.Unlock()
+			res["_scroll_id"] = id
 		}
 		if aggs, ok := body["aggs"].(map[string]any); ok {
 			res["aggregations"] = f.aggregate(matched, aggs)
@@ -94,15 +131,41 @@ func (f *fakeQuickwit) handler(t *testing.T) http.Handler {
 	})
 }
 
+func (f *fakeQuickwit) writeScrollPage(w http.ResponseWriter, state fakeScroll) {
+	end := state.offset + state.size
+	if end > len(state.docs) {
+		end = len(state.docs)
+	}
+	page := state.docs[state.offset:end]
+	f.mu.Lock()
+	f.scanSizes = append(f.scanSizes, len(page))
+	f.nextScroll++
+	id := fmt.Sprintf("scroll-%d", f.nextScroll)
+	if end < len(state.docs) {
+		f.scrolls[id] = fakeScroll{docs: state.docs, size: state.size, offset: end}
+	}
+	f.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"_scroll_id": id,
+		"hits":       map[string]any{"total": map[string]any{"value": len(state.docs)}, "hits": hitsJSON(page)},
+	})
+}
+
 func hitsJSON(page []doc) []any {
 	out := make([]any, 0, len(page))
 	for _, d := range page {
+		source := map[string]any{
+			"namespace": d.ns, "pod_name": d.pod, "pod_uid": d.uid,
+			"level": d.level, "message": d.msg, "workload_name": d.workload, "container": d.container,
+			"workload_kind": d.kind,
+			"event_id":      d.eventID,
+		}
+		if !d.malformed {
+			source["timestamp"] = d.ts
+		}
 		out = append(out, map[string]any{
-			"_id": d.id,
-			"_source": map[string]any{
-				"timestamp": d.ts, "namespace": d.ns, "pod_name": d.pod, "pod_uid": d.uid,
-				"level": d.level, "message": d.msg, "workload_name": d.workload, "container": d.container,
-			},
+			"_id":     d.id,
+			"_source": source,
 		})
 	}
 	return out
@@ -127,6 +190,8 @@ func (f *fakeQuickwit) filter(body map[string]any) []doc {
 				return d.level
 			case "workload_name":
 				return d.workload
+			case "workload_kind":
+				return d.kind
 			case "container":
 				return d.container
 			}
@@ -264,7 +329,8 @@ func makeDocs(n int) []doc {
 		docs = append(docs, doc{
 			id: fmt.Sprintf("doc-%04d", i), ts: ts, ns: ns, pod: pod, uid: uid,
 			level: []string{"INFO", "warn", "ERROR"}[i%3],
-			msg:   fmt.Sprintf("request %d handled", i), workload: wl, container: "app",
+			msg:   fmt.Sprintf("request %d handled", i), workload: wl,
+			kind: map[bool]string{true: "Deployment", false: "StatefulSet"}[ns == "payments"], container: "app",
 		})
 	}
 	return docs
@@ -348,6 +414,322 @@ func TestCursorPagingHasNoDuplicatesOrGaps(t *testing.T) {
 	}
 }
 
+// TestCursorPagingBeyond512TimestampCollisions는 한 timestamp의 경계 상태가
+// 과거 512개 제한을 넘어도 모든 문서를 정확히 한 번 반환하는지 검증합니다.
+func TestCursorPagingBeyond512TimestampCollisions(t *testing.T) {
+	docs := makeDocs(700)
+	for i := range docs {
+		docs[i].ts = testEnd.UnixMilli()
+	}
+	f := &fakeQuickwit{docs: docs}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 700 })
+
+	q := baseQuery("")
+	q.PageSize = 100
+	seen := map[string]bool{}
+	maxCursorBytes, maxUpstreamSize, pages := 0, 0, 0
+	for {
+		res, err := s.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		for _, line := range res.Lines {
+			if seen[line.ID] {
+				t.Fatalf("중복: %s", line.ID)
+			}
+			seen[line.ID] = true
+		}
+		if len(res.Next) > maxCursorBytes {
+			maxCursorBytes = len(res.Next)
+		}
+		body := f.bodies[len(f.bodies)-1]
+		if size := int(body["size"].(float64)); size > maxUpstreamSize {
+			maxUpstreamSize = size
+		}
+		if res.Next == "" {
+			break
+		}
+		q.Cursor = res.Next
+	}
+	if len(seen) != 700 {
+		t.Fatalf("누락: %d/700", len(seen))
+	}
+	if maxUpstreamSize > 700 {
+		t.Fatalf("upstream size가 MaxLines를 넘었습니다: %d", maxUpstreamSize)
+	}
+	t.Logf("700 collision: pages=%d requests=%d max_cursor_bytes=%d max_upstream_size=%d", pages, f.hits.Load(), maxCursorBytes, maxUpstreamSize)
+}
+
+func TestMaxLinesStopsTraversalWithoutOverflow(t *testing.T) {
+	f := &fakeQuickwit{docs: makeDocs(800)}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 550 })
+	q := baseQuery("")
+	q.PageSize = 100
+
+	total := 0
+	for {
+		res, err := s.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += len(res.Lines)
+		if res.Next == "" {
+			if !res.Truncated {
+				t.Fatal("cap 뒤 데이터가 있는데 truncated=false입니다")
+			}
+			break
+		}
+		q.Cursor = res.Next
+	}
+	if total != 500 {
+		t.Fatalf("bounded scan 불일치: got %d want 500", total)
+	}
+	if got := int(f.bodies[0]["size"].(float64)); got != 100 {
+		t.Fatalf("initial scroll size = %d, want 100", got)
+	}
+	scanned := 0
+	for _, size := range f.scanSizes {
+		if size > min(100, 550-scanned) {
+			t.Fatalf("scan request exceeded remaining budget: size=%d scanned=%d", size, scanned)
+		}
+		scanned += size
+	}
+	if scanned != 500 {
+		t.Fatalf("scanned = %d, want 500", scanned)
+	}
+	for _, body := range f.bodies {
+		if size := int(body["size"].(float64)); size > 550 {
+			t.Fatalf("upstream size가 MaxLines를 넘었습니다: %d", size)
+		}
+	}
+}
+
+func TestPrimeMaxLinesKeepsUpstreamCallsBounded(t *testing.T) {
+	f := &fakeQuickwit{docs: makeDocs(6000)}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 5003 })
+	q := baseQuery("")
+	q.PageSize = 100
+
+	returned := 0
+	for {
+		page, err := s.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		returned += len(page.Lines)
+		if page.Next == "" {
+			if !page.Truncated {
+				t.Fatal("underfilled scan cap must be truncated")
+			}
+			break
+		}
+		q.Cursor = page.Next
+	}
+	scanned := 0
+	for _, size := range f.scanSizes {
+		scanned += size
+	}
+	if returned != 5000 || scanned != 5000 || f.hits.Load() != 50 {
+		t.Fatalf("prime cap traversal: returned=%d scanned=%d calls=%d, want 5000/5000/50", returned, scanned, f.hits.Load())
+	}
+}
+
+func TestMaxLinesCapsMalformedAndValidHitScanning(t *testing.T) {
+	docs := make([]doc, 9)
+	for i := range docs {
+		docs[i] = doc{
+			id: fmt.Sprintf("doc-%d", i), ts: testEnd.UnixMilli(), ns: "payments",
+			pod: "payments-api-7f-aaa", uid: "uid-aaa", level: "INFO", msg: fmt.Sprintf("within-cap-%d", i),
+		}
+	}
+	docs[0].malformed = true
+	docs[2].malformed = true
+	for i := 4; i < len(docs); i++ {
+		docs[i].msg = fmt.Sprintf("after-cap-%d", i)
+	}
+
+	f := &fakeQuickwit{docs: docs}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 6 })
+	q := baseQuery("")
+	q.PageSize = 4
+
+	var lines []contract.LogLine
+	for {
+		page, err := s.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, page.Lines...)
+		if page.Next == "" {
+			if !page.Truncated {
+				t.Fatal("scan cap reached with more hits but truncated=false")
+			}
+			break
+		}
+		q.Cursor = page.Next
+	}
+	if len(lines) != 2 {
+		t.Fatalf("valid lines within scan cap = %d, want 2", len(lines))
+	}
+	for _, line := range lines {
+		if strings.Contains(line.Message, "after-cap") {
+			t.Fatalf("returned a valid line beyond scan cap: %q", line.Message)
+		}
+	}
+	if got := fmt.Sprint(f.scanSizes); got != "[4]" {
+		t.Fatalf("scan sizes = %s, want [4]", got)
+	}
+	if got := f.hits.Load(); got != 1 {
+		t.Fatalf("upstream requests = %d, want 1", got)
+	}
+}
+
+func TestOversizedCursorIsRejectedBeforeUpstream(t *testing.T) {
+	f := &fakeQuickwit{docs: makeDocs(10)}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 100 })
+	q := baseQuery("")
+	q.Cursor = strings.Repeat("A", maxEncodedCursorBytes+1)
+	if _, err := s.Search(context.Background(), q); err == nil {
+		t.Fatal("oversized cursor가 거절되지 않았습니다")
+	}
+	if got := f.hits.Load(); got != 0 {
+		t.Fatalf("cursor 검증 전에 upstream이 호출됐습니다: %d회", got)
+	}
+}
+
+func TestInvalidUpstreamScrollIDIsUnavailable(t *testing.T) {
+	for name, scrollID := range map[string]string{
+		"missing":   "",
+		"oversized": strings.Repeat("s", maxScrollIDBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"_scroll_id": scrollID,
+					"hits": map[string]any{
+						"total": map[string]any{"value": 2},
+						"hits":  hitsJSON([]doc{{ts: testEnd.UnixMilli(), ns: "payments", msg: "one"}}),
+					},
+				})
+			}))
+			t.Cleanup(srv.Close)
+			s, err := New(Config{BaseURL: srv.URL}, catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.Search(context.Background(), baseQuery("payments"))
+			if !errors.Is(err, datasource.ErrUnavailable) {
+				t.Fatalf("invalid scroll id는 ErrUnavailable이어야 합니다: %v", err)
+			}
+		})
+	}
+}
+
+func TestFinalPageDoesNotRequireScrollID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits": map[string]any{
+				"total": map[string]any{"value": 1},
+				"hits":  hitsJSON([]doc{{ts: testEnd.UnixMilli(), ns: "payments", msg: "only"}}),
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	s, err := New(Config{BaseURL: srv.URL}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.Search(context.Background(), baseQuery("payments"))
+	if err != nil || len(page.Lines) != 1 || page.Next != "" {
+		t.Fatalf("final page: err=%v page=%+v", err, page)
+	}
+}
+
+func TestCursorIsBoundToSourceAndCurrentScope(t *testing.T) {
+	f := &fakeQuickwit{docs: makeDocs(300)}
+	s := newSource(t, f)
+	q := baseQuery("")
+	q.PageSize = 50
+	first, err := s.Search(context.Background(), q)
+	if err != nil || first.Next == "" {
+		t.Fatalf("첫 scroll cursor: %v %+v", err, first)
+	}
+	before := f.hits.Load()
+
+	q.Cursor = first.Next
+	q.Target.Namespace = "payments"
+	if _, err := s.Search(context.Background(), q); err == nil {
+		t.Fatal("다른 Scope에서 cursor가 재사용됐습니다")
+	}
+	if f.hits.Load() != before {
+		t.Fatal("Scope mismatch가 upstream 요청 전에 거절되지 않았습니다")
+	}
+	q.Target.Namespace = ""
+	q.PageSize = 25
+	if _, err := s.Search(context.Background(), q); err == nil {
+		t.Fatal("다른 page size로 scroll page 일부를 버릴 수 있습니다")
+	}
+
+	other := newSource(t, f)
+	q.PageSize = 50
+	if _, err := other.Search(context.Background(), q); err == nil {
+		t.Fatal("다른 Source HMAC key에서 cursor가 재사용됐습니다")
+	}
+}
+
+func TestTraversalIDsAreUniqueForIdenticalDocuments(t *testing.T) {
+	docs := make([]doc, 700)
+	for i := range docs {
+		docs[i] = doc{ts: testEnd.UnixMilli(), ns: "payments", pod: "same", uid: "same",
+			level: "INFO", msg: "identical", workload: "same", kind: "Deployment", container: "app"}
+	}
+	f := &fakeQuickwit{docs: docs}
+	s := newSource(t, f, func(c *Config) { c.MaxLines = 700 })
+	q := baseQuery("payments")
+	q.PageSize = 100
+	seen := map[string]bool{}
+	for {
+		page, err := s.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range page.Lines {
+			if seen[line.ID] {
+				t.Fatalf("동일 문서 traversal ID 충돌: %s", line.ID)
+			}
+			seen[line.ID] = true
+		}
+		if page.Next == "" {
+			break
+		}
+		q.Cursor = page.Next
+	}
+	if len(seen) != 700 {
+		t.Fatalf("고유 ID %d/700", len(seen))
+	}
+}
+
+func TestStoredEventIDIsPreferred(t *testing.T) {
+	f := &fakeQuickwit{docs: []doc{{id: "", eventID: "event-42", ts: testEnd.UnixMilli(), ns: "payments", msg: "m"}}}
+	s := newSource(t, f)
+	page, err := s.Search(context.Background(), baseQuery("payments"))
+	if err != nil || len(page.Lines) != 1 || page.Lines[0].ID != "event-42" {
+		t.Fatalf("stored event_id가 사용되지 않았습니다: %v %+v", err, page.Lines)
+	}
+}
+
+func BenchmarkTraversalIDs500(b *testing.B) {
+	prefix := traversalIDPrefix(make([]byte, 32), "fixed-nonce")
+	ids := make([]string, 500)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for ordinal := range ids {
+			ids[ordinal] = traversalID(prefix, ordinal)
+		}
+	}
+}
+
 // TestOffsetPagingIsNeverUsed — 어떤 요청 본문에도 offset(from)이 없어야 합니다.
 // offset 페이징은 새 로그가 들어오면 페이지가 밀립니다. (ADR 0003)
 func TestOffsetPagingIsNeverUsed(t *testing.T) {
@@ -372,6 +754,10 @@ func TestOffsetPagingIsNeverUsed(t *testing.T) {
 		}
 		if _, has := body["start_offset"]; has {
 			t.Fatal("요청 본문에 start_offset이 있습니다")
+		}
+		raw, _ := json.Marshal(body)
+		if strings.Contains(string(raw), `"format":"epoch_millis"`) {
+			t.Fatal("Quickwit 0.8 range가 지원하지 않는 format 필드가 있습니다")
 		}
 	}
 }
@@ -403,6 +789,43 @@ func TestScopeFilterIsAlwaysInjected(t *testing.T) {
 	// 검색어는 match 노드 값으로만 존재해야 합니다.
 	if strings.Contains(string(raw), `"query_string"`) {
 		t.Fatalf("query_string이 사용되었습니다 — 연산자 주입 가능: %s", raw)
+	}
+}
+
+// TestIdentityScopeFiltersAreAlwaysInjected는 BFF가 확정한 workload와 Pod UID가
+// 모두 bool.filter로 강제되는지 확인합니다. ClusterID는 단일-cluster MVP의 BFF
+// 경계이며 Quickwit 인덱스에 존재하지 않는 cluster_id를 만들지 않습니다(ADR 0005).
+func TestIdentityScopeFiltersAreAlwaysInjected(t *testing.T) {
+	f := &fakeQuickwit{docs: makeDocs(90)}
+	s := newSource(t, f)
+	q := baseQuery("payments")
+	q.Target.WorkloadKind = "Deployment"
+	q.Target.WorkloadName = "payments-api"
+	q.Target.PodUID = "uid-aaa"
+
+	res, err := s.Search(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Lines) == 0 {
+		t.Fatal("identity scope 결과가 비었습니다")
+	}
+	for _, line := range res.Lines {
+		if line.Namespace != "payments" || line.WorkloadKind != "Deployment" ||
+			line.WorkloadName != "payments-api" || line.PodUID != "uid-aaa" {
+			t.Fatalf("identity scope 밖 로그가 나갔습니다: %+v", line)
+		}
+	}
+	raw, _ := json.Marshal(f.bodies[len(f.bodies)-1])
+	for _, want := range []string{
+		`"term":{"namespace":{"value":"payments"}}`,
+		`"term":{"workload_kind":{"value":"Deployment"}}`,
+		`"term":{"workload_name":{"value":"payments-api"}}`,
+		`"term":{"pod_uid":{"value":"uid-aaa"}}`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("scope filter %s가 없습니다: %s", want, raw)
+		}
 	}
 }
 
@@ -466,7 +889,7 @@ func TestPageSizeIsCapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := f.bodies[len(f.bodies)-1]
-	if size := int(body["size"].(float64)); size > 200+maxBoundaryIDs {
+	if size := int(body["size"].(float64)); size > 200 {
 		t.Fatalf("upstream 요청 크기가 상한을 넘습니다: %d", size)
 	}
 }
@@ -509,6 +932,29 @@ func TestUpstreamFailureIsClassifiedAndRetriedOnce(t *testing.T) {
 	}
 	if msg := err.Error(); strings.Contains(msg, "127.0.0.1") || strings.Contains(msg, "_elastic") {
 		t.Fatalf("에러 문자열에 내부 정보가 있습니다: %s", msg)
+	}
+}
+
+func TestTimeoutIsClassifiedAndRetriedOnce(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	s, err := New(Config{BaseURL: srv.URL, Timeout: 20 * time.Millisecond}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.Search(context.Background(), baseQuery("payments"))
+	close(release)
+	if !errors.Is(err, datasource.ErrUnavailable) {
+		t.Fatalf("timeout은 ErrUnavailable이어야 합니다: %v", err)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("timeout 재시도는 1회여야 합니다: %d회 호출", got)
 	}
 }
 

@@ -302,7 +302,7 @@ func quickwitFields(m map[string]string) quickwit.FieldMap {
 		"namespace": &f.Namespace, "pod_name": &f.PodName, "pod_uid": &f.PodUID,
 		"container": &f.Container, "workload_kind": &f.WorkloadKind,
 		"workload_name": &f.WorkloadName, "node": &f.Node,
-		"trace_id": &f.TraceID, "span_id": &f.SpanID,
+		"trace_id": &f.TraceID, "span_id": &f.SpanID, "event_id": &f.EventID,
 	}
 	for k, v := range m {
 		if p, ok := set[k]; ok {

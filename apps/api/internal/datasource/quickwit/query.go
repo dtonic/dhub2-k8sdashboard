@@ -10,30 +10,25 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 )
 
-// searchBody는 로그 페이지 조회 본문입니다. offset(from)은 **절대 쓰지 않습니다.**
-// 페이지 이동은 timestamp 상한(커서)으로만 표현합니다. (ADR 0003)
-func (s *Source) searchBody(q datasource.LogQuery, cur cursor, size int) map[string]any {
+// searchBody는 최초 scroll snapshot 조회 본문입니다. offset(from)은 쓰지 않습니다.
+func (s *Source) searchBody(q datasource.LogQuery, size int) map[string]any {
 	return map[string]any{
 		"size": size,
 		"sort": []any{
 			map[string]any{s.cfg.Fields.Timestamp: map[string]any{"order": "desc"}},
 		},
-		"query": s.boolQuery(q, cur),
+		"query": s.boolQuery(q),
 	}
 }
 
-func (s *Source) boolQuery(q datasource.LogQuery, cur cursor) map[string]any {
+func (s *Source) boolQuery(q datasource.LogQuery) map[string]any {
 	f := s.cfg.Fields
 	var filter []any
 
-	// 시간 범위 — 커서가 있으면 상한을 커서 timestamp로 내립니다(경계 포함).
+	// 시간 범위는 initial scroll snapshot을 만들 때 한 번 강제합니다.
 	rng := map[string]any{
-		"gte":    q.Window.From.UnixMilli(),
-		"lte":    q.Window.To.UnixMilli(),
-		"format": "epoch_millis",
-	}
-	if cur.T > 0 {
-		rng["lte"] = cur.T
+		"gte": q.Window.From.UnixMilli(),
+		"lte": q.Window.To.UnixMilli(),
 	}
 	filter = append(filter, map[string]any{"range": map[string]any{f.Timestamp: rng}})
 
@@ -49,6 +44,9 @@ func (s *Source) boolQuery(q datasource.LogQuery, cur cursor) map[string]any {
 	}
 	if q.Target.WorkloadName != "" {
 		filter = append(filter, term(f.WorkloadName, q.Target.WorkloadName))
+	}
+	if q.Target.WorkloadKind != "" {
+		filter = append(filter, term(f.WorkloadKind, q.Target.WorkloadKind))
 	}
 	if q.Container != "" {
 		filter = append(filter, term(f.Container, q.Container))

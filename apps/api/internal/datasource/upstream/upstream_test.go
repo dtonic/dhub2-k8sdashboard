@@ -99,6 +99,27 @@ func TestPostJSONSendsBody(t *testing.T) {
 	}
 }
 
+func TestPostJSONQueryAndGetJSONBodyOnce(t *testing.T) {
+	f := &fakeUpstream{body: `{}`}
+	c := newClient(t, f)
+	if err := c.PostJSONQuery(context.Background(), "/search", url.Values{"scroll": {"1m"}}, map[string]any{"size": 5}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.gotPath, "scroll=1m") {
+		t.Fatalf("scroll query가 없습니다: %s", f.gotPath)
+	}
+	f.status.Store(http.StatusServiceUnavailable)
+	if err := c.GetJSONBodyOnce(context.Background(), "/scroll", map[string]any{"scroll_id": "opaque"}, nil); !errors.Is(err, datasource.ErrUnavailable) {
+		t.Fatalf("scroll 오류 분류: %v", err)
+	}
+	if !strings.Contains(f.gotBody, `"scroll_id":"opaque"`) {
+		t.Fatalf("GET body가 없습니다: %s", f.gotBody)
+	}
+	if got := f.hits.Load(); got != 2 {
+		t.Fatalf("scroll GET은 재시도 없이 1회여야 합니다: 총 %d회", got)
+	}
+}
+
 // TestTransientErrorsRetryExactlyOnce — 503·429는 1회만 재시도합니다.
 // 데이터소스가 이미 힘들 때 재시도 폭풍을 만들지 않습니다.
 func TestTransientErrorsRetryExactlyOnce(t *testing.T) {

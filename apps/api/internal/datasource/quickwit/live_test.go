@@ -16,7 +16,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -49,6 +48,9 @@ func liveSource(t *testing.T, index string) *Source {
 // 커서가 전진하고, 페이지 간 중복이 없고, 정렬이 내림차순인지 확인합니다.
 // 읽기 전용입니다. 데이터가 없으면 그 사실만 기록하고 통과합니다.
 func TestLiveQuickwitCursorAdvancesWithoutDuplicates(t *testing.T) {
+	if os.Getenv("ITEST_MUTATE") == "1" {
+		t.Skip("쓰기 검증이 전용 인덱스에서 더 강한 cursor 계약을 확인합니다")
+	}
 	s := liveSource(t, envOr("QUICKWIT_ITEST_INDEX", "k8s-logs"))
 
 	q := datasource.LogQuery{
@@ -109,14 +111,16 @@ const itestIndexConfig = `{
       {"name": "workload_name", "type": "text", "tokenizer": "raw", "fast": true},
       {"name": "node", "type": "text", "tokenizer": "raw"},
       {"name": "trace_id", "type": "text", "tokenizer": "raw"},
-      {"name": "span_id", "type": "text", "tokenizer": "raw"}
+      {"name": "span_id", "type": "text", "tokenizer": "raw"},
+      {"name": "event_id", "type": "text", "tokenizer": "raw"}
     ]
   },
   "search_settings": {"default_search_fields": ["message"]}
 }`
 
 // TestLiveQuickwitEndToEndPaging — 전용 인덱스에 timestamp 충돌 문서를 넣고
-// 실서버에서 중복·누락 없는 전체 순회, Scope 필터, 서버 마스킹을 확인합니다.
+// 실서버에서 512건을 넘는 동일 timestamp 충돌의 전체 순회, MaxLines 상한,
+// Scope 필터, 서버 마스킹을 확인합니다.
 func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 	base := liveBase(t)
 	if os.Getenv("ITEST_MUTATE") != "1" {
@@ -136,19 +140,19 @@ func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 		http.DefaultClient.Do(req) //nolint:errcheck
 	})
 
-	// 같은 초에 7건씩 몰리는 300건 — 커서 경계의 실제 난이도입니다.
+	// 같은 timestamp에 700건을 몰아 과거 경계 id 512개 제한을 실제로 넘깁니다.
 	now := time.Now().Add(-time.Minute).Unix()
 	var buf bytes.Buffer
-	total := 300
+	total := 720
 	for i := 0; i < total; i++ {
 		ns := "itest-a"
-		if i%3 == 2 {
+		if i >= 700 {
 			ns = "itest-b"
 		}
 		doc := map[string]any{
-			"timestamp": now - int64(i/7),
-			"level":     []string{"INFO", "warn", "ERROR"}[i%3],
-			"message":   fmt.Sprintf("request %04d authorization Bearer abcdef%016d done", i, i),
+			"timestamp": now,
+			"level":     "warn",
+			"message":   "identical authorization Bearer abcdef0000000000 done",
 			"namespace": ns, "pod_name": "itest-pod", "pod_uid": "itest-uid",
 			"container": "app", "workload_kind": "Deployment", "workload_name": "itest",
 		}
@@ -162,28 +166,35 @@ func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 	}
 	res.Body.Close()
 
-	s := liveSource(t, itestIndex)
+	s, err := New(Config{BaseURL: base, Index: itestIndex, MaxLines: 800, MaxPageSize: 100}, fakeCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	q := datasource.LogQuery{
-		Target: datasource.Target{ClusterID: "itest", Namespace: "itest-a"},
+		Target: datasource.Target{
+			ClusterID: "itest", Namespace: "itest-a", PodUID: "itest-uid",
+			WorkloadKind: "Deployment", WorkloadName: "itest",
+		},
 		Window: datasource.Window{
 			From: time.Unix(now-3600, 0), To: time.Unix(now+60, 0), Step: time.Minute,
 		},
-		PageSize: 40,
+		PageSize: 73,
 	}
 
-	wantA := 0
-	for i := 0; i < total; i++ {
-		if i%3 != 2 {
-			wantA++
-		}
-	}
+	wantA := 700
 
 	seen := map[string]int{}
 	got := 0
-	for page := 0; page < 50; page++ {
+	maxCursorBytes := 0
+	pages := 0
+	for page := 0; page < 20; page++ {
 		res, err := s.Search(context.Background(), q)
 		if err != nil {
 			t.Fatal(err)
+		}
+		pages++
+		if len(res.Next) > maxCursorBytes {
+			maxCursorBytes = len(res.Next)
 		}
 		for _, l := range res.Lines {
 			seen[l.ID]++
@@ -193,6 +204,9 @@ func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 			}
 			if strings.Contains(l.Message, "Bearer abcdef") {
 				t.Fatalf("마스킹되지 않은 토큰이 나갔습니다: %s", l.Message)
+			}
+			if !strings.HasPrefix(l.ID, "scroll-") {
+				t.Fatalf("event_id 없는 문서에 traversal ID가 쓰이지 않았습니다: %s", l.ID)
 			}
 		}
 		if res.Next == "" {
@@ -210,6 +224,32 @@ func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 		}
 	}
 
+	// 같은 실제 데이터에서 cap을 넘지 않고 Next를 닫아야 합니다.
+	capped, err := New(Config{BaseURL: base, Index: itestIndex, MaxLines: 550, MaxPageSize: 100}, fakeCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Cursor = ""
+	q.Levels = nil
+	cappedTotal := 0
+	for page := 0; page < 20; page++ {
+		pageResult, err := capped.Search(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cappedTotal += len(pageResult.Lines)
+		if pageResult.Next == "" {
+			if !pageResult.Truncated {
+				t.Fatal("MaxLines 뒤 실데이터가 있는데 truncated=false입니다")
+			}
+			break
+		}
+		q.Cursor = pageResult.Next
+	}
+	if cappedTotal != 511 {
+		t.Fatalf("실서버 bounded MaxLines 불일치: got %d want 511", cappedTotal)
+	}
+
 	// 레벨 필터 — 소문자 warn 문서가 WARN 필터에 걸리는지 실서버에서 확인합니다.
 	q.Cursor = ""
 	q.Levels = []contract.LogLevel{contract.LevelWarn}
@@ -221,7 +261,7 @@ func TestLiveQuickwitEndToEndPaging(t *testing.T) {
 		t.Fatal("레벨 필터가 실서버에서 동작하지 않습니다")
 	}
 
-	t.Logf("실서버 전체 순회 %d/%d · 중복 0 · Scope·마스킹·레벨 필터 확인", got, wantA)
+	t.Logf("실서버 동일 timestamp 전체 순회 %d/%d · %d페이지 · cursor 최대 %dB · cap 550 이내 · 중복 0 · Scope·마스킹·레벨 필터 확인", got, wantA, pages, maxCursorBytes)
 }
 
 func envOr(k, def string) string {

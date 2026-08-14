@@ -92,21 +92,36 @@ func New(cfg Config) (*Client, error) {
 
 // GetJSON은 GET 요청을 보내고 JSON 응답을 out에 담습니다.
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) error {
-	return c.doJSON(ctx, http.MethodGet, path, query, nil, out)
+	return c.doJSON(ctx, http.MethodGet, path, query, nil, out, true)
 }
 
 // PostJSON은 JSON 본문으로 POST하고 JSON 응답을 out에 담습니다.
 // 조회용 POST(검색 API)에만 씁니다. 재시도 규칙이 GET과 같으므로
 // 상태를 바꾸는 요청에 쓰면 안 됩니다.
 func (c *Client) PostJSON(ctx context.Context, path string, body any, out any) error {
+	return c.PostJSONQuery(ctx, path, nil, body, out)
+}
+
+// PostJSONQuery는 JSON 조회 POST에 query parameter를 함께 보냅니다.
+func (c *Client) PostJSONQuery(ctx context.Context, path string, query url.Values, body any, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("%s 요청을 만들지 못했습니다: %w", c.what, err)
 	}
-	return c.doJSON(ctx, http.MethodPost, path, nil, raw, out)
+	return c.doJSON(ctx, http.MethodPost, path, query, raw, out, true)
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body []byte, out any) error {
+// GetJSONBodyOnce는 body가 있는 조회 GET을 재시도 없이 한 번 보냅니다.
+// scroll처럼 같은 capability 재사용의 멱등성이 보장되지 않는 API에만 씁니다.
+func (c *Client) GetJSONBodyOnce(ctx context.Context, path string, body any, out any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("%s 요청을 만들지 못했습니다: %w", c.what, err)
+	}
+	return c.doJSON(ctx, http.MethodGet, path, nil, raw, out, false)
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body []byte, out any, allowRetry bool) error {
 	do := func() (retryable bool, err error) {
 		req, err := c.newRequest(ctx, method, path, query, body)
 		if err != nil {
@@ -148,7 +163,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 
 	retryable, err := do()
-	if err == nil || !retryable {
+	if err == nil || !retryable || !allowRetry {
 		return err
 	}
 	select {

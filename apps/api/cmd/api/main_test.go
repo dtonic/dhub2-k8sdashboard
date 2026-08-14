@@ -183,9 +183,10 @@ func TestQuickwitFieldsMapping(t *testing.T) {
 		"message":   "body.message",
 		"level":     "severity_text",
 		"timestamp": "ts",
+		"event_id":  "log_uuid",
 		"whoops":    "ignored",
 	})
-	if f.Message != "body.message" || f.Level != "severity_text" || f.Timestamp != "ts" {
+	if f.Message != "body.message" || f.Level != "severity_text" || f.Timestamp != "ts" || f.EventID != "log_uuid" {
 		t.Fatalf("매핑: %+v", f)
 	}
 	if f.Namespace != "" {

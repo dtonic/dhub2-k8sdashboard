@@ -80,11 +80,13 @@ KUBECONFIG=~/.kube/config make dev-api
 | `QUICKWIT_USERNAME` / `QUICKWIT_PASSWORD` | (비움) | Basic 인증 |
 | `QUICKWIT_TIMEOUT` | `10s` | 검색 1건 상한 |
 | `QUICKWIT_MAX_PAGE` | `500` | 페이지 크기 상한. 브라우저가 큰 값을 보내도 넘지 못합니다 |
-| `QUICKWIT_MAX_LINES` | `5000` | 조회 범위 총량 상한. 넘으면 `truncated`로 알립니다 |
-| `QUICKWIT_FIELDS` | (비움) | 인덱스 필드 이름 재정의. `message=body.message,level=severity_text` 형식. 키: `timestamp` `level` `message` `namespace` `pod_name` `pod_uid` `container` `workload_kind` `workload_name` `node` `trace_id` `span_id` |
+| `QUICKWIT_MAX_LINES` | `5000` | 정상·비정상 hit을 포함한 조회 scan 총량 상한. 넘으면 `truncated`로 알립니다 |
+| `QUICKWIT_FIELDS` | (비움) | 인덱스 필드 이름 재정의. `message=body.message,level=severity_text` 형식. 키: `timestamp` `level` `message` `namespace` `pod_name` `pod_uid` `container` `workload_kind` `workload_name` `node` `trace_id` `span_id` `event_id` |
 
 Quickwit의 `namespace` `pod_name` `pod_uid` `level` `container` `workload_name` 필드는
 필터·집계에 쓰이므로 인덱스에서 **fast field**(raw 토크나이저)여야 합니다.
+선택 필드 `event_id`는 stored unique event id이면 충분하며 fast field일 필요는 없습니다.
+없으면 한 scroll traversal 안에서만 안정적인 nonce+ordinal ID를 사용합니다(ADR 0006).
 
 ### 실어댑터가 지키는 규칙
 
@@ -323,7 +325,7 @@ ITEST_MUTATE=1 GREPTIME_ITEST_URL=... QUICKWIT_ITEST_URL=... make api-itest
 | `TestLiveGreptimeInstantQueryRoundTrip` | 사용량 instant 질의 왕복과 응답 파싱 |
 | `TestLiveGreptimeScopeIsEnforcedOnRealData` | `ITEST_MUTATE=1` — 전용 테이블에 두 namespace를 넣고 Scope 매처가 한쪽만 돌려주는지 |
 | `TestLiveQuickwitCursorAdvancesWithoutDuplicates` | 실데이터 위 커서 전진 · 페이지 간 중복 0 · 내림차순 정렬 |
-| `TestLiveQuickwitEndToEndPaging` | `ITEST_MUTATE=1` — 전용 인덱스에 timestamp 충돌 문서를 넣고 전체 순회 중복·누락 0, Scope, 서버 마스킹, 레벨 필터 |
+| `TestLiveQuickwitEndToEndPaging` | `ITEST_MUTATE=1` — `event_id` 없는 동일 timestamp·동일 본문 700건을 TTL scroll로 순회해 중복·누락 0, traversal ID, MaxLines, Scope, 서버 마스킹, 레벨 필터 확인 |
 
 쓰기 검증이 만드는 것은 GreptimeDB `k8s_dashboard_itest_metric` 테이블과
 Quickwit `k8s-dashboard-itest` 인덱스뿐이며 끝나면 지웁니다.

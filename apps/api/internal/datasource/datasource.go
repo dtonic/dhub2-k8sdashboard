@@ -76,7 +76,7 @@ type LogQuery struct {
 	Container string
 	// Text는 전문 검색어입니다. 어댑터가 이스케이프해서 씁니다.
 	Text string
-	// Cursor는 (timestamp, id) 복합키를 인코딩한 불투명 문자열입니다.
+	// Cursor는 데이터소스별 다음 페이지 capability를 인코딩한 불투명 문자열입니다.
 	Cursor   string
 	PageSize int
 }

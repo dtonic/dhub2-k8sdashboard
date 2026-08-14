@@ -1,47 +1,95 @@
-// 커서 인코딩입니다. offset이 아니라 **정렬 키**를 담습니다. (ADR 0003)
-//
-// 커서는 (경계 timestamp, 경계에서 이미 내려간 문서 id 목록)입니다.
-// 다음 페이지는 timestamp ≤ 경계로 조회한 뒤 id 목록을 걸러서 만듭니다.
-// offset과 달리 새 로그가 들어와도 페이지가 밀리거나 중복되지 않습니다.
+// Quickwit scroll cursor encoding. The cursor is an HMAC-signed capability.
 package quickwit
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 )
 
-// maxBoundaryIDs는 커서에 실을 수 있는 경계 id 수 상한입니다.
-// 같은 밀리초에 이보다 많은 로그가 몰리는 경우 커서가 무한히 자라는 것을
-// 막습니다. 상한을 넘으면 그 너머의 극단적 동시 로그는 중복될 수 있습니다 —
-// 커서 폭주보다 낫다고 판단한 트레이드오프입니다.
-const maxBoundaryIDs = 512
+const (
+	cursorVersion         = 2
+	maxEncodedCursorBytes = 8 << 10
+	maxScrollIDBytes      = 4 << 10
+	digestBytes           = sha256.Size
+	nonceBytes            = 16
+)
 
-// cursor는 불투명 문자열로 인코딩되어 브라우저를 오갑니다.
-// 내용을 신뢰하지 않습니다 — 해석에 실패하면 요청을 거절합니다.
 type cursor struct {
-	T   int64    `json:"t"`
-	IDs []string `json:"ids,omitempty"`
+	ScrollID  string `json:"s"`
+	QueryHash string `json:"q"`
+	Nonce     string `json:"x"`
+	Returned  int    `json:"n"`
+	Scanned   int    `json:"p"`
+	Total     int    `json:"total"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
-func encodeCursor(c cursor) string {
-	if len(c.IDs) > maxBoundaryIDs {
-		c.IDs = c.IDs[:maxBoundaryIDs]
+type cursorPayload struct {
+	Version int `json:"v"`
+	cursor
+}
+
+type cursorWire struct {
+	cursorPayload
+	Signature string `json:"sig"`
+}
+
+func encodeCursor(c cursor, key []byte) (string, bool) {
+	if len(c.ScrollID) == 0 || len(c.ScrollID) > maxScrollIDBytes {
+		return "", false
 	}
-	raw, _ := json.Marshal(c)
-	return base64.RawURLEncoding.EncodeToString(raw)
+	p := cursorPayload{Version: cursorVersion, cursor: c}
+	raw, _ := json.Marshal(p)
+	w := cursorWire{cursorPayload: p, Signature: signCursor(raw, key)}
+	wire, _ := json.Marshal(w)
+	encoded := base64.RawURLEncoding.EncodeToString(wire)
+	return encoded, len(encoded) <= maxEncodedCursorBytes
 }
 
-func decodeCursor(s string) (cursor, bool) {
+func decodeCursor(s string, maxLines int, key []byte) (cursor, bool) {
 	if s == "" {
 		return cursor{}, true
+	}
+	if len(s) > maxEncodedCursorBytes || maxLines <= 0 {
+		return cursor{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
 		return cursor{}, false
 	}
-	var c cursor
-	if err := json.Unmarshal(raw, &c); err != nil || c.T < 0 {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var w cursorWire
+	if err := dec.Decode(&w); err != nil {
 		return cursor{}, false
 	}
-	return c, true
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return cursor{}, false
+	}
+	pRaw, _ := json.Marshal(w.cursorPayload)
+	want := signCursor(pRaw, key)
+	if !hmac.Equal([]byte(w.Signature), []byte(want)) {
+		return cursor{}, false
+	}
+	if w.Version != cursorVersion || len(w.ScrollID) == 0 || len(w.ScrollID) > maxScrollIDBytes ||
+		w.Returned < 0 || w.Scanned <= 0 || w.Scanned >= maxLines || w.Returned > w.Scanned || w.Total < w.Scanned ||
+		!fixedBase64(w.QueryHash, digestBytes) || !fixedBase64(w.Nonce, nonceBytes) {
+		return cursor{}, false
+	}
+	return w.cursor, true
+}
+
+func signCursor(payload, key []byte) string {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(payload)
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func fixedBase64(s string, size int) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	return err == nil && len(raw) == size
 }

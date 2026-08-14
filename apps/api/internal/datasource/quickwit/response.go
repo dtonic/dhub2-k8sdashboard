@@ -2,7 +2,8 @@
 package quickwit
 
 type esResponse struct {
-	Hits struct {
+	ScrollID string `json:"_scroll_id"`
+	Hits     struct {
 		Total struct {
 			Value int `json:"value"`
 		} `json:"total"`
