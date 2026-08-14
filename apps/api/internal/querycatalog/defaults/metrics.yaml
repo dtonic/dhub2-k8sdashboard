@@ -1,0 +1,126 @@
+# 기본 쿼리 카탈로그 — Git이 진실의 원천입니다. (#9)
+#
+# 이 파일은 바이너리에 임베드되어 시작 시 검증됩니다. 운영에서 다른 카탈로그를
+# 쓰려면 QUERY_CATALOG_DIR로 디렉터리를 지정합니다(기본 카탈로그를 대체).
+#
+# 규칙:
+#   - range 질의 expr에는 $__scope가 반드시 있어야 합니다. 없으면 로드가 실패합니다.
+#   - $__rate는 Step에서 계산된 rate/increase 구간입니다.
+#   - 변수는 allowlist(values/pattern)로 선언해야 하며, 라벨 값 리터럴로만 렌더링됩니다.
+#   - 같은 지표는 어느 화면에서든 이 정의 하나를 씁니다.
+version: 1
+
+queries:
+  # ── 화면 시계열 (promql_range) ──────────────────────────────────────────
+  - ref: metrics.cpu.used
+    type: promql_range
+    unit: cores
+    expr: sum(rate(container_cpu_usage_seconds_total{$__scope,container!=""}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.cpu.requested
+    type: promql_range
+    unit: cores
+    expr: sum(kube_pod_container_resource_requests{$__scope,resource="cpu"})
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.memory.used
+    type: promql_range
+    unit: bytes
+    expr: sum(container_memory_working_set_bytes{$__scope,container!=""})
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.memory.requested
+    type: promql_range
+    unit: bytes
+    expr: sum(kube_pod_container_resource_requests{$__scope,resource="memory"})
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.network.rx
+    type: promql_range
+    unit: bytes_per_sec
+    expr: sum(rate(container_network_receive_bytes_total{$__scope}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.network.tx
+    type: promql_range
+    unit: bytes_per_sec
+    expr: sum(rate(container_network_transmit_bytes_total{$__scope}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.restarts
+    type: promql_range
+    unit: count
+    expr: sum(increase(kube_pod_container_status_restarts_total{$__scope}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  # ── 사용량 스냅숏 (promql_instant · 서버 내부 용도) ─────────────────────
+  # store에 병합되는 Pod UID → 사용량 지도입니다. 화면 질의가 아니므로
+  # 클러스터 전체를 읽는 것을 clusterWide로 명시합니다.
+  - ref: metrics.usage.cpu_milli
+    type: promql_instant
+    unit: millicores
+    clusterWide: true
+    expr: 1000 * sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[$__rate]))
+    timeout: 10s
+
+  - ref: metrics.usage.memory_mib
+    type: promql_instant
+    unit: mebibytes
+    clusterWide: true
+    expr: sum by (namespace, pod) (container_memory_working_set_bytes{container!=""}) / 1048576
+    timeout: 10s
+
+# ── 화면 패널 — UI가 고를 수 있는 것은 이 id뿐입니다 ─────────────────────
+panels:
+  - id: cpu
+    title: CPU 사용량
+    series:
+      - { key: used, label: 사용, query: metrics.cpu.used }
+      - { key: requested, label: Request, query: metrics.cpu.requested }
+  - id: memory
+    title: 메모리 사용량
+    series:
+      - { key: used, label: 사용, query: metrics.memory.used }
+      - { key: requested, label: Request, query: metrics.memory.requested }
+  - id: network
+    title: 네트워크
+    series:
+      - { key: rx, label: 수신, query: metrics.network.rx }
+      - { key: tx, label: 송신, query: metrics.network.tx }
+  - id: restarts
+    title: 컨테이너 재시작
+    series:
+      - { key: restarts, label: 재시작, query: metrics.restarts }
+
+# ── 로그 조회 한계 — Quickwit 어댑터가 같은 카탈로그를 읽습니다 ──────────
+logs:
+  search:
+    timeout: 10s
+    maxPageSize: 500
+    maxLines: 5000
+  histogram:
+    timeout: 10s
+  facets:
+    timeout: 10s
