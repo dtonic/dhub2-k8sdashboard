@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,123 @@ type fakeUpstream struct {
 	gotHdr  string
 	gotBody string
 	gotPath string
+}
+
+func TestCircuitOpensHalfOpenSingleProbeAndRecovers(t *testing.T) {
+	f := &fakeUpstream{}
+	f.status.Store(500)
+	now := time.Unix(1, 0)
+	c := newClient(t, f, func(cfg *upstream.Config) {
+		cfg.CircuitThreshold = 2
+		cfg.CircuitCooldown = time.Second
+		cfg.Now = func() time.Time { return now }
+	})
+	for i := 0; i < 2; i++ {
+		if err := c.GetJSON(context.Background(), "/x", nil, nil); !errors.Is(err, datasource.ErrUnavailable) {
+			t.Fatal(err)
+		}
+	}
+	hits := f.hits.Load()
+	if err := c.GetJSON(context.Background(), "/x", nil, nil); !errors.Is(err, datasource.ErrUnavailable) {
+		t.Fatal(err)
+	}
+	if f.hits.Load() != hits {
+		t.Fatal("open circuit reached network")
+	}
+	f.status.Store(0)
+	f.body = `{}`
+	now = now.Add(time.Second)
+	if err := c.GetJSON(context.Background(), "/x", nil, &map[string]any{}); err != nil {
+		t.Fatalf("half-open probe: %v", err)
+	}
+	if err := c.GetJSON(context.Background(), "/x", nil, &map[string]any{}); err != nil {
+		t.Fatalf("recovered circuit: %v", err)
+	}
+}
+
+func TestNoRetryRequestGetsFullLogicalTimeout(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		time.Sleep(60 * time.Millisecond)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c, err := upstream.New(upstream.Config{BaseURL: srv.URL, What: "scroll", Timeout: 150 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.GetJSONBodyOnce(context.Background(), "/scroll", map[string]string{"id": "x"}, &map[string]any{}); err != nil {
+		t.Fatalf("non-retry request lost half its budget: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("hits=%d", hits.Load())
+	}
+}
+
+func TestResponseLimitAndTrailingPayloadAreStrict(t *testing.T) {
+	const capBytes = 32 << 20
+	tests := []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"exact", `"` + strings.Repeat("a", capBytes-2) + `"`, false},
+		{"cap-plus-one", `"` + strings.Repeat("a", capBytes-1) + `"`, true},
+		{"oversized-whitespace", `{}` + strings.Repeat(" ", capBytes), true},
+		{"trailing-json", `{} {}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeUpstream{body: tt.body}
+			c := newClient(t, f)
+			var out any
+			err := c.GetJSON(context.Background(), "/x", nil, &out)
+			if tt.wantErr != errors.Is(err, datasource.ErrUnavailable) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestHalfOpenAllowsOneConcurrentProbe(t *testing.T) {
+	var hits atomic.Int32
+	var fail atomic.Bool
+	fail.Store(true)
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if fail.Load() {
+			http.Error(w, "x", 500)
+			return
+		}
+		entered <- struct{}{}
+		<-gate
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	now := time.Unix(1, 0)
+	c, err := upstream.New(upstream.Config{BaseURL: srv.URL, What: "x", Timeout: time.Second, CircuitThreshold: 1, CircuitCooldown: time.Second, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.GetJSON(context.Background(), "/x", nil, nil)
+	fail.Store(false)
+	now = now.Add(time.Second)
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs <- c.GetJSON(context.Background(), "/x", nil, &map[string]any{}) }()
+	}
+	<-entered
+	time.Sleep(20 * time.Millisecond)
+	close(gate)
+	wg.Wait()
+	close(errs)
+	if hits.Load() != 2 {
+		t.Fatalf("network hits=%d, want initial failure + one probe", hits.Load())
+	}
 }
 
 func (f *fakeUpstream) handler() http.Handler {

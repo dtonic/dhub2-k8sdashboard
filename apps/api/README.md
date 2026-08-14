@@ -41,6 +41,15 @@ KUBECONFIG=~/.kube/config make dev-api
 | `K8S_QPS` / `K8S_BURST` | `20` / `30` | client-side rate limit |
 | `K8S_DISABLE_PROTOBUF` | `false` | protobuf를 지원하지 않는 aggregated API 뒤에서만 켭니다 |
 | `CACHE_TTL` | `5s` | 화면 응답 재사용 시간. 0으로 두면 자동 갱신 사용자 수만큼 팬아웃이 늘어납니다 |
+| `CACHE_SHORT_TTL` / `CACHE_HISTORICAL_TTL` | `30s` / `10m` | 이동 시계열과 안전한 불변 과거 구간 TTL. Kubernetes 현재 상태가 섞인 화면은 항상 `CACHE_TTL`을 사용합니다 |
+| `CACHE_HISTORICAL_SAFETY` | `5m` | custom 종료 시각이 현재보다 이 값 이상 과거일 때만 장기 TTL을 허용합니다 |
+| `CACHE_MAX_ENTRIES` / `CACHE_MAX_VALUE_BYTES` / `CACHE_MAX_LOCAL_BYTES` | `1024` / `4194304` / `67108864` | L1 entry·단일 직렬화 응답·L1 byte 총량 hard cap. 초과 응답은 캐시·전송하지 않고 502입니다. legacy typed L1은 entry/TTL cap도 적용합니다 |
+| `REDIS_ADDR` | (비움) | `host:port`. 비우면 bounded L1만 사용합니다. 형식 오류는 기동 실패, 연결·런타임 장애는 짧은 timeout과 cooldown 후 L1 fallback입니다 |
+| `REDIS_OP_TIMEOUT` / `REDIS_COOLDOWN` | `75ms` / `2s` | Redis 단일 연산 상한과 장애 뒤 single-probe 복구 대기. Credential은 이 설정에 넣지 않습니다 |
+| `QUERY_TIMEOUT` / `QUERY_SLOW_THRESHOLD` | `12s` / `2s` | retry/backoff를 포함한 전체 요청 budget과 slow counter 기준. 서버 budget 초과는 504입니다 |
+| `QUERY_USER_RATE` / `QUERY_USER_BURST` | `20` / `40` | 보안 Subject별 초당 허용량과 token burst. `AUTH_MODE=none`은 고정 identity를 사용합니다 |
+| `QUERY_DASHBOARD_RATE` / `QUERY_DASHBOARD_BURST` | `100` / `200` | 고정 mux dashboard pattern별 rate/burst. 동적 ID는 label/state key가 아닙니다 |
+| `QUERY_USER_CONCURRENT` / `QUERY_DASHBOARD_CONCURRENT` | `8` / `32` | 사용자·dashboard별 동시 요청 상한. 거절은 upstream 전 429와 `Retry-After`입니다 |
 | `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행. **실주소가 설정된 데이터소스는 이 값과 무관하게 실제 어댑터를 씁니다** |
 | `ALLOWED_ORIGIN` | (비움) | 개발 중 Vite 오리진 허용 |
 
@@ -49,7 +58,8 @@ KUBECONFIG=~/.kube/config make dev-api
 `AUTH_MODE`, 유효한 listen 주소가 아닌 `ADDR`, 절대 HTTPS URL이 아니거나
 `OIDC_AUDIENCE`가 비어 있는 OIDC 설정(`AUTH_MODE=oidc`일 때), loopback이 아닌 `AUTH_MOCK_ADDR`
 (`AUTH_MODE=mock`일 때), 비거나 0 이하인 `CLUSTER_ID`·`K8S_QPS`·`K8S_BURST`·`K8S_RESYNC`·
-`CACHE_TTL`·`READ_TIMEOUT`·`WRITE_TIMEOUT`이 대상입니다. 형식이 틀린 선택적
+`CACHE_TTL`·cache/query 보호 상한·`READ_TIMEOUT`·`WRITE_TIMEOUT`과 잘못된 `REDIS_ADDR`가 대상이며,
+표준 JSON 504를 보장하려면 `WRITE_TIMEOUT`이 `QUERY_TIMEOUT`보다 반드시 길어야 합니다. 형식이 틀린 선택적
 튜닝 env는 지금처럼 기본값으로 물러나고, 데이터소스 주소 오류는 기동을 막지
 않고 해당 섹션만 degraded로 내려갑니다.
 
@@ -159,10 +169,10 @@ GET /api/v1/clusters/{clusterId}/logs?ns=&levels=&q=&cursor=
 GET /api/v1/clusters/{clusterId}/topology?ns=
 GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series
 GET /api/v1/clusters/{clusterId}/alerts?ns=
-GET /healthz   GET /readyz   GET /version
+GET /healthz   GET /readyz   GET /version   GET /metrics
 ```
 
-`/healthz` · `/readyz` · `/version`은 어느 `AUTH_MODE`에서든 인증 없이 호출할 수 있습니다.
+`/healthz` · `/readyz` · `/version` · `/metrics`는 어느 `AUTH_MODE`에서든 인증 및 query guard 없이 호출할 수 있습니다.
 `/version`은 빌드 시 주입된 값(`{version, commit, buildDate}`)을 돌려주며, 로컬 빌드
 기본값은 `dev`/`unknown`입니다:
 

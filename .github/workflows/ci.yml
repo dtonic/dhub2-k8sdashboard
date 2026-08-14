@@ -38,6 +38,16 @@ jobs:
   api:
     name: API (vet · test · build)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8.2.6-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,4 +56,7 @@ jobs:
           cache-dependency-path: apps/api/go.sum
       - run: make api-vet
       - run: make api-test
+      - run: make api-redis-itest
+        env:
+          REDIS_ITEST_ADDR: 127.0.0.1:6379
       - run: make api-build

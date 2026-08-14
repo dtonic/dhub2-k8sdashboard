@@ -32,6 +32,66 @@ func TestLoadDefaultsAreClusterSafe(t *testing.T) {
 	}
 }
 
+func TestRedisAddressValidation(t *testing.T) {
+	for _, bad := range []string{"redis", "redis:", ":6379", "redis:0", "redis:70000"} {
+		cfg := Load()
+		cfg.RedisAddr = bad
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "REDIS_ADDR") {
+			t.Fatalf("%q err=%v", bad, err)
+		}
+	}
+	cfg := Load()
+	cfg.RedisAddr = "redis.internal:6379"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid Redis address: %v", err)
+	}
+}
+
+func TestProtectionPolicyRelationships(t *testing.T) {
+	tests := []func(*Config){
+		func(c *Config) { c.CacheShortTTL = c.CacheTTL - time.Nanosecond },
+		func(c *Config) { c.CacheHistoricalTTL = c.CacheShortTTL - time.Nanosecond },
+		func(c *Config) { c.RedisOpTimeout = c.QueryTimeout },
+		func(c *Config) { c.QuerySlowThreshold = c.QueryTimeout + time.Nanosecond },
+	}
+	for i, mutate := range tests {
+		cfg := Load()
+		mutate(&cfg)
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("invalid relationship %d passed", i)
+		}
+	}
+}
+
+func TestWriteTimeoutMustExceedQueryTimeout(t *testing.T) {
+	cfg := Load()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default timeout relationship: %v", err)
+	}
+	for _, writeTimeout := range []time.Duration{cfg.QueryTimeout, cfg.QueryTimeout - time.Nanosecond} {
+		cfg.WriteTimeout = writeTimeout
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "WRITE_TIMEOUT must be greater than QUERY_TIMEOUT") {
+			t.Fatalf("write=%v query=%v err=%v", cfg.WriteTimeout, cfg.QueryTimeout, err)
+		}
+	}
+	cfg.WriteTimeout = cfg.QueryTimeout + time.Nanosecond
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("strict valid boundary: %v", err)
+	}
+}
+
+func TestLocalByteBudgetMustCoverOneValue(t *testing.T) {
+	cfg := Load()
+	cfg.CacheMaxLocalBytes = cfg.CacheMaxValueBytes
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("exact boundary: %v", err)
+	}
+	cfg.CacheMaxLocalBytes--
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "CACHE_MAX_LOCAL_BYTES") {
+		t.Fatalf("undersized local budget err=%v", err)
+	}
+}
+
 // TestLoadReadsEnvironment — 환경변수가 각 필드로 흘러가는지 확인합니다.
 func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("ADDR", ":9999")

@@ -8,31 +8,37 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
 )
 
 // Deps는 서버가 쓰는 바깥 세계 전부입니다. 테스트에서는 전부 대체할 수 있습니다.
 type Deps struct {
-	Store    *clusterstate.Store
-	Metrics  datasource.Metrics
-	Logs     datasource.Logs
-	Alerts   datasource.Alerts
-	Topology datasource.Topology
-	Resolver scope.Resolver
-	Cache    *cache.TTL
-	Logger   *slog.Logger
+	Store             *clusterstate.Store
+	Metrics           datasource.Metrics
+	Logs              datasource.Logs
+	Alerts            datasource.Alerts
+	Topology          datasource.Topology
+	Resolver          scope.Resolver
+	Cache             *cache.TTL
+	Guard             *queryprotect.Guard
+	ProtectionMetrics *queryprotect.Metrics
+	CacheTTL          cache.TTLPolicy
+	Logger            *slog.Logger
 	// AllowedOrigin이 있으면 CORS 헤더를 붙입니다. 개발 중 Vite 오리진용입니다.
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
@@ -48,12 +54,23 @@ type Server struct {
 	mux  *http.ServeMux
 }
 
+var errQueryBudget = errors.New("server query budget exceeded")
+
 func NewServer(d Deps) *Server {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
 	if d.Cache == nil {
 		d.Cache = cache.NewTTL(5 * time.Second)
+	}
+	if d.ProtectionMetrics == nil {
+		d.ProtectionMetrics = queryprotect.NewMetrics()
+	}
+	if d.Guard == nil {
+		d.Guard = queryprotect.New(queryprotect.DefaultConfig(), d.ProtectionMetrics)
+	}
+	if d.CacheTTL.State <= 0 {
+		d.CacheTTL = cache.TTLPolicy{State: 5 * time.Second, Short: 30 * time.Second, Historical: 10 * time.Minute, HistoricalSafety: 5 * time.Minute}
 	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
@@ -83,6 +100,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, s.deps.Version)
 	})
+	m.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_ = s.deps.ProtectionMetrics.WritePrometheus(r.Context(), w)
+	})
 
 	m.HandleFunc("GET /api/v1/scope", s.handleScope)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.handleOverview)
@@ -98,7 +119,7 @@ func (s *Server) routes() {
 
 // operationalPath는 인증 없이 접근 가능한 운영 경로입니다. probe·버전 확인은
 // Credential 없이 가능해야 하고, /api/v1/*의 인증 경계는 그대로 유지합니다. (#5)
-var operationalPath = map[string]bool{"/healthz": true, "/readyz": true, "/version": true}
+var operationalPath = map[string]bool{"/healthz": true, "/readyz": true, "/version": true, "/metrics": true}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 요청 ID는 가장 먼저 확정합니다 — 401·404·패닉을 포함한 모든 응답이 달고 나갑니다.
@@ -152,14 +173,41 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, pattern := s.mux.Handler(r); pattern == "" {
+	_, pattern := s.mux.Handler(r)
+	if pattern == "" {
 		writeError(w, r, http.StatusNotFound, "not_found", "등록되지 않은 경로입니다.")
 		s.audit(r, sc, http.StatusNotFound, started)
 		return
 	}
+	r.Pattern = pattern
+	if !operationalPath[r.URL.Path] {
+		user := sc.Subject
+		if user == "" {
+			user = "auth-none"
+		}
+		release, reason, retry := s.deps.Guard.Acquire(user, pattern)
+		if reason != "" {
+			seconds := int((retry + time.Second - 1) / time.Second)
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			s.deps.ProtectionMetrics.Reject(reason, pattern)
+			writeError(w, r, http.StatusTooManyRequests, "query_rejected", "요청 보호 한도를 초과했습니다.")
+			s.audit(r, sc, http.StatusTooManyRequests, started)
+			return
+		}
+		defer release()
+		ctx, cancel := context.WithTimeoutCause(r.Context(), s.deps.Guard.Timeout(), errQueryBudget)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	s.mux.ServeHTTP(rec, r.WithContext(scope.With(r.Context(), sc)))
+	if !operationalPath[r.URL.Path] && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
+		s.deps.ProtectionMetrics.Slow(pattern)
+	}
 	s.audit(r, sc, rec.status, started)
 }
 
@@ -186,13 +234,38 @@ type errBadRequest struct{ code, msg string }
 
 func (e errBadRequest) Error() string { return e.msg }
 
+type cachedPanic struct{ value any }
+
+func (e cachedPanic) Error() string { return fmt.Sprint(e.value) }
+
 // serve는 캐시·singleflight·에러 매핑·직렬화를 한 곳에 모읍니다.
 //
 // 같은 화면을 여러 사람이 동시에 열면 upstream 호출은 **1회**입니다.
 func serve[T any](s *Server, w http.ResponseWriter, r *http.Request, fn func(context.Context) (T, error)) {
 	key := cacheKey(r)
-	v, err := cache.Typed(r.Context(), s.deps.Cache, key, fn)
+	ttl := cacheTTL(s, r)
+	v, err := s.deps.Cache.Bytes(r.Context(), key, ttl, func(ctx context.Context) (raw []byte, err error) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = cachedPanic{recovered}
+			}
+		}()
+		value, err := fn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(value)
+	})
 	if err != nil {
+		var cp cachedPanic
+		if errors.As(err, &cp) {
+			panic(cp.value)
+		}
+		if errors.Is(context.Cause(r.Context()), errQueryBudget) || (r.Context().Err() == nil && errors.Is(err, context.DeadlineExceeded)) {
+			s.deps.ProtectionMetrics.Reject("query_timeout", r.Pattern)
+			writeError(w, r, http.StatusGatewayTimeout, "query_timeout", "서버 질의 시간 한도를 초과했습니다.")
+			return
+		}
 		if r.Context().Err() != nil {
 			return
 		}
@@ -203,13 +276,18 @@ func serve[T any](s *Server, w http.ResponseWriter, r *http.Request, fn func(con
 			writeError(w, r, http.StatusForbidden, "forbidden", fb.msg)
 		case errors.As(err, &br):
 			writeError(w, r, http.StatusBadRequest, br.code, br.msg)
+		case errors.Is(err, cache.ErrValueTooLarge):
+			s.deps.ProtectionMetrics.Reject("result_too_large", r.Pattern)
+			writeError(w, r, http.StatusBadGateway, "result_too_large", "응답 크기 한도를 초과했습니다.")
 		default:
 			s.deps.Logger.Error("요청 처리 실패", "path", r.URL.Path, "requestId", requestIDFrom(r.Context()), "err", err)
 			writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, v)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(v)
 }
 
 // cacheKey는 경로 + 정렬된 쿼리 + Scope입니다.
@@ -218,30 +296,47 @@ func cacheKey(r *http.Request) string {
 	q := r.URL.Query()
 	keys := make([]string, 0, len(q))
 	for k := range q {
-		if k == "scenario" {
+		if k == "range" || k == "from" || k == "to" {
 			continue
 		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	var b strings.Builder
-	b.WriteString(r.URL.Path)
+	params := make([]cache.Param, 0, len(keys)+1)
+	params = append(params, cache.Param{Name: "path", Values: []string{r.URL.Path}})
 	for _, k := range keys {
-		b.WriteString("&")
-		b.WriteString(k)
-		b.WriteString("=")
-		b.WriteString(strings.Join(q[k], ","))
+		params = append(params, cache.Param{Name: k, Values: append([]string(nil), q[k]...)})
 	}
-	b.WriteString("|scope=")
-	for _, c := range scope.From(r.Context()).Clusters {
-		b.WriteString(c.ID)
-		if c.All {
-			b.WriteString(":*")
-			continue
+	sc := scope.From(r.Context())
+	identScope := cache.ScopeIdentity{}
+	for _, c := range sc.Clusters {
+		identScope.Clusters = append(identScope.Clusters, cache.ClusterIdentity{ID: c.ID, All: c.All, Namespaces: append([]string(nil), c.Namespaces...)})
+	}
+	identity := cache.Identity{Dashboard: r.Pattern, QueryRef: r.Pattern, Scope: identScope, Range: q.Get("range"), Params: params}
+	if win, err := timerange.Parse(q.Get("range"), q.Get("from"), q.Get("to"), time.Now()); err == nil {
+		identity.Range = string(win.Key)
+		identity.StepSeconds = int64(win.Step / time.Second)
+		if win.Key == contract.RangeCustom {
+			identity.Range = string(win.Key)
+			identity.From = win.From.UTC().Format(time.RFC3339Nano)
+			identity.To = win.To.UTC().Format(time.RFC3339Nano)
 		}
-		b.WriteString(":" + strings.Join(c.Namespaces, "+"))
 	}
-	return b.String()
+	return identity.Key()
+}
+
+func cacheTTL(s *Server, r *http.Request) time.Duration {
+	class := cache.State
+	if r.Pattern == "GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series" {
+		class = cache.Short
+	}
+	q := r.URL.Query()
+	if class == cache.Short && (q.Get("from") != "" || q.Get("to") != "") {
+		if win, err := timerange.Parse(q.Get("range"), q.Get("from"), q.Get("to"), s.deps.Now()); err == nil {
+			return s.deps.CacheTTL.For(cache.Historical, win.To, s.deps.Now())
+		}
+	}
+	return s.deps.CacheTTL.For(class, time.Time{}, s.deps.Now())
 }
 
 // authorize는 클러스터 접근 권한을 확인합니다.

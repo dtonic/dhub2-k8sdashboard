@@ -167,7 +167,7 @@ func TestOpenAPIErrorAndAuthBoundary(t *testing.T) {
 	for op, def := range specOperations(t, doc) {
 		path := op[strings.Index(op, " ")+1:]
 		security, declared := def["security"].([]any)
-		operational := path == "/healthz" || path == "/readyz" || path == "/version"
+		operational := path == "/healthz" || path == "/readyz" || path == "/version" || path == "/metrics"
 		if operational && (!declared || len(security) != 0) {
 			t.Errorf("%s: 운영 경로는 security: []여야 합니다", op)
 		}

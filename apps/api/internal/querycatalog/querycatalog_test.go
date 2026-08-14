@@ -1,6 +1,7 @@
 package querycatalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -26,6 +27,27 @@ func TestDefaultCatalogIsValid(t *testing.T) {
 	}
 	if cat.Logs().Search.MaxPageSize <= 0 {
 		t.Fatal("로그 한계 선언이 없습니다")
+	}
+}
+
+func TestCatalogPanelAndSeriesCaps(t *testing.T) {
+	base := "version: 1\nqueries:\n  - ref: q\n    type: promql_range\n    expr: sum(x{$__scope})\npanels:\n"
+	var panels strings.Builder
+	panels.WriteString(base)
+	for i := 0; i <= MaxPanels; i++ {
+		fmt.Fprintf(&panels, "  - id: p%d\n    title: p\n    series:\n      - {key: k, label: l, query: q}\n", i)
+	}
+	if _, err := loadOne(t, panels.String()); err == nil || !strings.Contains(err.Error(), "panel 수") {
+		t.Fatalf("panel cap err=%v", err)
+	}
+	var series strings.Builder
+	series.WriteString(base)
+	series.WriteString("  - id: p\n    title: p\n    series:\n")
+	for i := 0; i <= MaxSeriesPerPanel; i++ {
+		fmt.Fprintf(&series, "      - {key: k%d, label: l, query: q}\n", i)
+	}
+	if _, err := loadOne(t, series.String()); err == nil || !strings.Contains(err.Error(), "series 수") {
+		t.Fatalf("series cap err=%v", err)
 	}
 }
 

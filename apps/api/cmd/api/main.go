@@ -29,6 +29,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/quickwit"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 )
 
@@ -116,17 +117,32 @@ func run(logger *slog.Logger) error {
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
 	go refreshUsage(ctx, logger, store, metrics, cfg.ClusterID)
 
+	protectionMetrics := queryprotect.NewMetrics()
+	responseCache := cache.New(cache.Config{DefaultTTL: cfg.CacheTTL, MaxEntries: cfg.CacheMaxEntries, MaxValueBytes: cfg.CacheMaxValueBytes, MaxLocalBytes: cfg.CacheMaxLocalBytes, RedisAddr: cfg.RedisAddr, RedisOpTimeout: cfg.RedisOpTimeout, RedisCooldown: cfg.RedisCooldown, LockTTL: cfg.QueryTimeout + time.Second, LockWait: cfg.QueryTimeout, Observer: protectionMetrics})
+	defer responseCache.Close()
+	guardCfg := queryprotect.DefaultConfig()
+	guardCfg.UserRate = cfg.QueryUserRate
+	guardCfg.DashboardRate = cfg.QueryDashboardRate
+	guardCfg.UserBurst = cfg.QueryUserBurst
+	guardCfg.DashboardBurst = cfg.QueryDashboardBurst
+	guardCfg.UserConcurrent = cfg.QueryUserConcurrent
+	guardCfg.DashboardConcurrent = cfg.QueryDashboardConcurrent
+	guardCfg.QueryTimeout = cfg.QueryTimeout
+	guardCfg.SlowThreshold = cfg.QuerySlowThreshold
 	srv := httpapi.NewServer(httpapi.Deps{
-		Store:         store,
-		Metrics:       metrics,
-		Logs:          logs,
-		Alerts:        alerts,
-		Topology:      topo,
-		Resolver:      resolver,
-		Cache:         cache.NewTTL(cfg.CacheTTL),
-		Logger:        logger,
-		AllowedOrigin: cfg.AllowedOrigin,
-		Version:       contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
+		Store:             store,
+		Metrics:           metrics,
+		Logs:              logs,
+		Alerts:            alerts,
+		Topology:          topo,
+		Resolver:          resolver,
+		Cache:             responseCache,
+		Guard:             queryprotect.New(guardCfg, protectionMetrics),
+		ProtectionMetrics: protectionMetrics,
+		CacheTTL:          cache.TTLPolicy{State: cfg.CacheTTL, Short: cfg.CacheShortTTL, Historical: cfg.CacheHistoricalTTL, HistoricalSafety: cfg.CacheHistoricalSafety},
+		Logger:            logger,
+		AllowedOrigin:     cfg.AllowedOrigin,
+		Version:           contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
 
 	httpSrv := &http.Server{

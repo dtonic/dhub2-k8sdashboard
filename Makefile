@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-vet clean
+.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-redis-itest api-vet clean
 
 install:            ## 의존성 설치
 	npm install
@@ -49,6 +49,9 @@ api-itest:          ## Go API 통합 테스트 (실제 kube-apiserver·GreptimeD
 	#                                     Quickwit은 k8s-dashboard-itest 인덱스만 만들고 지웁니다.
 	#   ITEST_SERVICE_ACCOUNT=ns:name     배포된 ServiceAccount의 실제 권한 검사
 	cd apps/api && go test -tags integration -count=1 -v -timeout 15m ./...
+
+api-redis-itest:    ## Redis protocol/cache integration (REDIS_ITEST_ADDR required)
+	cd apps/api && go test -tags integration -count=1 -v -timeout 2m ./internal/cache
 
 api-vet:            ## Go 정적 검사
 	cd apps/api && go vet ./...

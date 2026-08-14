@@ -26,7 +26,7 @@ import (
 
 // auditSkip은 감사에서 제외할 경로입니다. probe가 로그를 도배하면
 // 정작 봐야 할 기록이 묻힙니다.
-var auditSkip = map[string]bool{"/healthz": true, "/readyz": true, "/version": true}
+var auditSkip = map[string]bool{"/healthz": true, "/readyz": true, "/version": true, "/metrics": true}
 
 // sensitiveParam은 값을 가려야 하는 파라미터 이름입니다.
 var sensitiveParam = regexp.MustCompile(`(?i)(token|secret|password|passwd|api[_-]?key|auth)|^(?i:q|cursor)$`)

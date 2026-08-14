@@ -38,7 +38,24 @@ type Config struct {
 
 	// CacheTTL은 화면 응답 재사용 시간입니다. 짧게 두되 0은 아닙니다 —
 	// 0이면 자동 갱신을 켠 사용자 수만큼 데이터소스 팬아웃이 그대로 늘어납니다.
-	CacheTTL time.Duration
+	CacheTTL                 time.Duration
+	CacheShortTTL            time.Duration
+	CacheHistoricalTTL       time.Duration
+	CacheHistoricalSafety    time.Duration
+	CacheMaxEntries          int
+	CacheMaxValueBytes       int
+	CacheMaxLocalBytes       int
+	RedisAddr                string
+	RedisOpTimeout           time.Duration
+	RedisCooldown            time.Duration
+	QueryTimeout             time.Duration
+	QuerySlowThreshold       time.Duration
+	QueryUserRate            float64
+	QueryDashboardRate       float64
+	QueryUserBurst           int
+	QueryDashboardBurst      int
+	QueryUserConcurrent      int
+	QueryDashboardConcurrent int
 
 	// UseDemoData는 GreptimeDB/Quickwit/Alertmanager 없이 결정적 값을 씁니다.
 	// 실주소(GREPTIME_URL·QUICKWIT_URL)가 설정된 데이터소스는 이 값과 무관하게
@@ -109,20 +126,37 @@ type QuickwitConfig struct {
 func Load() Config {
 	nsList, all := scope.ParseNamespaces(env("SCOPE_NAMESPACES", "*"))
 	return Config{
-		Addr:               env("ADDR", ":8080"),
-		Kubeconfig:         env("KUBECONFIG", ""),
-		DisableProtobuf:    envBool("K8S_DISABLE_PROTOBUF", false),
-		QPS:                float32(envFloat("K8S_QPS", 20)),
-		Burst:              envInt("K8S_BURST", 30),
-		Resync:             envDuration("K8S_RESYNC", 10*time.Minute),
-		EventFieldSelector: env("K8S_EVENT_FIELD_SELECTOR", "type=Warning"),
-		ClusterID:          env("CLUSTER_ID", "default"),
-		ClusterName:        env("CLUSTER_NAME", ""),
-		Namespaces:         nsList,
-		AllNS:              all,
-		CacheTTL:           envDuration("CACHE_TTL", 5*time.Second),
-		UseDemoData:        envBool("USE_DEMO_DATA", true),
-		QueryCatalogDir:    env("QUERY_CATALOG_DIR", ""),
+		Addr:                     env("ADDR", ":8080"),
+		Kubeconfig:               env("KUBECONFIG", ""),
+		DisableProtobuf:          envBool("K8S_DISABLE_PROTOBUF", false),
+		QPS:                      float32(envFloat("K8S_QPS", 20)),
+		Burst:                    envInt("K8S_BURST", 30),
+		Resync:                   envDuration("K8S_RESYNC", 10*time.Minute),
+		EventFieldSelector:       env("K8S_EVENT_FIELD_SELECTOR", "type=Warning"),
+		ClusterID:                env("CLUSTER_ID", "default"),
+		ClusterName:              env("CLUSTER_NAME", ""),
+		Namespaces:               nsList,
+		AllNS:                    all,
+		CacheTTL:                 envDuration("CACHE_TTL", 5*time.Second),
+		CacheShortTTL:            envDuration("CACHE_SHORT_TTL", 30*time.Second),
+		CacheHistoricalTTL:       envDuration("CACHE_HISTORICAL_TTL", 10*time.Minute),
+		CacheHistoricalSafety:    envDuration("CACHE_HISTORICAL_SAFETY", 5*time.Minute),
+		CacheMaxEntries:          envInt("CACHE_MAX_ENTRIES", 1024),
+		CacheMaxValueBytes:       envInt("CACHE_MAX_VALUE_BYTES", 4<<20),
+		CacheMaxLocalBytes:       envInt("CACHE_MAX_LOCAL_BYTES", 64<<20),
+		RedisAddr:                env("REDIS_ADDR", ""),
+		RedisOpTimeout:           envDuration("REDIS_OP_TIMEOUT", 75*time.Millisecond),
+		RedisCooldown:            envDuration("REDIS_COOLDOWN", 2*time.Second),
+		QueryTimeout:             envDuration("QUERY_TIMEOUT", 12*time.Second),
+		QuerySlowThreshold:       envDuration("QUERY_SLOW_THRESHOLD", 2*time.Second),
+		QueryUserRate:            envFloat("QUERY_USER_RATE", 20),
+		QueryDashboardRate:       envFloat("QUERY_DASHBOARD_RATE", 100),
+		QueryUserBurst:           envInt("QUERY_USER_BURST", 40),
+		QueryDashboardBurst:      envInt("QUERY_DASHBOARD_BURST", 200),
+		QueryUserConcurrent:      envInt("QUERY_USER_CONCURRENT", 8),
+		QueryDashboardConcurrent: envInt("QUERY_DASHBOARD_CONCURRENT", 32),
+		UseDemoData:              envBool("USE_DEMO_DATA", true),
+		QueryCatalogDir:          env("QUERY_CATALOG_DIR", ""),
 		Auth: AuthConfig{
 			Mode:           env("AUTH_MODE", "none"),
 			Issuer:         env("OIDC_ISSUER", ""),
@@ -181,6 +215,41 @@ func (c Config) Validate() error {
 	if c.CacheTTL <= 0 {
 		// 0이면 자동 갱신 사용자 수만큼 데이터소스 팬아웃이 늘어납니다.
 		errs = append(errs, fmt.Errorf("CACHE_TTL은 0보다 커야 합니다: %v", c.CacheTTL))
+	}
+	for name, value := range map[string]time.Duration{"CACHE_SHORT_TTL": c.CacheShortTTL, "CACHE_HISTORICAL_TTL": c.CacheHistoricalTTL, "CACHE_HISTORICAL_SAFETY": c.CacheHistoricalSafety, "REDIS_OP_TIMEOUT": c.RedisOpTimeout, "REDIS_COOLDOWN": c.RedisCooldown, "QUERY_TIMEOUT": c.QueryTimeout, "QUERY_SLOW_THRESHOLD": c.QuerySlowThreshold} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s은 0보다 커야 합니다: %v", name, value))
+		}
+	}
+	for name, value := range map[string]int{"CACHE_MAX_ENTRIES": c.CacheMaxEntries, "CACHE_MAX_VALUE_BYTES": c.CacheMaxValueBytes, "CACHE_MAX_LOCAL_BYTES": c.CacheMaxLocalBytes, "QUERY_USER_BURST": c.QueryUserBurst, "QUERY_DASHBOARD_BURST": c.QueryDashboardBurst, "QUERY_USER_CONCURRENT": c.QueryUserConcurrent, "QUERY_DASHBOARD_CONCURRENT": c.QueryDashboardConcurrent} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s은 0보다 커야 합니다: %d", name, value))
+		}
+	}
+	if c.QueryUserRate <= 0 || c.QueryDashboardRate <= 0 {
+		errs = append(errs, errors.New("query rate limits must be positive"))
+	}
+	if c.CacheShortTTL < c.CacheTTL || c.CacheHistoricalTTL < c.CacheShortTTL {
+		errs = append(errs, errors.New("cache TTLs must satisfy historical >= short >= state"))
+	}
+	if c.RedisOpTimeout >= c.QueryTimeout {
+		errs = append(errs, errors.New("REDIS_OP_TIMEOUT must be less than QUERY_TIMEOUT"))
+	}
+	if c.QuerySlowThreshold > c.QueryTimeout {
+		errs = append(errs, errors.New("QUERY_SLOW_THRESHOLD must not exceed QUERY_TIMEOUT"))
+	}
+	if c.WriteTimeout <= c.QueryTimeout {
+		errs = append(errs, errors.New("WRITE_TIMEOUT must be greater than QUERY_TIMEOUT"))
+	}
+	if c.CacheMaxLocalBytes < c.CacheMaxValueBytes {
+		errs = append(errs, errors.New("CACHE_MAX_LOCAL_BYTES must be at least CACHE_MAX_VALUE_BYTES"))
+	}
+	if c.RedisAddr != "" {
+		host, port, err := net.SplitHostPort(c.RedisAddr)
+		n, convErr := strconv.Atoi(port)
+		if err != nil || host == "" || convErr != nil || n < 1 || n > 65535 {
+			errs = append(errs, fmt.Errorf("REDIS_ADDR must be a valid host:port: %q", c.RedisAddr))
+		}
 	}
 	if c.ReadTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("READ_TIMEOUT은 0보다 커야 합니다: %v", c.ReadTimeout))

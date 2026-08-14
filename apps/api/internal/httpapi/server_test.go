@@ -547,6 +547,28 @@ func TestCacheKeyIncludesScope(t *testing.T) {
 	}
 }
 
+func TestCacheSharesEqualAuthorizationScopeAcrossSubjects(t *testing.T) {
+	f := newFixture(t, func(d *httpapi.Deps) { d.Resolver = subjectHeaderResolver{}; d.Cache = cache.NewTTL(time.Minute) })
+	for _, subject := range []string{"subject-a", "subject-b"} {
+		r := httptest.NewRequest(http.MethodGet, base+"/overview?range=1h", nil)
+		r.Header.Set("X-Test-Subject", subject)
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d", subject, rec.Code)
+		}
+	}
+	if got := f.counts.trends.Load(); got != 1 {
+		t.Fatalf("equal authorization scopes did not share cache: trends=%d", got)
+	}
+}
+
+type subjectHeaderResolver struct{}
+
+func (subjectHeaderResolver) Resolve(r *http.Request) (scope.Scope, error) {
+	return scope.Scope{Subject: r.Header.Get("X-Test-Subject"), Clusters: []scope.Cluster{{ID: testcluster.ClusterID, Name: "Seoul Production", Namespaces: []string{"payments"}}}}, nil
+}
+
 // headerResolver는 헤더로 Scope를 바꿉니다. 실제 토큰 연동 자리를 흉내 냅니다.
 type headerResolver struct{}
 

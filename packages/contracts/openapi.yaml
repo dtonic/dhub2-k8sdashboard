@@ -79,6 +79,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VersionInfo"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus query protection metrics
+      description: Fixed-label cache, rejection, and slow-query counters. Authentication and query guards are not applied.
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/v1/scope:
     get:
       operationId: getScope

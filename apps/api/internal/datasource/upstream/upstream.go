@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
@@ -43,7 +44,15 @@ type Client struct {
 	pass    string
 	headers map[string]string
 	// what은 오류 메시지에 실을 데이터소스 이름입니다. 주소가 아니라 이름만 노출합니다.
-	what string
+	what             string
+	timeout          time.Duration
+	now              func() time.Time
+	breakerMu        sync.Mutex
+	breakerFailures  int
+	breakerOpenUntil time.Time
+	halfOpen         bool
+	breakerThreshold int
+	breakerCooldown  time.Duration
 }
 
 // Config는 클라이언트 구성입니다.
@@ -57,7 +66,10 @@ type Config struct {
 	// Timeout은 요청 1건의 상한입니다. 0이면 10초입니다.
 	Timeout time.Duration
 	// Headers는 모든 요청에 붙는 고정 헤더입니다. 예: X-Greptime-DB-Name
-	Headers map[string]string
+	Headers          map[string]string
+	CircuitThreshold int
+	CircuitCooldown  time.Duration
+	Now              func() time.Time
 }
 
 // New는 클라이언트를 만듭니다. BaseURL이 비어 있으면 오류입니다.
@@ -73,10 +85,18 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	if cfg.CircuitThreshold <= 0 {
+		cfg.CircuitThreshold = 3
+	}
+	if cfg.CircuitCooldown <= 0 {
+		cfg.CircuitCooldown = 5 * time.Second
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Client{
 		base: u,
 		http: &http.Client{
-			Timeout: timeout,
 			Transport: &http.Transport{
 				MaxIdleConns:        16,
 				MaxIdleConnsPerHost: 8,
@@ -87,6 +107,7 @@ func New(cfg Config) (*Client, error) {
 		pass:    cfg.Password,
 		headers: cfg.Headers,
 		what:    cfg.What,
+		timeout: timeout, now: cfg.Now, breakerThreshold: cfg.CircuitThreshold, breakerCooldown: cfg.CircuitCooldown,
 	}, nil
 }
 
@@ -122,8 +143,27 @@ func (c *Client) GetJSONBodyOnce(ctx context.Context, path string, body any, out
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body []byte, out any, allowRetry bool) error {
+	probe, ok := c.breakerAllow()
+	if !ok {
+		return fmt.Errorf("%s: %w", c.what, datasource.ErrUnavailable)
+	}
+	logicalCtx, cancelLogical := context.WithTimeout(ctx, c.timeout)
+	defer cancelLogical()
+	backoff := retryBackoff
+	attemptTimeout := c.timeout
+	if allowRetry {
+		if max := c.timeout / 4; max < backoff {
+			backoff = max
+		}
+		attemptTimeout = (c.timeout - backoff) / 2
+		if attemptTimeout <= 0 {
+			attemptTimeout = c.timeout
+		}
+	}
 	do := func() (retryable bool, err error) {
-		req, err := c.newRequest(ctx, method, path, query, body)
+		attemptCtx, cancel := context.WithTimeout(logicalCtx, attemptTimeout)
+		defer cancel()
+		req, err := c.newRequest(attemptCtx, method, path, query, body)
 		if err != nil {
 			return false, err
 		}
@@ -155,24 +195,79 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		if out == nil {
 			return false, nil
 		}
-		dec := json.NewDecoder(io.LimitReader(res.Body, maxBodyBytes))
+		limited := &io.LimitedReader{R: res.Body, N: maxBodyBytes + 1}
+		dec := json.NewDecoder(limited)
 		if err := dec.Decode(out); err != nil {
 			return false, fmt.Errorf("%s 응답을 해석하지 못했습니다: %w", c.what, datasource.ErrUnavailable)
+		}
+		var trailing any
+		trailingErr := dec.Decode(&trailing)
+		consumed := int64(maxBodyBytes+1) - limited.N
+		if consumed > maxBodyBytes || !errors.Is(trailingErr, io.EOF) {
+			return false, fmt.Errorf("%s 응답이 크기 또는 단일 JSON 한도를 위반했습니다: %w", c.what, datasource.ErrUnavailable)
 		}
 		return false, nil
 	}
 
 	retryable, err := do()
 	if err == nil || !retryable || !allowRetry {
+		c.breakerFinish(probe, err == nil, c.breakerCounts(ctx, err))
 		return err
 	}
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(retryBackoff):
+	case <-logicalCtx.Done():
+		c.breakerFinish(probe, false, ctx.Err() == nil)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%s: %w", c.what, datasource.ErrUnavailable)
+	case <-time.After(backoff):
 	}
-	_, err = do()
+	retryable, err = do()
+	c.breakerFinish(probe, err == nil, c.breakerCounts(ctx, err))
 	return err
+}
+
+func (c *Client) breakerCounts(caller context.Context, err error) bool {
+	return caller.Err() == nil && errors.Is(err, datasource.ErrUnavailable)
+}
+
+func (c *Client) breakerAllow() (bool, bool) {
+	c.breakerMu.Lock()
+	defer c.breakerMu.Unlock()
+	now := c.now()
+	if c.breakerOpenUntil.IsZero() {
+		return false, true
+	}
+	if now.Before(c.breakerOpenUntil) {
+		return false, false
+	}
+	if c.halfOpen {
+		return false, false
+	}
+	c.halfOpen = true
+	return true, true
+}
+func (c *Client) breakerFinish(probe, success, countFailure bool) {
+	c.breakerMu.Lock()
+	defer c.breakerMu.Unlock()
+	if success {
+		c.breakerFailures = 0
+		c.breakerOpenUntil = time.Time{}
+		c.halfOpen = false
+		return
+	}
+	if probe {
+		c.halfOpen = false
+	}
+	if !countFailure {
+		return
+	}
+	c.breakerFailures++
+	if probe || c.breakerFailures >= c.breakerThreshold {
+		c.breakerOpenUntil = c.now().Add(c.breakerCooldown)
+		c.halfOpen = false
+	}
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, query url.Values, body []byte) (*http.Request, error) {

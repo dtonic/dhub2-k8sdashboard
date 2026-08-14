@@ -35,6 +35,11 @@ import (
 //go:embed defaults/*.yaml
 var defaultsFS embed.FS
 
+const (
+	MaxPanels         = 32
+	MaxSeriesPerPanel = 16
+)
+
 // Type은 질의 종류입니다. 어댑터는 자신이 아는 Type만 실행합니다.
 type Type string
 
@@ -232,6 +237,9 @@ func LoadFS(fsys fs.FS) (Catalog, error) {
 
 	// 패널 검증은 모든 파일의 query가 모인 뒤에 합니다.
 	seenPanel := map[string]bool{}
+	if len(cat.panels) > MaxPanels {
+		errs = append(errs, fmt.Sprintf("panel 수가 상한 %d를 초과합니다: %d", MaxPanels, len(cat.panels)))
+	}
 	for _, p := range cat.panels {
 		if p.ID == "" || len(p.Series) == 0 {
 			errs = append(errs, fmt.Sprintf("panel %q: id와 series가 필요합니다", p.ID))
@@ -242,6 +250,9 @@ func LoadFS(fsys fs.FS) (Catalog, error) {
 			continue
 		}
 		seenPanel[p.ID] = true
+		if len(p.Series) > MaxSeriesPerPanel {
+			errs = append(errs, fmt.Sprintf("panel %q: series 수가 상한 %d를 초과합니다: %d", p.ID, MaxSeriesPerPanel, len(p.Series)))
+		}
 		for _, s := range p.Series {
 			q, ok := cat.queries[s.QueryRef]
 			if !ok {
