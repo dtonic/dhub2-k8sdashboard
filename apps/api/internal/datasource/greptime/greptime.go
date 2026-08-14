@@ -24,6 +24,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/upstream"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 )
 
@@ -43,6 +44,7 @@ type Config struct {
 	MaxDataPoints int
 	// MaxConcurrent는 화면 1회 그리기에서 GreptimeDB로 나가는 동시 질의 상한입니다.
 	MaxConcurrent int
+	Observer      upstream.Observer
 }
 
 func (c Config) withDefaults() Config {
@@ -76,6 +78,8 @@ func New(cfg Config, catalog datasource.PodCatalog, queries querycatalog.Catalog
 		Username: cfg.Username,
 		Password: cfg.Password,
 		Timeout:  cfg.Timeout,
+		Observer: cfg.Observer,
+		Upstream: upstream.UpstreamGreptime,
 		Headers:  map[string]string{"X-Greptime-DB-Name": cfg.DB},
 	})
 	if err != nil {
@@ -150,6 +154,7 @@ func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.W
 			g.Go(func() error {
 				qctx, cancel := context.WithTimeout(gctx, q.Limits.Timeout)
 				defer cancel()
+				observability.RecordQueryRef(qctx, q.Ref)
 				pts, err := s.rangeQuery(qctx, expr, w.From, w.To, step)
 				if err != nil {
 					return err
@@ -195,6 +200,7 @@ func (s *Source) Usage(ctx context.Context, clusterID string) (map[string]contra
 		}
 		qctx, cancel := context.WithTimeout(ctx, q.Limits.Timeout)
 		defer cancel()
+		observability.RecordQueryRef(qctx, q.Ref)
 		return s.instantQuery(qctx, expr)
 	}
 

@@ -20,6 +20,14 @@ for env in dev stage prod; do
   cmp "$TMP/$env.yaml" "$TMP/$env.second.yaml"
   docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/$env.yaml"
   python3 "$ROOT/scripts/check-deploy.py" "$TMP/$env.yaml" --environment "$env" --self-test
+  if [ "$env" = dev ]; then
+    ! grep -q 'prometheus.io/scrape' "$TMP/$env.yaml"
+    ! grep -q 'grafana-dashboard' "$TMP/$env.yaml"
+  else
+    grep -q 'prometheus.io/scrape: "true"' "$TMP/$env.yaml"
+    grep -q 'grafana-dashboard' "$TMP/$env.yaml"
+    grep -q 'app.kubernetes.io/name: prometheus' "$TMP/$env.yaml"
+  fi
 done
 
 expect_render_failure() {

@@ -69,4 +69,4 @@ jobs:
       - name: Build non-push images
         run: make deploy-images
       - name: Lint, deterministic render, schema and policy
-        run: make deploy-check
+        run: make observability-check deploy-check

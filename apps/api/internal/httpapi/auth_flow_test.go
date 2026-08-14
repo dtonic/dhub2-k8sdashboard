@@ -161,8 +161,8 @@ func TestAuthnAndAuthzAreDistinguished(t *testing.T) {
 	}
 }
 
-// TestAuditLogRecordsWhoDidWhatWithWhatResult — 감사 로그에 사용자·범위·
-// 요청(route+params)·결과가 남고, 토큰 원문은 절대 남지 않습니다. (#10 완료 기준)
+// TestAuditLogRecordsWhoDidWhatWithWhatResult — 감사 로그에는 bounded route/scope shape와
+// 결과만 남고 Subject, 경로 값, namespace 이름, 토큰은 남지 않습니다.
 func TestAuditLogRecordsWhoDidWhatWithWhatResult(t *testing.T) {
 	f := newAuthFixture(t)
 	viewer, _ := f.idp.Token("kim", []string{"namespace.viewer:payments"}, time.Hour)
@@ -174,8 +174,7 @@ func TestAuditLogRecordsWhoDidWhatWithWhatResult(t *testing.T) {
 	logs := f.log.String()
 	for _, want := range []string{
 		"decision=allowed", "decision=forbidden", "decision=unauthorized",
-		"user=kim", "route=" + base + "/namespaces/payments",
-		"scope=" + testcluster.ClusterID + ":payments",
+		"route=namespace", "scope=\"clusters=1 all=0 namespaces=1 overflow=false\"",
 		"status=200", "status=403", "status=401",
 	} {
 		if !strings.Contains(logs, want) {
@@ -183,13 +182,14 @@ func TestAuditLogRecordsWhoDidWhatWithWhatResult(t *testing.T) {
 		}
 	}
 	// 토큰 원문이 로그에 남으면 감사 로그 자체가 유출 경로가 됩니다.
-	if strings.Contains(logs, viewer) || strings.Contains(logs, "Bearer ") {
-		t.Fatal("감사 로그에 토큰이 남았습니다")
+	for _, forbidden := range []string{viewer, "Bearer ", "kim", "payments", "media", base + "/namespaces"} {
+		if strings.Contains(logs, forbidden) {
+			t.Fatalf("감사 로그에 민감·가변 값 %q가 남았습니다", forbidden)
+		}
 	}
 }
 
-// TestSensitiveQueryParamsAreMaskedInAudit — 이름에 token·key 등이 들어간
-// 파라미터 값은 감사 로그에서 가려집니다. (#10 마스킹 정책)
+// TestSensitiveQueryParamsAreMaskedInAudit — query 이름과 값 모두 기록하지 않습니다.
 func TestSensitiveQueryParamsAreMaskedInAudit(t *testing.T) {
 	f := newAuthFixture(t)
 	admin, _ := f.idp.Token("admin", []string{"platform.admin"}, time.Hour)
@@ -198,16 +198,15 @@ func TestSensitiveQueryParamsAreMaskedInAudit(t *testing.T) {
 
 	logs := f.log.String()
 	if strings.Contains(logs, "super-secret-value") {
-		t.Fatalf("민감 파라미터 값이 감사 로그에 남았습니다:\n%s", logs)
+		t.Fatalf("query 값이 감사 로그에 남았습니다:\n%s", logs)
 	}
 	if strings.Contains(logs, "raw-search-term") || strings.Contains(logs, "opaque-scroll-capability") {
 		t.Fatalf("검색어 또는 cursor가 감사 로그에 남았습니다:\n%s", logs)
 	}
-	if strings.Count(logs, "[REDACTED]") < 3 {
-		t.Fatalf("민감 값이 [REDACTED]로 표시되지 않았습니다:\n%s", logs)
-	}
-	if !strings.Contains(logs, "access_token=") {
-		t.Fatal("파라미터 이름은 남아야 합니다 (무엇이 가려졌는지 보여야 합니다)")
+	for _, forbidden := range []string{"access_token", "cursor", "q=", "params"} {
+		if strings.Contains(logs, forbidden) {
+			t.Fatalf("query metadata %q가 감사 로그에 남았습니다:\n%s", forbidden, logs)
+		}
 	}
 }
 

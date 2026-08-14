@@ -82,8 +82,8 @@ paths:
   /metrics:
     get:
       operationId: getMetrics
-      summary: Prometheus query protection metrics
-      description: Fixed-label cache, rejection, and slow-query counters. Authentication and query guards are not applied.
+      summary: Prometheus platform, datasource, cache, query protection, informer and SSE metrics
+      description: Fixed-label HTTP RED, logical upstream outcome/latency/circuit, cache/query protection, informer sync, and SSE metrics. Authentication and query guards are not applied; deployments keep this endpoint off the public Ingress and allow only the monitoring scrape boundary.
       security: []
       responses:
         "200":

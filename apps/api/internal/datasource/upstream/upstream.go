@@ -28,6 +28,7 @@ import (
 // ErrBadQuery는 서버가 만든 질의를 upstream이 거절한 경우입니다.
 // 사용자 입력이 아니라 **우리 쿼리 카탈로그의 버그**이므로 로그로만 확인합니다.
 var ErrBadQuery = errors.New("upstream이 질의를 거절했습니다")
+var errCircuitOpen = errors.New("upstream circuit open")
 
 // maxBodyBytes는 upstream 응답 크기 상한입니다. 대량 응답이 그대로
 // 메모리에 올라오지 않게 합니다. (README §11)
@@ -53,7 +54,60 @@ type Client struct {
 	halfOpen         bool
 	breakerThreshold int
 	breakerCooldown  time.Duration
+	observer         Observer
+	upstream         Upstream
+	circuitState     CircuitState
+	circuitGen       uint64
 }
+
+// Observer receives bounded logical-call and circuit state events.
+type Observer interface {
+	ObserveUpstream(ctx context.Context, upstream Upstream, outcome Outcome, duration time.Duration)
+	SetCircuit(upstream Upstream, state CircuitState, generation uint64)
+}
+
+type Upstream uint8
+
+const (
+	UpstreamOther Upstream = iota
+	UpstreamGreptime
+	UpstreamQuickwit
+)
+
+func (u Upstream) String() string {
+	names := [...]string{"other", "greptime", "quickwit"}
+	if int(u) < 0 || int(u) >= len(names) {
+		return names[0]
+	}
+	return names[u]
+}
+
+type Outcome uint8
+
+const (
+	OutcomeSuccess Outcome = iota
+	OutcomeTimeout
+	OutcomeCanceled
+	OutcomeBadQuery
+	OutcomeUnavailable
+	OutcomeCircuitOpen
+)
+
+func (o Outcome) String() string {
+	names := [...]string{"success", "timeout", "canceled", "bad_query", "unavailable", "circuit_open"}
+	if int(o) < 0 || int(o) >= len(names) {
+		return names[4]
+	}
+	return names[o]
+}
+
+type CircuitState int
+
+const (
+	CircuitClosed CircuitState = iota
+	CircuitOpen
+	CircuitHalfOpen
+)
 
 // Config는 클라이언트 구성입니다.
 type Config struct {
@@ -70,6 +124,9 @@ type Config struct {
 	CircuitThreshold int
 	CircuitCooldown  time.Duration
 	Now              func() time.Time
+	Observer         Observer
+	// Upstream is a fixed observability identity: greptime, quickwit, or other.
+	Upstream Upstream
 }
 
 // New는 클라이언트를 만듭니다. BaseURL이 비어 있으면 오류입니다.
@@ -94,7 +151,11 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Client{
+	upstream := cfg.Upstream
+	if upstream > UpstreamQuickwit {
+		upstream = UpstreamOther
+	}
+	c := &Client{
 		base: u,
 		http: &http.Client{
 			Transport: &http.Transport{
@@ -108,7 +169,12 @@ func New(cfg Config) (*Client, error) {
 		headers: cfg.Headers,
 		what:    cfg.What,
 		timeout: timeout, now: cfg.Now, breakerThreshold: cfg.CircuitThreshold, breakerCooldown: cfg.CircuitCooldown,
-	}, nil
+		observer: cfg.Observer, upstream: upstream,
+	}
+	if c.observer != nil {
+		c.observer.SetCircuit(c.upstream, CircuitClosed, 0)
+	}
+	return c, nil
 }
 
 // GetJSON은 GET 요청을 보내고 JSON 응답을 out에 담습니다.
@@ -142,10 +208,16 @@ func (c *Client) GetJSONBodyOnce(ctx context.Context, path string, body any, out
 	return c.doJSON(ctx, http.MethodGet, path, nil, raw, out, false)
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body []byte, out any, allowRetry bool) error {
+func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body []byte, out any, allowRetry bool) (resultErr error) {
+	started := c.now()
+	defer func() {
+		if c.observer != nil {
+			c.observer.ObserveUpstream(ctx, c.upstream, outcome(ctx, resultErr), c.now().Sub(started))
+		}
+	}()
 	probe, ok := c.breakerAllow()
 	if !ok {
-		return fmt.Errorf("%s: %w", c.what, datasource.ErrUnavailable)
+		return fmt.Errorf("%s: %w: %w", c.what, datasource.ErrUnavailable, errCircuitOpen)
 	}
 	logicalCtx, cancelLogical := context.WithTimeout(ctx, c.timeout)
 	defer cancelLogical()
@@ -172,6 +244,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 			// 컨텍스트 취소는 사용자가 떠난 것이므로 재시도하지 않습니다.
 			if ctx.Err() != nil {
 				return false, ctx.Err()
+			}
+			if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+				return true, fmt.Errorf("%s: %w: %w", c.what, datasource.ErrUnavailable, context.DeadlineExceeded)
 			}
 			return true, fmt.Errorf("%s: %w", c.what, datasource.ErrUnavailable)
 		}
@@ -220,12 +295,34 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("%s: %w", c.what, datasource.ErrUnavailable)
+		return fmt.Errorf("%s: %w: %w", c.what, datasource.ErrUnavailable, context.DeadlineExceeded)
 	case <-time.After(backoff):
 	}
 	retryable, err = do()
 	c.breakerFinish(probe, err == nil, c.breakerCounts(ctx, err))
 	return err
+}
+
+func outcome(caller context.Context, err error) Outcome {
+	if err == nil {
+		return OutcomeSuccess
+	}
+	if caller.Err() != nil {
+		if errors.Is(caller.Err(), context.DeadlineExceeded) {
+			return OutcomeTimeout
+		}
+		return OutcomeCanceled
+	}
+	if errors.Is(err, errCircuitOpen) {
+		return OutcomeCircuitOpen
+	}
+	if errors.Is(err, ErrBadQuery) {
+		return OutcomeBadQuery
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return OutcomeTimeout
+	}
+	return OutcomeUnavailable
 }
 
 func (c *Client) breakerCounts(caller context.Context, err error) bool {
@@ -234,39 +331,71 @@ func (c *Client) breakerCounts(caller context.Context, err error) bool {
 
 func (c *Client) breakerAllow() (bool, bool) {
 	c.breakerMu.Lock()
-	defer c.breakerMu.Unlock()
 	now := c.now()
 	if c.breakerOpenUntil.IsZero() {
+		c.breakerMu.Unlock()
 		return false, true
 	}
 	if now.Before(c.breakerOpenUntil) {
+		c.breakerMu.Unlock()
 		return false, false
 	}
 	if c.halfOpen {
+		c.breakerMu.Unlock()
 		return false, false
 	}
 	c.halfOpen = true
+	c.circuitState = CircuitHalfOpen
+	c.circuitGen++
+	state, generation := c.circuitState, c.circuitGen
+	c.breakerMu.Unlock()
+	c.setCircuit(state, generation)
 	return true, true
 }
 func (c *Client) breakerFinish(probe, success, countFailure bool) {
 	c.breakerMu.Lock()
-	defer c.breakerMu.Unlock()
+	notify := false
 	if success {
+		notify = c.circuitState != CircuitClosed
 		c.breakerFailures = 0
 		c.breakerOpenUntil = time.Time{}
 		c.halfOpen = false
+		c.circuitState = CircuitClosed
+		if notify {
+			c.circuitGen++
+		}
+		state, generation := c.circuitState, c.circuitGen
+		c.breakerMu.Unlock()
+		if notify {
+			c.setCircuit(state, generation)
+		}
 		return
 	}
 	if probe {
 		c.halfOpen = false
 	}
 	if !countFailure {
+		c.breakerMu.Unlock()
 		return
 	}
 	c.breakerFailures++
 	if probe || c.breakerFailures >= c.breakerThreshold {
 		c.breakerOpenUntil = c.now().Add(c.breakerCooldown)
 		c.halfOpen = false
+		c.circuitState = CircuitOpen
+		c.circuitGen++
+		notify = true
+	}
+	state, generation := c.circuitState, c.circuitGen
+	c.breakerMu.Unlock()
+	if notify {
+		c.setCircuit(state, generation)
+	}
+}
+
+func (c *Client) setCircuit(state CircuitState, generation uint64) {
+	if c.observer != nil {
+		c.observer.SetCircuit(c.upstream, state, generation)
 	}
 }
 

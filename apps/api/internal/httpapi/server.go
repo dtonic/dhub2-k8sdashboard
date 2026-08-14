@@ -21,6 +21,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
@@ -38,6 +39,8 @@ type Deps struct {
 	Cache             *cache.TTL
 	Guard             *queryprotect.Guard
 	ProtectionMetrics *queryprotect.Metrics
+	Observability     *observability.Metrics
+	PlannedQueryRefs  []string
 	CacheTTL          cache.TTLPolicy
 	Logger            *slog.Logger
 	// Stream은 상태 변경 SSE 허브입니다. nil이면 SSE 경로는 503을 반환합니다.
@@ -73,6 +76,9 @@ func NewServer(d Deps) *Server {
 	}
 	if d.ProtectionMetrics == nil {
 		d.ProtectionMetrics = queryprotect.NewMetrics()
+	}
+	if d.Observability == nil {
+		d.Observability = observability.New()
 	}
 	if d.Guard == nil {
 		d.Guard = queryprotect.New(queryprotect.DefaultConfig(), d.ProtectionMetrics)
@@ -118,6 +124,8 @@ func (s *Server) routes() {
 		if s.deps.StreamMetrics != nil {
 			_ = s.deps.StreamMetrics.WritePrometheus(w)
 		}
+		s.deps.Observability.SetInformerSynced(s.deps.Store.HasSynced())
+		_ = s.deps.Observability.WritePrometheus(w)
 	})
 
 	m.HandleFunc("GET /api/v1/scope", s.handleScope)
@@ -138,6 +146,18 @@ func (s *Server) routes() {
 var operationalPath = map[string]bool{"/healthz": true, "/readyz": true, "/version": true, "/metrics": true}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	started := s.deps.Now()
+	rec := &statusRecorder{ResponseWriter: w}
+	w = rec
+	route := routeName(s.mux, r)
+	isStreamRequest := route == "stream"
+	observeHTTP := route != "metrics"
+	if observeHTTP {
+		s.deps.Observability.HTTPStarted()
+		defer func() {
+			s.deps.Observability.HTTPFinished(route, rec.status, rec.bytes, s.deps.Now().Sub(started), isStreamRequest, r.Context().Err() != nil)
+		}()
+	}
 	// 요청 ID는 가장 먼저 확정합니다 — 401·404·패닉을 포함한 모든 응답이 달고 나갑니다.
 	reqID := r.Header.Get(requestIDHeader)
 	if !safeRequestID(reqID) {
@@ -152,14 +172,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// 대시보드 응답은 항상 지금의 상태입니다. 중간 캐시가 끼면 낡은 값이 정상처럼 보입니다.
 	w.Header().Set("Cache-Control", "no-store")
-	started := s.deps.Now()
 	sc := scope.Scope{}
+	var trace *observability.Trace
 
 	defer func() {
-		if rec := recover(); rec != nil {
-			s.deps.Logger.Error("패닉", "path", r.URL.Path, "requestId", reqID, "recover", fmt.Sprint(rec))
-			writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
-			s.audit(r, sc, http.StatusInternalServerError, started)
+		if recovered := recover(); recovered != nil {
+			s.deps.Logger.Error("패닉", "route", route, "requestId", reqID)
+			if !rec.wroteHeader {
+				writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
+			}
+			s.audit(r, sc, rec.status, started)
 		}
 	}()
 
@@ -222,10 +244,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(ctx)
 	}
 
-	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	if route == "overview" || route == "namespace" || route == "workload" || route == "pod" {
+		var traceCtx context.Context
+		traceCtx, trace = observability.WithTrace(r.Context())
+		trace.SetRequestID(reqID)
+		r = r.WithContext(traceCtx)
+	}
 	s.mux.ServeHTTP(rec, r.WithContext(scope.With(r.Context(), sc)))
+	if trace != nil && rec.status < 400 {
+		for _, ref := range s.deps.PlannedQueryRefs {
+			observability.RecordQueryRef(r.Context(), ref)
+		}
+	}
 	if !operationalPath[r.URL.Path] && !isStream && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
 		s.deps.ProtectionMetrics.Slow(pattern)
+		args := []any{"route", route, "status", rec.status, "durationMs", s.deps.Now().Sub(started).Milliseconds(), "bytes", rec.bytes, "requestId", reqID, "scope", scopeText(sc)}
+		if trace != nil {
+			refs, overflow := trace.Summary()
+			args = append(args, "queryRefs", refs, "queryRefsOverflow", overflow)
+		}
+		s.deps.Logger.Warn("slow_api", args...)
 	}
 	s.audit(r, sc, rec.status, started)
 }
@@ -233,17 +271,70 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // statusRecorder는 감사 로그에 결과 상태를 남기기 위해 상태 코드를 붙잡습니다.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status      int
+	bytes       int
+	wroteHeader bool
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
+	r.wroteHeader = true
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += n
+	return n, err
 }
 
 // Unwrap은 http.ResponseController가 원본 writer의 Flush·SetWriteDeadline을
 // 찾을 수 있게 합니다. SSE 핸들러(#12)가 이 경로에 의존합니다.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+func routeName(mux *http.ServeMux, r *http.Request) string {
+	_, pattern := mux.Handler(r)
+	switch pattern {
+	case "GET /healthz":
+		return "healthz"
+	case "GET /readyz":
+		return "readyz"
+	case "GET /version":
+		return "version"
+	case "GET /metrics":
+		return "metrics"
+	case "GET /api/v1/scope":
+		return "scope"
+	case "GET /api/v1/clusters/{clusterId}/overview":
+		return "overview"
+	case "GET /api/v1/clusters/{clusterId}/namespaces":
+		return "namespaces"
+	case "GET /api/v1/clusters/{clusterId}/namespaces/{namespace}":
+		return "namespace"
+	case "GET /api/v1/clusters/{clusterId}/workloads/{kind}/{name}":
+		return "workload"
+	case "GET /api/v1/clusters/{clusterId}/pods/{name}":
+		return "pod"
+	case "GET /api/v1/clusters/{clusterId}/logs":
+		return "logs"
+	case "GET /api/v1/clusters/{clusterId}/topology":
+		return "topology"
+	case "GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series":
+		return "edge_series"
+	case "GET /api/v1/clusters/{clusterId}/alerts":
+		return "alerts"
+	case streamRoute:
+		return "stream"
+	default:
+		return "unmatched"
+	}
+}
 
 /* ── 공통 처리 ──────────────────────────────────────────────────────────── */
 
@@ -303,7 +394,7 @@ func serve[T any](s *Server, w http.ResponseWriter, r *http.Request, fn func(con
 			s.deps.ProtectionMetrics.Reject("result_too_large", r.Pattern)
 			writeError(w, r, http.StatusBadGateway, "result_too_large", "응답 크기 한도를 초과했습니다.")
 		default:
-			s.deps.Logger.Error("요청 처리 실패", "path", r.URL.Path, "requestId", requestIDFrom(r.Context()), "err", err)
+			s.deps.Logger.Error("요청 처리 실패", "route", routeName(s.mux, r), "requestId", requestIDFrom(r.Context()))
 			writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
 		}
 		return

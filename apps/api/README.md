@@ -181,6 +181,7 @@ GET /healthz   GET /readyz   GET /version   GET /metrics
 ```
 
 `/healthz` · `/readyz` · `/version` · `/metrics`는 어느 `AUTH_MODE`에서든 인증 및 query guard 없이 호출할 수 있습니다.
+`/metrics`는 Service 내부의 Prometheus scrape 전용이며 Ingress에 노출하지 않습니다. scrape 자체는 HTTP SLI에서 제외해 self-amplification을 막고, SSE는 request rate에만 포함하며 장기 연결의 latency·response bytes histogram에서는 제외합니다. route/status/upstream/outcome 라벨은 고정 allowlist라 경로 값·Subject·query 값으로 시계열이 늘지 않습니다.
 `/version`은 빌드 시 주입된 값(`{version, commit, buildDate}`)을 돌려주며, 로컬 빌드
 기본값은 `dev`/`unknown`입니다:
 
@@ -400,13 +401,12 @@ token은 현재 지원하지 않으며 401로 거절합니다.
 데이터는 부분도 나가지 않습니다 (`TestAuthnAndAuthzAreDistinguished`).
 
 **감사 로그** — 화면 요청마다 `audit` 레코드를 남깁니다:
-`user · route · params · scope · decision(allowed/forbidden/unauthorized/error) · status · durMs`.
-화면 하나 = 카탈로그의 고정 쿼리 집합이므로(ADR 0002 · #9) route+params가 곧
-실행된 queryRef 집합을 식별합니다.
+`requestId · 고정 route · bounded scope counts · decision · status · durMs · sorted queryRefs`.
+queryRefs는 catalog의 실제 ref만 최대 32개로 dedup하며 overflow를 별도로 표시합니다. 화면
+집계 route는 cache hit/follower에도 catalog panel refs를 기록하고 Quickwit operation은 ref로 위장하지 않습니다.
 
-**감사 로그 마스킹 정책** — 절대 남지 않는 것: Authorization 헤더·토큰 원문
-(읽지 않습니다), 이름에 token/secret/password/key/auth가 든 파라미터와 `q`·`cursor`의 값.
-가려진 값은 `[REDACTED]`로 기록합니다.
+**감사 로그 정책** — Authorization 헤더·토큰·Subject·원문 경로·path 값·query 파라미터의
+이름과 값(`q`, `cursor` 포함)은 필드 자체를 기록하지 않습니다.
 로그 **본문**의 민감정보는 `datasource/mask`(서버 마스킹, ADR 0003) 담당입니다.
 
 **로컬 개발 (mock IdP)** — 검증 경로는 운영과 같고 발급자만 로컬입니다.

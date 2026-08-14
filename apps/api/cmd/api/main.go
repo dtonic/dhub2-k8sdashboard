@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
@@ -27,7 +28,9 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/greptime"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/quickwit"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/upstream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -131,7 +134,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	metrics, logs, alerts, topo := sources(logger, cfg, store, queries)
+	platformMetrics := observability.New()
+	platformMetrics.ConfigureLogging(logger, cfg.QuerySlowThreshold)
+	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, store, queries, platformMetrics)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
@@ -171,6 +176,8 @@ func run(logger *slog.Logger) error {
 		Cache:             responseCache,
 		Guard:             queryprotect.New(guardCfg, protectionMetrics),
 		ProtectionMetrics: protectionMetrics,
+		Observability:     platformMetrics,
+		PlannedQueryRefs:  panelQueryRefs(queries),
 		CacheTTL:          cache.TTLPolicy{State: cfg.CacheTTL, Short: cfg.CacheShortTTL, Historical: cfg.CacheHistoricalTTL, HistoricalSafety: cfg.CacheHistoricalSafety},
 		Logger:            logger,
 		Stream:            hub,
@@ -208,6 +215,21 @@ func run(logger *slog.Logger) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
 	}
+}
+
+func panelQueryRefs(c querycatalog.Catalog) []string {
+	set := map[string]struct{}{}
+	for _, panel := range c.Panels() {
+		for _, series := range panel.Series {
+			set[series.QueryRef] = struct{}{}
+		}
+	}
+	refs := make([]string, 0, len(set))
+	for ref := range set {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return refs
 }
 
 // buildResolver는 AUTH_MODE에 따라 Scope 해석기를 만듭니다. (#10)
@@ -273,6 +295,12 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, queries querycatalog.Catalog) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
+	return sourcesObserved(logger, cfg, store, queries, nil)
+}
+
+func sourcesObserved(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, queries querycatalog.Catalog, observer upstream.Observer) (
+	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
+) {
 	var d *demo.Source
 	if cfg.UseDemoData {
 		d = demo.New(store)
@@ -288,6 +316,7 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, 
 			Password:      cfg.Greptime.Password,
 			Timeout:       cfg.Greptime.Timeout,
 			MaxDataPoints: cfg.Greptime.MaxDataPoints,
+			Observer:      observer,
 		}, store, queries)
 		if err != nil {
 			logger.Error("GreptimeDB 설정이 잘못되었습니다 · 메트릭 섹션은 degraded로 내려갑니다", "err", err)
@@ -314,6 +343,7 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, 
 			MaxPageSize: cfg.Quickwit.MaxPageSize,
 			MaxLines:    cfg.Quickwit.MaxLines,
 			Fields:      quickwitFields(cfg.Quickwit.Fields),
+			Observer:    observer,
 		}
 		// 로그 조회 한계는 Git의 쿼리 카탈로그가 선언한 값이 환경변수보다 우선입니다.
 		// 한계의 진실은 배포 설정이 아니라 카탈로그 한 곳이어야 합니다. (#9)

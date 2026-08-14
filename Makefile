@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-redis-itest api-vet deploy-check deploy-images clean
+.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-redis-itest api-vet observability-check deploy-check deploy-images clean
 
 install:            ## 의존성 설치
 	npm install
@@ -55,6 +55,9 @@ api-redis-itest:    ## Redis protocol/cache integration (REDIS_ITEST_ADDR requir
 
 api-vet:            ## Go 정적 검사
 	cd apps/api && go vet ./...
+
+observability-check: ## Grafana, Prometheus rules and metric-reference drift
+	sh deploy/scripts/check-observability.sh
 
 deploy-check:       ## Helm lint/render, Kubernetes schema, repository policy
 	sh deploy/scripts/check-deploy.sh

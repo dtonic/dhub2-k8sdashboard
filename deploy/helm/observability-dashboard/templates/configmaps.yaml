@@ -49,3 +49,16 @@ data:
         try_files $uri $uri/ /index.html;
       }
     }
+{{- if .Values.networkPolicy.monitoring.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dashboard.fullname" . }}-grafana-dashboard
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  observability-dashboard-platform.json: |-
+{{ .Files.Get "files/dashboard.json" | indent 4 }}
+{{- end }}

@@ -1,0 +1,20 @@
+{
+  "title": "Observability Dashboard Platform",
+  "uid": "observability-dashboard-platform",
+  "schemaVersion": 39,
+  "templating": {"list": [{"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus"}]},
+  "panels": [
+    {"id": 1, "gridPos": {"x": 0, "y": 0, "w": 8, "h": 8}, "title": "API request rate", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "sum(rate(dashboard_http_requests_total{route!~\"healthz|readyz|version|stream\"}[5m])) by (route)"}]},
+    {"id": 2, "gridPos": {"x": 8, "y": 0, "w": 8, "h": 8}, "title": "API error rate", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "sum(rate(dashboard_http_requests_total{route!~\"healthz|readyz|version|stream\",status_class=\"5xx\"}[5m])) / clamp_min(sum(rate(dashboard_http_requests_total{route!~\"healthz|readyz|version|stream\"}[5m])), 0.001)"}]},
+    {"id": 3, "gridPos": {"x": 16, "y": 0, "w": 8, "h": 8}, "title": "API p95 latency", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(dashboard_http_request_duration_seconds_bucket{route!~\"healthz|readyz|version|stream\"}[5m])) by (le,route))"}]},
+    {"id": 4, "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8}, "title": "In-flight requests", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "dashboard_http_inflight_requests"}]},
+    {"id": 5, "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8}, "title": "Response p95 bytes", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(dashboard_http_response_bytes_bucket{route!~\"healthz|readyz|version|stream\"}[5m])) by (le,route))"}]},
+    {"id": 6, "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8}, "title": "Upstream p95 latency", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(dashboard_upstream_request_duration_seconds_bucket[5m])) by (le,upstream))"}]},
+    {"id": 7, "gridPos": {"x": 0, "y": 16, "w": 8, "h": 8}, "title": "Upstream outcomes", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "sum(rate(dashboard_upstream_requests_total[5m])) by (upstream,outcome)"}]},
+    {"id": 8, "gridPos": {"x": 8, "y": 16, "w": 8, "h": 8}, "title": "Circuit state", "type": "state-timeline", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "dashboard_upstream_circuit_state"}]},
+    {"id": 9, "gridPos": {"x": 16, "y": 16, "w": 8, "h": 8}, "title": "Cache hit ratio", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "sum(rate(dashboard_cache_requests_total{result=~\"l1_hit|redis_hit|coalesced\"}[5m])) / clamp_min(sum(rate(dashboard_cache_requests_total[5m])), 0.001)"}]},
+    {"id": 10, "gridPos": {"x": 0, "y": 24, "w": 8, "h": 8}, "title": "Query rejects and slow", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "sum(rate(dashboard_query_rejected_total[5m]))"}, {"expr": "sum(rate(dashboard_query_slow_total[5m]))"}]},
+    {"id": 11, "gridPos": {"x": 8, "y": 24, "w": 8, "h": 8}, "title": "Informer sync", "type": "stat", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "dashboard_informer_synced"}]},
+    {"id": 12, "gridPos": {"x": 16, "y": 24, "w": 8, "h": 8}, "title": "SSE connections", "type": "timeseries", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}, "targets": [{"expr": "dashboard_stream_connections"}]}
+  ]
+}

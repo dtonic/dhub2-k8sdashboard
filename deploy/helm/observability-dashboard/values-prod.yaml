@@ -24,6 +24,10 @@ redis:
   image: {repository: redis, tag: "", digest: sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e}
 networkPolicy:
   ingress: {namespaceSelector: {}, podSelector: {}, cidrs: ["10.0.0.0/8"]}
+  monitoring:
+    enabled: true
+    namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+    podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
   kubernetesApiCidrs: ["10.96.0.1/32"]
   external:
     - {cidr: "192.0.2.10/32", port: 443, protocol: TCP, purpose: oidc}

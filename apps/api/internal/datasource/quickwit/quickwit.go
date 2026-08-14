@@ -91,6 +91,7 @@ type Config struct {
 	// MaxLines는 한 조회 범위에서 훑는 총량 상한입니다. 넘으면 truncated로 알립니다.
 	MaxLines int
 	Fields   FieldMap
+	Observer upstream.Observer
 }
 
 func (c Config) withDefaults() Config {
@@ -132,6 +133,8 @@ func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
 		Username: cfg.Username,
 		Password: cfg.Password,
 		Timeout:  cfg.Timeout,
+		Observer: cfg.Observer,
+		Upstream: upstream.UpstreamQuickwit,
 	})
 	if err != nil {
 		return nil, err

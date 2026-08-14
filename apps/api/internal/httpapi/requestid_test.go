@@ -20,6 +20,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 )
 
@@ -332,6 +333,23 @@ func BenchmarkOperationalProbe(b *testing.B) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 		if rec.Code != http.StatusOK {
+			b.Fatal(rec.Code)
+		}
+	}
+}
+
+func BenchmarkOverviewForbidden(b *testing.B) {
+	cfg := queryprotect.DefaultConfig()
+	cfg.UserRate = 1e9
+	cfg.DashboardRate = 1e9
+	cfg.UserBurst = 1_000_000_000
+	cfg.DashboardBurst = 1_000_000_000
+	srv := httpapi.NewServer(httpapi.Deps{Resolver: scope.Static{}, Guard: queryprotect.New(cfg, nil), Logger: slog.New(slog.NewJSONHandler(io.Discard, nil))})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, base+"/overview?range=1h", nil))
+		if rec.Code != http.StatusForbidden {
 			b.Fatal(rec.Code)
 		}
 	}

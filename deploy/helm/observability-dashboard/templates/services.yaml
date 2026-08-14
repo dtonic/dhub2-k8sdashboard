@@ -16,6 +16,12 @@ metadata:
   name: {{ include "dashboard.fullname" . }}-api
   labels:
     {{- include "dashboard.labels" . | nindent 4 }}
+  {{- if .Values.networkPolicy.monitoring.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8080"
+  {{- end }}
 spec:
   selector:
     {{- include "dashboard.selector" . | nindent 4 }}

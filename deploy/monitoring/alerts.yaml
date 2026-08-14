@@ -1,0 +1,43 @@
+groups:
+  - name: observability-dashboard
+    rules:
+      - alert: DashboardAPIUnavailable
+        expr: absent(dashboard_http_requests_total) == 1 or sum(rate(dashboard_http_requests_total{route!~"healthz|readyz|version|stream",status_class="5xx"}[5m])) / clamp_min(sum(rate(dashboard_http_requests_total{route!~"healthz|readyz|version|stream"}[5m])), 0.001) > 0.05
+        for: 10m
+        labels: {severity: critical}
+        annotations: {summary: "Dashboard API unavailable", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#api-outage"}
+      - alert: DashboardAPIHighLatency
+        expr: histogram_quantile(0.95, sum(rate(dashboard_http_request_duration_seconds_bucket{route!~"healthz|readyz|version|stream"}[5m])) by (le)) > 2
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Dashboard API p95 latency is high", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#slow-api"}
+      - alert: DashboardUpstreamDegraded
+        expr: sum(rate(dashboard_upstream_requests_total{outcome=~"timeout|unavailable"}[5m])) by (upstream) / clamp_min(sum(rate(dashboard_upstream_requests_total[5m])) by (upstream), 0.001) > 0.1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Dashboard datasource degraded", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#datasource-degradation"}
+      - alert: DashboardCircuitOpen
+        expr: dashboard_upstream_circuit_state > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Dashboard upstream circuit is not closed", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#datasource-degradation"}
+      - alert: DashboardUpstreamBadQuery
+        expr: sum(rate(dashboard_upstream_requests_total{outcome="bad_query"}[5m])) by (upstream) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Dashboard catalog query is rejected by upstream", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#datasource-degradation"}
+      - alert: DashboardInformerUnsynced
+        expr: dashboard_informer_synced == 0 or absent(dashboard_informer_synced) == 1
+        for: 10m
+        labels: {severity: critical}
+        annotations: {summary: "Dashboard informer is unsynced", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#informer-unsynced"}
+      - alert: DashboardQueryProtectionExcessive
+        expr: sum(rate(dashboard_query_rejected_total[5m])) > 5
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Dashboard query rejects are excessive", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#query-protection-and-cache"}
+      - alert: DashboardCacheUnhealthy
+        expr: sum(rate(dashboard_cache_errors_total[5m])) > 1
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Dashboard cache errors are elevated", runbook_url: "https://github.com/xenx96/k8s-dashboard/blob/main/docs/runbooks/platform-observability.md#query-protection-and-cache"}

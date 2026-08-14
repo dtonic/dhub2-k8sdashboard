@@ -67,3 +67,6 @@ probe 출발점 처리가 다르므로 배포 전 해당 CNI에서 `/healthz`와
 실행 시에는 이전 values revision과 image digest를 보관합니다. 장애 시 `helm rollback <release> <revision>`
 또는 이전 digest/values로 upgrade합니다. Secret 자체는 외부 관리 대상이므로 별도 revision과 함께
 되돌립니다. 이 변경에서는 실제 cluster apply나 rollback을 수행하지 않았습니다.
+# 플랫폼 모니터링 자산
+
+`networkPolicy.monitoring.enabled=true`일 때만 API Service scrape annotation, Prometheus ingress NetworkPolicy, Grafana sidecar-discovery ConfigMap이 함께 생성됩니다. Grafana JSON의 단일 정본은 chart의 `files/dashboard.json`입니다. Alert rule은 CRD를 생성하지 않는 repo-owned 자산이며 운영 Prometheus rule loader가 `deploy/monitoring/alerts.yaml`을 별도로 소유·설치합니다.
