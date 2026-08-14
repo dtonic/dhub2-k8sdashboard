@@ -13,7 +13,7 @@ COPY design-system design-system
 RUN VITE_USE_MOCK=false npm run build --workspace @k8s-dashboard/web \
     && rm -f /src/apps/web/dist/mockServiceWorker.js
 
-FROM nginxinc/nginx-unprivileged:1.27.4-alpine3.21@sha256:62a904036bfc0e4a4f2b556e34cbf17bc136b47fde8cdb4628762725f48c5782
+FROM nginxinc/nginx-unprivileged:1.30.4-alpine@sha256:44e36330f74d4f3a1d4e222acca9e23b401fb87811a7597024502bb759c4dd49
 COPY --from=build --chown=101:101 /src/apps/web/dist /usr/share/nginx/html
 USER 101:101
 EXPOSE 8080

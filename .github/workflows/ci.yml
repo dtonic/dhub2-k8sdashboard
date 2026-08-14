@@ -8,27 +8,38 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   web:
     name: Web (typecheck · build · e2e)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 20
+          node-version: 20.19.0
           cache: npm
-      - run: make install
+      - run: make install-ci
       - name: 타입체크 · design-system preview 검증
         run: make check
+      - name: Unit, component, contract and schema tests
+        run: make web-unit contract-test
+      - name: Dependency advisory gate
+        run: make dependency-audit
       - name: 빌드 (Web/디자인 시스템만 — Go 툴체인 불필요)
         run: make build-web
+      - name: Production Web build (MSW excluded)
+        run: make build-web-production
+      - name: Production bundle budget
+        run: make web-performance
       - name: Playwright 브라우저 설치
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
       - name: E2E (mock API 위에서 실행 — 클러스터 불필요)
         run: make test-web
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: failure()
         with:
           name: playwright-report
@@ -40,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       redis:
-        image: redis:8.2.6-alpine
+        image: redis:8.2.6-alpine@sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e
         ports:
           - 6379:6379
         options: >-
@@ -49,24 +60,36 @@ jobs:
           --health-timeout 2s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: "1.24"
+          go-version: "1.26.6"
           cache-dependency-path: apps/api/go.sum
+      - run: go version
       - run: make api-vet
-      - run: make api-test
+      - run: make api-coverage
+      - run: make api-race
+      - run: make api-govuln
       - run: make api-redis-itest
         env:
           REDIS_ITEST_ADDR: 127.0.0.1:6379
+      - name: Integration contracts (external adapters skip without endpoints)
+        run: make api-itest
+        env:
+          REDIS_ITEST_ADDR: 127.0.0.1:6379
       - run: make api-build
+      - run: make api-performance
 
   deploy:
     name: Deploy (images · Helm · schema · policy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Immutable workflow policy and negative mutations
+        run: make quality-policy
       - name: Build non-push images
         run: make deploy-images
       - name: Lint, deterministic render, schema and policy
         run: make observability-check deploy-check
+      - name: Dependency, secret, image and IaC security gates
+        run: make security-scan

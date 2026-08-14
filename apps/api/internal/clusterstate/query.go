@@ -24,8 +24,16 @@ const revisionAnnotation = "deployment.kubernetes.io/revision"
 // 메트릭 데이터소스에서 옵니다. 없으면 request/limit만 채워집니다.
 type UsageFunc func(podUID string) (contract.ContainerUsage, bool)
 
+type usageProvider struct{ lookup UsageFunc }
+
 // SetUsage는 사용량 조회원을 붙입니다. 붙이지 않으면 사용량은 0입니다.
-func (s *Store) SetUsage(fn UsageFunc) { s.usage = fn }
+func (s *Store) SetUsage(fn UsageFunc) {
+	if fn == nil {
+		s.usage.Store(nil)
+		return
+	}
+	s.usage.Store(&usageProvider{lookup: fn})
+}
 
 // NamespaceFilter는 이 요청이 볼 수 있는 namespace입니다.
 // **Scope에서 만들어진 값만 들어와야 합니다.** 요청 파라미터를 그대로 넣으면 안 됩니다.
@@ -815,8 +823,8 @@ func (s *Store) podRef(p *corev1.Pod, workloadKind, workloadName, workloadUID st
 
 func (s *Store) podUsage(p *corev1.Pod) contract.ResourceUsage {
 	u := PodRequests(p)
-	if s.usage != nil {
-		if v, ok := s.usage(string(p.UID)); ok {
+	if provider := s.usage.Load(); provider != nil {
+		if v, ok := provider.lookup(string(p.UID)); ok {
 			u.CPUMilli = v.CPUMilli
 			u.MemoryMib = v.MemoryMib
 		}

@@ -15,9 +15,9 @@ func TestSecretsNeverSurviveMasking(t *testing.T) {
 		kind   string
 	}{
 		{"Bearer 토큰", `auth header Bearer abcdef0123456789ghijk rejected`, "abcdef0123456789ghijk", "token"},
-		{"JWT", `token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9`, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "token"},
+		{"JWT", `token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9`, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "token"}, // gitleaks:allow
 		{"password", `login failed password: hunter2secret for admin`, "hunter2secret", "password"},
-		{"api key", `config reloaded api_key=sk-live-7f3ac91b22d4`, "sk-live-7f3ac91b22d4", "secret"},
+		{"api key", `config reloaded api_key=sk-live-7f3ac91b22d4`, "sk-live-7f3ac91b22d4", "secret"}, // gitleaks:allow
 		{"email", `user login succeeded for admin@example.com`, "admin@example.com", "email"},
 		{"IP", `retrying upstream 10.42.0.17 attempt 3`, "10.42.0.17", "ip"},
 		{"카드번호", `charge failed for 4111 1111 1111 1111`, "4111 1111 1111 1111", "card"},
@@ -69,7 +69,7 @@ func TestSpanOffsetsPointAtMaskedText(t *testing.T) {
 
 func TestMaskedLengthDoesNotLeakOriginalLength(t *testing.T) {
 	short, sp1 := mask.Apply("password: ab12cd34")
-	long, sp2 := mask.Apply("password: ab12cd34ef56gh78ij90kl")
+	long, sp2 := mask.Apply("password: ab12cd34ef56gh78ij90kl") // gitleaks:allow
 	if sp1[0].Length != sp2[0].Length {
 		t.Fatalf("가림 길이가 원문 길이를 따라갑니다: %d vs %d", sp1[0].Length, sp2[0].Length)
 	}

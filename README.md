@@ -567,6 +567,9 @@ make lint           # 정적 검사 (TypeScript 타입체크 + go vet)
 make build          # 전체 빌드 (Web + API — Go 툴체인 필요)
 make build-web      # Web/디자인 시스템만 빌드 (Go 불필요)
 make test           # Web E2E(Playwright) + Go 테스트
+make web-unit contract-test dependency-audit
+make api-coverage api-race api-govuln api-performance
+make quality-policy security-scan
 
 # API 단독 검증
 make api-vet && make api-test && make api-build
@@ -578,6 +581,9 @@ GreptimeDB/Quickwit/Alertmanager 없이 뜹니다. CI는 로컬과 **같은 명�
 화면 상태(부분 장애 · 권한 없음 · 빈 결과)는 URL 쿼리로 재현할 수 있습니다.
 자세한 내용은 [`apps/web/README.md`](./apps/web/README.md)와 [`apps/api/README.md`](./apps/api/README.md)를
 참고하세요.
+
+필수 CI context와 Main 보호 적용/검증/rollback 절차는
+[`docs/quality-gates.md`](./docs/quality-gates.md)에 고정합니다.
 
 ---
 

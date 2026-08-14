@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -143,6 +144,39 @@ func TestPodSummaryAndOwnerChain(t *testing.T) {
 	if _, found, _ := store.Pod("payments", "payments-api-7f-aaa", "uid-of-restarted-pod"); found {
 		t.Fatal("UID 불일치가 조회되었습니다")
 	}
+}
+
+func TestSetUsagePublishesConcurrentSnapshotsSafely(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store, _ := testcluster.NewStore(t, ctx)
+	pod, found, err := store.Pod("payments", "payments-api-7f-aaa", testcluster.UIDPodHealthy)
+	if err != nil || !found {
+		t.Fatalf("Pod 조회: found=%v err=%v", found, err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			value := i
+			store.SetUsage(func(string) (contract.ContainerUsage, bool) {
+				return contract.ContainerUsage{CPUMilli: value}, true
+			})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 1000; i++ {
+			_ = store.PodSummary(pod)
+		}
+	}()
+	close(start)
+	wg.Wait()
 }
 
 // TestTopologyPods — 토폴로지 화면의 Pod 목록과 limit 적용입니다.

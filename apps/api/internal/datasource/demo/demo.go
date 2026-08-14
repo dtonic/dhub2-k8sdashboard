@@ -163,7 +163,7 @@ var messages = []string{
 	"db query slow: SELECT * FROM ledger LIMIT %d",
 	"cache miss ratio %d%% over last window",
 	"retrying upstream 10.42.0.17 attempt %d",
-	"config reloaded, api_key=sk-live-7f3ac91b22d4 (%d keys)",
+	"config reloaded, api_key=sk-live-7f3ac91b22d4 (%d keys)", // gitleaks:allow
 	"probe failed: readiness returned 503 (%d)",
 }
 

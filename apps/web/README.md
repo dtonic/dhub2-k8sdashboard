@@ -171,4 +171,13 @@ src/
 - Node 상세 화면 — 현재 Overview의 Node 항목은 Namespace 목록으로 되돌립니다
 - 가상 스크롤을 라이브러리(TanStack Virtual)로 교체할지 결정 — 지금은 최소 구현
 - 서버 측 pagination — 현재는 전체를 받아 클라이언트에서 가상화합니다
-- 린트·테스트 도구 확정 (`#21`)
+
+## 품질 게이트
+
+- `make web-unit`: Vitest + Testing Library/jsdom 대표 unit/component 테스트
+- `make contract-test`: 공통 OpenAPI/JSON Schema/TypeScript parity와 dashboard schema 테스트
+- `make test-web`: 기존 전체 Playwright E2E. 초기 대시보드 요청은 `/scope` + `/overview` 2건 이하이며 취소 전파도 검증
+- `make build-web-production && make web-performance`: `VITE_USE_MOCK=false` production asset의
+  raw/gzip 결정적 합계 예산(실측 baseline의 약 15% headroom). wall-clock은 gate로 쓰지 않음
+- `make dependency-audit`: Vite 7.3.6의 high advisory를 제거하고, 브라우저에서 사용하지 않는
+  React Router 기능의 moderate advisory 3건만 package/version/range/fix 기준으로 기한부 허용

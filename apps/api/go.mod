@@ -1,10 +1,12 @@
 module github.com/xenx96/k8s-dashboard/apps/api
 
-go 1.24.0
+go 1.26.0
+
+toolchain go1.26.6
 
 require (
 	github.com/redis/go-redis/v9 v9.20.0
-	golang.org/x/sync v0.8.0
+	golang.org/x/sync v0.21.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.31.3
 	k8s.io/apimachinery v0.31.3
@@ -37,11 +39,11 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/oauth2 v0.21.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/term v0.21.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect

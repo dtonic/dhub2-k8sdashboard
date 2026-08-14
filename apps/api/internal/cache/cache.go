@@ -71,6 +71,8 @@ type TTL struct {
 	closeOnce  sync.Once
 	closeErr   error
 	localBytes int
+	// afterWaitMiss is an internal deterministic test seam for the Redis lock handoff window.
+	afterWaitMiss func()
 }
 
 // Close releases the owned Redis pool. Local-only caches are a no-op.
@@ -199,7 +201,9 @@ func (c *TTL) Bytes(ctx context.Context, key string, ttl time.Duration, fn func(
 
 func (c *TTL) produceBytes(ctx context.Context, key string, ttl time.Duration, fn func(context.Context) ([]byte, error)) ([]byte, Result, error) {
 	owner, locked := c.redisLock(ctx, key)
+	waited := false
 	if c.redis != nil && !locked && !c.redisCooling() {
+		waited = true
 		waitCtx, cancel := context.WithTimeout(ctx, c.config.LockWait)
 		defer cancel()
 		interval := 10 * time.Millisecond
@@ -218,6 +222,9 @@ func (c *TTL) produceBytes(ctx context.Context, key string, ttl time.Duration, f
 				c.set(key, b, remaining)
 				return b, ResultCoalesced, nil
 			}
+			if c.afterWaitMiss != nil {
+				c.afterWaitMiss()
+			}
 			if c.redisCooling() {
 				break
 			}
@@ -232,6 +239,14 @@ func (c *TTL) produceBytes(ctx context.Context, key string, ttl time.Duration, f
 	}
 	if locked {
 		defer c.redisUnlock(key, owner)
+		// The previous owner can publish between our last GET and lock acquisition.
+		// Recheck once after handoff so two instances never run the producer for one miss.
+		if waited {
+			if b, remaining, ok := c.redisGet(ctx, key); ok {
+				c.set(key, b, remaining)
+				return b, ResultCoalesced, nil
+			}
+		}
 	}
 	if o, ok := c.config.Observer.(LoadObserver); ok {
 		o.ObserveCacheLoad()

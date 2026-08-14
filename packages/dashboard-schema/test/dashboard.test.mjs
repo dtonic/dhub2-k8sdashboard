@@ -78,6 +78,16 @@ test("Draft 2020-12 schema and runtime agree on the structural parity corpus", (
   }
 });
 
+test("negative security mutations independently reject remote widget types and raw query bindings", () => {
+  const remoteType = { ...valid, widgets: [{ ...widgets[0], type: "RemoteComponent" }] };
+  assert.equal(schemaValidate(remoteType), false, "unknown sensitive widget type was masked");
+  assert.equal(validateDashboard(remoteType, catalog).valid, false, "runtime accepted unknown sensitive widget type");
+
+  const rawQuery = { ...valid, widgets: [{ ...widgets[0], binding: "raw.query" }] };
+  assert.equal(schemaValidate(rawQuery), false, "raw query binding was masked");
+  assert.equal(validateDashboard(rawQuery, catalog).valid, false, "runtime accepted raw query binding");
+});
+
 test("runtime rejects semantic ambiguity and enforces exact caps", () => {
   const invalid = [
     { ...valid, widgets: [widgets[0], { ...widgets[0] }] },

@@ -95,7 +95,7 @@ type Store struct {
 	synced []cache.InformerSynced
 
 	// usage는 메트릭 데이터소스에서 온 현재 사용량 조회원입니다. 없으면 request/limit만 채웁니다.
-	usage UsageFunc
+	usage atomic.Pointer[usageProvider]
 
 	// now는 테스트에서 시간을 고정하기 위한 훅입니다.
 	now func() time.Time

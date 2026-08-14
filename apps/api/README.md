@@ -227,17 +227,18 @@ go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDa
 
 ```bash
 make api-test     # 단위 테스트 — fake clientset. 클러스터 불필요
+make api-coverage # merged coverage + package ratchet
+make api-race     # race detector
+make api-govuln   # govulncheck v1.1.4, reachable finding 0건
 make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
-
-# 커버리지 (전 패키지 병합 기준 80% 이상 유지)
-cd apps/api && go test -coverprofile=cover.out -coverpkg=./internal/...,./cmd/... ./... \
-  && go tool cover -func=cover.out | tail -1
 ```
 
-커버리지 기준: **전 패키지 병합 80% 이상**(2026-08-14 기준 88.5%), 개별 패키지도
-80% 이상을 유지합니다. 예외 두 곳 — `cmd/api`는 main/run이 실클러스터 없이는
-돌지 않아 56%(배선 함수는 전부 테스트됨), `internal/testcluster`는 테스트 픽스처라
-자체 테스트가 없습니다(모든 스위트가 사용).
+CI와 Docker builder는 Go **1.26.6**을 고정하고 `go.mod`도 1.26 계열을 선언합니다.
+커버리지 기준은 전 패키지 병합 **86% 이상**(2026-08-14 실측 86.7%)입니다. 낮은 패키지는
+현재값보다 내려가지 않도록 `quality/budgets.json`에서 별도 ratchet을 둡니다:
+`cmd/api` 46.6%(gate 46), `internal/cache` 67.2%(67), `internal/observability` 72.5%(72),
+`internal/queryprotect` 74.3%(74), 테스트 픽스처인 `internal/testcluster` 0%(0).
+coverage profile은 OS 임시 디렉터리에 만들고 항상 제거합니다.
 
 값이 맞는지보다 **규칙이 지켜지는지**를 봅니다.
 

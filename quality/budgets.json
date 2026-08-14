@@ -1,0 +1,24 @@
+{
+  "goCoverage": {
+    "mergedMinimumPercent": 86.0,
+    "packageMinimumPercent": {
+      "cmd/api": 46.0,
+      "internal/cache": 67.0,
+      "internal/observability": 72.0,
+      "internal/queryprotect": 74.0,
+      "internal/testcluster": 0.0
+    }
+  },
+  "goBenchmarks": {
+    "BenchmarkOperationalProbe": { "maxAllocsPerOp": 44, "maxBytesPerOp": 9600 },
+    "BenchmarkOverviewForbidden": { "maxAllocsPerOp": 105, "maxBytesPerOp": 14400 }
+  },
+  "webBundle": {
+    "maxRawBytes": 385500,
+    "maxGzipBytes": 112500
+  },
+  "webDashboard": {
+    "initialApiRequests": 2,
+    "overviewRequests": 1
+  }
+}

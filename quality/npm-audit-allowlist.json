@@ -1,0 +1,36 @@
+{
+  "reviewBy": "2026-11-14",
+  "entries": [
+    {
+      "package": "react-router",
+      "installedVersion": "6.30.4",
+      "severity": "moderate",
+      "vulnerabilityRange": "6.0.0 - 7.17.0",
+      "advisories": {
+        "GHSA-wrjc-x8rr-h8h6": ">=6.0.0 <7.18.0",
+        "GHSA-337j-9hxr-rhxg": ">=6.4.0 <7.18.0"
+      },
+      "fixAvailable": { "name": "react-router-dom", "version": "7.18.2", "isSemVerMajor": true },
+      "unusedFeatures": [
+        "development server route execution",
+        "server-side rendering",
+        "data-router action redirects"
+      ],
+      "reason": "The browser-only dashboard uses BrowserRouter routes and does not execute server routes, SSR, or route actions. Remove this exception when React Router 7 migration is validated, when any listed feature is introduced, or by reviewBy."
+    },
+    {
+      "package": "react-router-dom",
+      "installedVersion": "6.30.4",
+      "severity": "moderate",
+      "vulnerabilityRange": "6.0.0-alpha.0 - 7.17.0",
+      "advisories": {
+        "GHSA-jjmj-jmhj-qwj2": ">=6.30.2 <=6.30.4"
+      },
+      "fixAvailable": { "name": "react-router-dom", "version": "7.18.2", "isSemVerMajor": true },
+      "unusedFeatures": [
+        "untrusted external redirect destinations"
+      ],
+      "reason": "Navigation targets are application-owned relative routes. Remove this exception when external redirect input is introduced, when React Router 7 migration is validated, or by reviewBy."
+    }
+  ]
+}
