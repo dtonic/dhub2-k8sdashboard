@@ -47,7 +47,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return out, err
 		}
-		target := datasource.Target{ClusterID: c.ID, Namespace: f.Single()}
+		target := dsTarget(c, f)
 
 		out = contract.ClusterOverviewResponse{
 			ClusterID:    c.ID,
@@ -311,12 +311,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 
 		lq := datasource.LogQuery{
-			Target: datasource.Target{
-				ClusterID:    c.ID,
-				Namespace:    f.Single(),
-				WorkloadName: q.Get("workload"),
-				PodUID:       q.Get("podUid"),
-			},
+			Target: func() datasource.Target {
+				t := dsTarget(c, f)
+				t.WorkloadName = q.Get("workload")
+				t.PodUID = q.Get("podUid")
+				return t
+			}(),
 			Window:    dsWindow(win),
 			Levels:    parseLevels(q.Get("levels")),
 			Container: q.Get("container"),
@@ -395,7 +395,7 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 		v13, err13 := s.deps.Store.TopologyPods(f, unhealthyLimit)
 		out.Pods = kubeSection(s, v13, err13)
 
-		graph, err := s.deps.Topology.Graph(ctx, datasource.Target{ClusterID: c.ID, Namespace: f.Single()}, dsWindow(win))
+		graph, err := s.deps.Topology.Graph(ctx, dsTarget(c, f), dsWindow(win))
 		out.Graph = dsSection(graph, err, contract.SourceGreptimeDB, "GreptimeDB")
 		return out, nil
 	})
@@ -436,7 +436,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		res, err := s.deps.Alerts.List(ctx, datasource.AlertQuery{
-			Target: datasource.Target{ClusterID: c.ID, Namespace: f.Single()},
+			Target: dsTarget(c, f),
 			Window: dsWindow(win),
 		})
 		out.Firing = dsSection(res.Firing, err, contract.SourceAlertmanager, "Alertmanager")
@@ -492,4 +492,16 @@ func (s *Server) nowRFC3339() string { return s.deps.Now().UTC().Format(time.RFC
 
 func dsWindow(w timerange.Window) datasource.Window {
 	return datasource.Window{From: w.From, To: w.To, Step: w.Step}
+}
+
+// dsTarget은 Scope가 확정한 namespace 범위를 데이터소스 Target에 싣습니다.
+//
+// f.Single()만 넘기면 "여러 namespace만 허용된 사용자"가 어댑터에게는
+// 전체 허용처럼 보입니다. 허용 목록을 함께 실어야 어댑터가 질의에 강제할 수 있습니다.
+func dsTarget(c scope.Cluster, f clusterstate.NamespaceFilter) datasource.Target {
+	t := datasource.Target{ClusterID: c.ID, Namespace: f.Single()}
+	if !f.All {
+		t.Namespaces = append([]string(nil), f.List...)
+	}
+	return t
 }

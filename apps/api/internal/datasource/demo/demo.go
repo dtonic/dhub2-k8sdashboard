@@ -52,6 +52,23 @@ func pick[T any](list []T, key string, i int) T {
 	return list[int(noise(key, i)*float64(len(list)))%len(list)]
 }
 
+// pods는 Target의 namespace 범위를 존중해 Pod 신원을 빌려옵니다.
+// 여러 namespace만 허용된 사용자(Namespace=="", Namespaces!=nil)의 범위 밖 Pod는
+// 데모 데이터에도 나타나면 안 됩니다 — 데모라도 Scope 규칙은 같습니다. (README §10)
+func (s *Source) pods(t datasource.Target) []datasource.CatalogPod {
+	all := s.Catalog.CatalogPods(t.Namespace, 0)
+	if t.Namespace != "" || len(t.Namespaces) == 0 {
+		return all
+	}
+	out := make([]datasource.CatalogPod, 0, len(all))
+	for _, p := range all {
+		if t.AllowsNamespace(p.Namespace) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 /* ── Metrics ────────────────────────────────────────────────────────────── */
 
 var panelTitles = map[string]struct {
@@ -246,7 +263,7 @@ func (s *Source) Search(_ context.Context, q datasource.LogQuery) (datasource.Lo
 	if size <= 0 {
 		size = DefaultPageSize
 	}
-	pods := s.Catalog.CatalogPods(q.Target.Namespace, 0)
+	pods := s.pods(q.Target)
 
 	page := datasource.LogPage{Lines: make([]contract.LogLine, 0, size), MaxLines: MaxLines}
 	i := start
@@ -272,7 +289,7 @@ func (s *Source) Histogram(_ context.Context, q datasource.LogQuery) ([]contract
 	if n == 0 {
 		return nil, nil
 	}
-	pods := s.Catalog.CatalogPods(q.Target.Namespace, 0)
+	pods := s.pods(q.Target)
 	out := make([]contract.LogHistogramBucket, n)
 	for i := 0; i < n; i++ {
 		out[i] = contract.LogHistogramBucket{
@@ -298,7 +315,7 @@ func (s *Source) Histogram(_ context.Context, q datasource.LogQuery) ([]contract
 }
 
 func (s *Source) Facets(_ context.Context, q datasource.LogQuery) (contract.LogFacets, error) {
-	pods := s.Catalog.CatalogPods(q.Target.Namespace, 0)
+	pods := s.pods(q.Target)
 	f := contract.LogFacets{}
 	byWorkload := map[string]*contract.LogFacetWorkload{}
 	for _, p := range pods {
@@ -339,7 +356,7 @@ var alertNames = []struct {
 }
 
 func (s *Source) List(_ context.Context, q datasource.AlertQuery) (datasource.AlertResult, error) {
-	pods := s.Catalog.CatalogPods(q.Target.Namespace, 0)
+	pods := s.pods(q.Target)
 	res := datasource.AlertResult{GroupingRule: GroupingRule}
 	if len(pods) == 0 {
 		return res, nil
@@ -416,7 +433,7 @@ func routesFor(protocol string) []string {
 }
 
 func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Window) (contract.TopologyGraph, error) {
-	pods := s.Catalog.CatalogPods(t.Namespace, 0)
+	pods := s.pods(t)
 	if len(pods) == 0 {
 		return contract.TopologyGraph{}, nil
 	}

@@ -27,11 +27,35 @@ type Window struct {
 
 // Target은 무엇에 대한 데이터인지입니다. 비어 있는 필드는 제한 없음입니다.
 type Target struct {
-	ClusterID    string
-	Namespace    string
+	ClusterID string
+	// Namespace는 단일 namespace로 좁혀졌을 때의 이름입니다.
+	Namespace string
+	// Namespaces는 서버가 확정한 **허용 namespace 목록**입니다. 비어 있으면 전체 허용입니다.
+	//
+	// Namespace가 비어 있다고 전체 조회가 아닙니다 — 여러 namespace만 볼 수 있는
+	// 사용자는 Namespace==""이면서 Namespaces가 채워져 옵니다. 어댑터는 이 목록을
+	// 데이터소스 질의에 **직접 삽입**해야 합니다. UI가 보낸 값이 아니라 scope.Resolver가
+	// 확정한 값이므로 신뢰할 수 있습니다. (README §10)
+	Namespaces   []string
 	WorkloadKind string
 	WorkloadName string
 	PodUID       string
+}
+
+// AllowsNamespace는 이 Target의 범위에서 namespace가 보이는지입니다.
+func (t Target) AllowsNamespace(ns string) bool {
+	if t.Namespace != "" {
+		return t.Namespace == ns
+	}
+	if len(t.Namespaces) == 0 {
+		return true
+	}
+	for _, n := range t.Namespaces {
+		if n == ns {
+			return true
+		}
+	}
+	return false
 }
 
 // Metrics는 시계열 어댑터입니다.
