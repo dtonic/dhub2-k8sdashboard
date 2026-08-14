@@ -52,7 +52,8 @@ KUBECONFIG=~/.kube/config make dev-api
 | `GREPTIME_DB` | `public` | 데이터베이스 이름 |
 | `GREPTIME_USERNAME` / `GREPTIME_PASSWORD` | (비움) | Basic 인증. **브라우저로 나가는 응답 어디에도 실리지 않습니다** |
 | `GREPTIME_TIMEOUT` | `10s` | 질의 1건 상한 |
-| `GREPTIME_MAX_POINTS` | `1000` | 시리즈당 최대 포인트. 넘으면 **Step을 서버가 넓힙니다** |
+| `GREPTIME_MAX_POINTS` | `1000` | **전역** 포인트 상한. 카탈로그의 쿼리별 `maxDataPoints`보다 작으면 이 값이 이깁니다 |
+| `QUERY_CATALOG_DIR` | (비움) | 쿼리 카탈로그 디렉터리. 비우면 임베디드 기본 카탈로그. 지정하면 기본을 **대체**합니다(병합 없음) |
 | `QUICKWIT_URL` | (비움) | Quickwit 주소. 예: `http://quickwit:7280` |
 | `QUICKWIT_INDEX` | `k8s-logs` | 로그 인덱스 id |
 | `QUICKWIT_USERNAME` / `QUICKWIT_PASSWORD` | (비움) | Basic 인증 |
@@ -66,10 +67,11 @@ Quickwit의 `namespace` `pod_name` `pod_uid` `level` `container` `workload_name`
 
 ### 실어댑터가 지키는 규칙
 
-- **질의는 서버 카탈로그에서만 나옵니다.** 프런트는 패널 id·검색어만 보낼 수 있고,
-  PromQL 매처와 ES 필터는 `greptime/queries.go` · `quickwit/query.go`가 만듭니다.
-  사용자 검색어는 match 노드의 **값**으로만 들어가므로 연산자 주입으로
-  Scope 필터를 우회할 수 없습니다.
+- **질의는 등록형 쿼리 카탈로그에서만 나옵니다.** 프런트는 패널 id·검색어만 보낼 수
+  있고, PromQL 템플릿·escape·Step 계산은 `internal/querycatalog`(#9)가,
+  ES 필터 조립은 `quickwit/query.go`가 맡습니다. 등록되지 않은 queryRef는 실행
+  경로가 없고, 사용자 검색어는 match 노드의 **값**으로만 들어가므로 연산자
+  주입으로 Scope 필터를 우회할 수 없습니다. 카탈로그 규칙은 아래 §쿼리 카탈로그 참고.
 - **Pod 신원은 카탈로그에서 빌려옵니다.** 메트릭 라벨은 pod 이름이지만 화면 신원은
   UID입니다. UID → 이름 변환과 facet의 UID·Kind는 informer 캐시(`CatalogPods`)를
   거칩니다. 인덱스의 uid를 믿으면 사라진 Pod의 딥링크가 404가 됩니다.
@@ -97,6 +99,8 @@ internal/
     greptime/              GreptimeDB 메트릭 어댑터 (#6) — Prometheus 호환 API
       queries.go             서버 측 쿼리 카탈로그. 프런트는 패널 id만 고를 수 있습니다
     quickwit/              Quickwit 로그 어댑터 (#7) — ES 호환 검색 · 커서 페이징
+  querycatalog/          등록형 쿼리 카탈로그 (#9) — 실행 가능한 질의의 유일한 원천
+    defaults/              Git에 커밋되고 바이너리에 임베드되는 기본 카탈로그(YAML)
   httpapi/               화면 단위 엔드포인트 · Scope 강제 · 섹션 봉투
   contract/              packages/contracts와 같은 JSON을 만드는 Go 타입
   timerange/             범위별 강제 Step, Custom 30일 상한
@@ -168,6 +172,10 @@ make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
 | `TestRangeQueryCarriesWindowAndScope` (greptime) | 범위·Step·Scope 매처가 서버 확정 값 그대로 |
 | `TestStepWidensToRespectMaxDataPoints` (greptime) | 장기 조회에서도 포인트 상한 준수 |
 | `TestUpstreamFailureIsClassifiedAndRetriedOnce` (양쪽) | 표준 오류 분류 · 재시도는 1회 |
+| `TestDefaultCatalogIsValid` (querycatalog) | Git의 기본 카탈로그가 항상 유효 — CI 검출 지점 (#9) |
+| `TestRangeQueryWithoutScopeIsRejected` (querycatalog) | $__scope 없는 range 질의는 로드 거부 |
+| `TestVariableValuesAreConstrainedAndQuoted` (querycatalog) | 변수는 allowlist + 라벨 값 리터럴 — matcher 조각 삽입 불가 |
+| `TestUnregisteredPanelIsNotExecuted` (greptime) | 미등록 패널 id는 질의가 나가지 않음 (#9) |
 
 ### 실클러스터 통합 테스트
 
@@ -237,6 +245,72 @@ Event 요청: /api/v1/events?fieldSelector=type%3DWarning&limit=500&resourceVers
 끊긴 리소스마다 재LIST가 정확히 1회이고, 그보다 많으면 실패합니다.
 잘못된 재연결의 실제 위험은 낡은 값이 아니라 **LIST 폭풍**이기 때문입니다.
 
+### 실데이터소스 통합 테스트
+
+httptest 계약 테스트는 우리 쪽 규칙을 검증하지만, 실제 GreptimeDB가 PromQL을
+받아주는지 · 실제 Quickwit의 정렬·집계가 기대와 같은지는 진짜 인스턴스에서만
+나옵니다. `make api-itest`에 함께 들어 있습니다. env가 없으면 skip입니다.
+
+```bash
+# 예: 로컬 컨테이너를 띄우고
+docker run -d --name greptime -p 4000:4000 greptime/greptimedb standalone start --http-addr 0.0.0.0:4000
+docker run -d --name quickwit  -p 7280:7280 quickwit/quickwit run
+
+# 읽기 전용 검증 (운영 인스턴스에 겨눠도 안전합니다)
+GREPTIME_ITEST_URL=http://localhost:4000 \
+QUICKWIT_ITEST_URL=http://localhost:7280 QUICKWIT_ITEST_INDEX=k8s-logs \
+  make api-itest
+
+# 쓰기 검증 — 전용 리소스만 만들었다 지웁니다
+ITEST_MUTATE=1 GREPTIME_ITEST_URL=... QUICKWIT_ITEST_URL=... make api-itest
+```
+
+| 테스트 | 확인 |
+|---|---|
+| `TestLiveGreptimeRangeQueryRoundTrip` | 기본 카탈로그 range 질의 전부가 실서버에서 실행됨 (없는 namespace → 빈 시리즈) |
+| `TestLiveGreptimeInstantQueryRoundTrip` | 사용량 instant 질의 왕복과 응답 파싱 |
+| `TestLiveGreptimeScopeIsEnforcedOnRealData` | `ITEST_MUTATE=1` — 전용 테이블에 두 namespace를 넣고 Scope 매처가 한쪽만 돌려주는지 |
+| `TestLiveQuickwitCursorAdvancesWithoutDuplicates` | 실데이터 위 커서 전진 · 페이지 간 중복 0 · 내림차순 정렬 |
+| `TestLiveQuickwitEndToEndPaging` | `ITEST_MUTATE=1` — 전용 인덱스에 timestamp 충돌 문서를 넣고 전체 순회 중복·누락 0, Scope, 서버 마스킹, 레벨 필터 |
+
+쓰기 검증이 만드는 것은 GreptimeDB `k8s_dashboard_itest_metric` 테이블과
+Quickwit `k8s-dashboard-itest` 인덱스뿐이며 끝나면 지웁니다.
+운영 메트릭 테이블·로그 인덱스에는 절대 쓰지 않습니다.
+
+### 쿼리 카탈로그 (#9)
+
+실행 가능한 질의의 유일한 원천은 `internal/querycatalog/defaults/*.yaml`입니다.
+Git이 진실이고, 빌드 시 바이너리에 임베드되며, 시작 단계에서 검증됩니다.
+검증 실패면 서버가 뜨지 않습니다 — 잘못된 카탈로그로 뜬 서버는 빈 화면을
+정상처럼 보여주기 때문입니다.
+
+```yaml
+- ref: metrics.cpu.used          # queryRef — 화면은 이 이름만 압니다
+  type: promql_range             # promql_range | promql_instant
+  unit: cores
+  expr: sum(rate(container_cpu_usage_seconds_total{$__scope,container!=""}[$__rate]))
+  minStep: 60s                   # 이보다 좁은 Step 요청은 올립니다
+  maxDataPoints: 1000            # 넘으면 Step을 넓힙니다
+  timeout: 10s
+  maxRange: 720h                 # 최대 조회 기간
+```
+
+규칙 — 어기면 로드가 실패합니다.
+
+- range 질의 `expr`에는 `$__scope`가 반드시 있습니다. Scope를 잊은 질의는
+  존재할 수 없습니다. 클러스터 전체 질의는 `clusterWide: true`를 명시합니다.
+- 내장 자리표시자는 `$__scope`·`$__rate` 둘뿐입니다. 오타는 로드 오류입니다.
+- 변수는 `variables`에 allowlist(values/pattern)로 선언해야 하고, 렌더링은
+  **라벨 값 리터럴**로만 됩니다. matcher·표현식 조각을 끼울 자리가 없습니다.
+- 패널 시리즈는 등록된 `promql_range` ref만 가리킬 수 있습니다. ref 중복 금지,
+  오타 필드 금지(KnownFields).
+- 로그 조회 한계(`logs.search.maxPageSize` 등)도 카탈로그가 선언하며
+  환경변수보다 우선합니다.
+
+같은 지표는 어느 화면(Overview·Namespace·Workload·Pod)에서든 같은 ref를
+쓰므로 정의가 갈라질 수 없습니다. Raw query expert mode는 MVP 비목표이며
+이 계층에 그 경로가 없습니다.
+
 ### RBAC
 
 `deploy/rbac/k8s-dashboard-api.yaml`이 최소 권한입니다. 읽기 verb만 있고,
@@ -252,10 +326,8 @@ ITEST_KUBECONFIG=~/.kube/config \
 
 - Alertmanager/Grafana Alerting 실제 클라이언트 (#17 잔여). 알림·토폴로지는
   데모 또는 degraded입니다. 메트릭·로그는 `GREPTIME_URL`·`QUICKWIT_URL`을 설정하면
-  실제 어댑터로 동작합니다 (#6·#7 구현됨 — 계약 테스트는 httptest 기반이고,
-  실 GreptimeDB/Quickwit 인스턴스 대상 검증은 배포 환경에서 남아 있습니다).
-- 등록형 Query Catalog(queryRef) 계층 (#9). 지금은 `greptime/queries.go`의
-  고정 패널 카탈로그가 최소 구현입니다.
+  실제 어댑터로 동작합니다 (#6·#7 구현됨 — 실인스턴스 검증은
+  `GREPTIME_ITEST_URL`/`QUICKWIT_ITEST_URL`로 `make api-itest`가 수행합니다).
 - OIDC/SubjectAccessReview 기반 Scope (#10). `scope.Resolver` 인터페이스 뒤에 끼우면 핸들러는 바뀌지 않습니다.
 - Redis 캐시 (#11). 지금은 프로세스 내 TTL + singleflight입니다.
 - 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
