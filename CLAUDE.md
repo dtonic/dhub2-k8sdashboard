@@ -74,6 +74,10 @@ Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts)와
 - Event는 전부 watch하지 않습니다. 기본 필드 셀렉터는 `type=Warning`입니다.
 - 섹션 degraded 사유에 내부 주소·질의·스택트레이스를 담지 않습니다.
 - Scope는 `scope.Resolver` 뒤에서만 정합니다. 핸들러가 요청 파라미터로 권한을 판단하지 않습니다.
+- informer 대상 리소스나 콘텐츠 협상을 바꾸면 **`make api-itest`로 실서버에서 재확인**합니다.
+  fake clientset은 protobuf 협상도 필드 셀렉터도 검증하지 못합니다.
+- 실클러스터 통합 테스트는 **기본이 읽기 전용**입니다. 객체를 만드는 테스트는
+  `ITEST_MUTATE=1`로만 돌게 두고, 기본 경로에서 클러스터를 건드리지 않습니다.
 
 ### 엔티티 식별 (README §5)
 

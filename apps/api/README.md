@@ -105,7 +105,8 @@ GET /healthz   GET /readyz
 ## 테스트
 
 ```bash
-make api-test
+make api-test     # 단위 테스트 — fake clientset. 클러스터 불필요
+make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
 ```
 
 값이 맞는지보다 **규칙이 지켜지는지**를 봅니다.
@@ -121,9 +122,67 @@ make api-test
 | `TestDatasourceOutageDegradesSectionsNotThePage` | 부분 장애가 화면 전체를 죽이지 않음 |
 | `TestOverviewIsOneRequestWithoutPerWidgetFanout` | 요청 하나 안에서도 데이터소스 팬아웃 없음 |
 
+### 실클러스터 통합 테스트
+
+fake clientset은 **우리 코드가 규칙을 지키는지**는 보여주지만, API 서버가 실제로 protobuf를
+협상하는지 · 필드 셀렉터를 서버에서 걸러주는지 · watch가 몇 ms 만에 변경을 전달하는지는
+보여주지 못합니다. 그건 진짜 서버에서만 나옵니다.
+
+```bash
+# 1) 로컬에서 kube-apiserver를 띄워서 (클러스터 불필요)
+KUBEBUILDER_ASSETS=/path/to/envtest/bin make api-itest
+
+# 2) 실제 클러스터에 겨눠서 — 기본 동작은 읽기 전용입니다
+ITEST_KUBECONFIG=~/.kube/config make api-itest
+```
+
+| 환경변수 | 효과 |
+|---|---|
+| `ITEST_KUBECONFIG` | 이 kubeconfig의 클러스터를 대상으로 합니다. 없으면 `KUBECONFIG`를 봅니다 |
+| `KUBEBUILDER_ASSETS` | 위가 없을 때, 이 디렉터리의 `etcd`·`kube-apiserver`를 직접 띄웁니다 |
+| `ITEST_MUTATE=1` | 상태 반영 지연을 측정합니다. **임시 namespace와 Pod를 만듭니다** |
+| `ITEST_SERVICE_ACCOUNT=ns:name` | 배포된 ServiceAccount의 실제 권한을 SubjectAccessReview로 검사합니다 |
+
+둘 다 없으면 테스트는 실패가 아니라 **skip**입니다. 클러스터가 없다고 CI가 빨개지면 안 됩니다.
+
+검증하는 것:
+
+| 테스트 | 확인 |
+|---|---|
+| `TestLiveProtobufIsActuallyNegotiated` | 응답이 실제로 protobuf로 오는지. ADR 0004에서 Go를 고른 1순위 근거입니다 |
+| `TestLiveInitialSyncIsOneListPlusOneWatchPerResource` | 리소스당 LIST 1회 + WATCH 1회. 폴링이 섞이지 않았는지 |
+| `TestLiveServingCausesZeroAPICalls` | 화면을 21회 그리는 동안 API 서버 호출이 **0회**인지 |
+| `TestLiveEventWatchIsNarrowedServerSide` | Event 요청 URL에 `fieldSelector=type=Warning`이 실제로 붙는지 |
+| `TestLiveEveryPodNormalizesToAKnownState` | 실클러스터의 온갖 상태 조합이 전부 알려진 severity로 떨어지는지 |
+| `TestLiveOwnerChainMatchesRealCluster` | Deployment마다 현재 세대가 정확히 1개인지 |
+| `TestLivePodStateChangeReachesCacheQuickly` | 변경 → 캐시 반영이 5초 안인지 (`ITEST_MUTATE=1`) |
+| `TestLiveDeployedServiceAccountCannotReadSecrets` | 필요한 권한은 되고 Secret·exec·delete는 거절되는지 |
+
+측정 예 (kube-apiserver v1.31, Pod 3개):
+
+```
+응답 Content-Type — protobuf 16 · json 0 · 기타 0
+리소스 8종 · LIST 8회 · WATCH 8회
+화면 21회 · API 서버 추가 호출 0회
+Event 요청: /api/v1/events?fieldSelector=type%3DWarning&limit=500&resourceVersion=0
+생성 → 캐시 반영 8ms · 변경 → 캐시 반영 25ms
+```
+
+### RBAC
+
+`deploy/rbac/k8s-dashboard-api.yaml`이 최소 권한입니다. 읽기 verb만 있고,
+Secret·ConfigMap·`pods/exec`·`pods/log`가 없습니다. 적용한 뒤 실제로 그런지 확인합니다.
+
+```bash
+kubectl apply -f deploy/rbac/k8s-dashboard-api.yaml
+ITEST_KUBECONFIG=~/.kube/config \
+  ITEST_SERVICE_ACCOUNT=k8s-dashboard:k8s-dashboard-api make api-itest
+```
+
 ## 아직 없는 것
 
 - GreptimeDB / Quickwit / Alertmanager 실제 클라이언트. 지금은 `USE_DEMO_DATA=true`의 결정적 어댑터를 씁니다.
   끄면 해당 섹션이 degraded로 내려가고 화면은 그대로 동작합니다.
 - OIDC/SubjectAccessReview 기반 Scope. `scope.Resolver` 인터페이스 뒤에 끼우면 핸들러는 바뀌지 않습니다.
+- 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
 - 멀티 클러스터. 지금은 프로세스당 클러스터 하나입니다.

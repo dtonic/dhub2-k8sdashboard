@@ -98,7 +98,11 @@ Rust의 우위는 이 워크로드에서 실질적 차이를 만들지 않기 �
 
 ## 후속 작업
 
-- [ ] protobuf 협상이 실제로 적용되는지 API 서버 메트릭(`apiserver_request_body_size_bytes`)으로 확인
+- [x] **protobuf 협상이 실제로 적용되는지 확인.** 실제 kube-apiserver v1.31 대상 통합 테스트에서
+      응답 Content-Type을 세어 확인했습니다 — protobuf 16건 · JSON 0건.
+      (`TestLiveProtobufIsActuallyNegotiated`, `make api-itest`)
+- [x] **요청당 API 서버 호출 0회를 실서버 트래픽으로 확인.** 화면 21회를 그리는 동안
+      추가 호출 0회. (`TestLiveServingCausesZeroAPICalls`)
 - [ ] informer 캐시 메모리 실측 후 metadata-only 적용 범위 확정 (이슈 #8)
 - [ ] 대규모 클러스터(Pod 1만 이상)에서 초기 LIST 부하 측정 — WatchList(streaming list) 적용 여부 판단
 - [ ] 데이터소스별 타임아웃·서킷브레이커 수치 확정 (이슈 #9)
