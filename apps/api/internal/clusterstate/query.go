@@ -146,9 +146,9 @@ func (s *Store) Unhealthy(f NamespaceFilter, limit int) ([]contract.UnhealthyEnt
 		if st.Severity == contract.SeverityHealthy {
 			continue
 		}
-		kind, name := s.workloadOfPod(p)
+		kind, name, uid := s.workloadOfPod(p)
 		out = append(out, contract.UnhealthyEntity{
-			Ref:        s.podRef(p, kind, name),
+			Ref:        s.podRef(p, kind, name, uid),
 			Name:       p.Name,
 			Kind:       "Pod",
 			Namespace:  p.Namespace,
@@ -533,7 +533,7 @@ func (s *Store) PodsForWorkload(ns, kind, name, uid string) ([]contract.PodSumma
 	now := s.now()
 	out := make([]contract.PodSummary, 0, len(pods))
 	for _, p := range pods {
-		out = append(out, s.podSummary(p, kind, name, now))
+		out = append(out, s.podSummary(p, kind, name, uid, now))
 	}
 	sort.Slice(out, func(a, b int) bool {
 		ra, rb := severityRank(out[a].Severity), severityRank(out[b].Severity)
@@ -571,17 +571,17 @@ func (s *Store) Pod(ns, name, uid string) (*corev1.Pod, bool, error) {
 
 // PodSummary는 Pod 하나를 화면 계약으로 바꿉니다.
 func (s *Store) PodSummary(p *corev1.Pod) contract.PodSummary {
-	kind, name := s.workloadOfPod(p)
-	return s.podSummary(p, kind, name, s.now())
+	kind, name, uid := s.workloadOfPod(p)
+	return s.podSummary(p, kind, name, uid, s.now())
 }
 
-func (s *Store) podSummary(p *corev1.Pod, workloadKind, workloadName string, now time.Time) contract.PodSummary {
+func (s *Store) podSummary(p *corev1.Pod, workloadKind, workloadName, workloadUID string, now time.Time) contract.PodSummary {
 	st := NormalizePod(p, now)
 	usage := s.podUsage(p)
 	usage.Normalize()
 
 	ps := contract.PodSummary{
-		Ref:       s.podRef(p, workloadKind, workloadName),
+		Ref:       s.podRef(p, workloadKind, workloadName, workloadUID),
 		Name:      p.Name,
 		UID:       string(p.UID),
 		Namespace: p.Namespace,
@@ -780,32 +780,34 @@ func (s *Store) replicaSetMeta(ns, name string) (*metav1.PartialObjectMetadata, 
 	return m, ok
 }
 
-// workloadOfPod는 Pod가 어느 워크로드에 속하는지 찾습니다.
+// workloadOfPod는 Pod가 어느 워크로드에 속하는지 owner 체인에서 찾습니다.
 // ReplicaSet은 Deployment의 구현 세부사항이므로 화면에는 Deployment로 올려서 보여줍니다.
-func (s *Store) workloadOfPod(p *corev1.Pod) (kind, name string) {
+// UID도 함께 돌려줘 Pod EntityRef가 이름이 아니라 Workload UID로 상관될 수 있게 합니다. (이슈 #4)
+func (s *Store) workloadOfPod(p *corev1.Pod) (kind, name, uid string) {
 	o := directOwner(p.OwnerReferences)
 	if o == nil {
-		return "", ""
+		return "", "", ""
 	}
 	if o.Kind != "ReplicaSet" {
-		return o.Kind, o.Name
+		return o.Kind, o.Name, string(o.UID)
 	}
 	rs, ok := s.replicaSetMeta(p.Namespace, o.Name)
 	if !ok {
-		return "ReplicaSet", o.Name
+		return "ReplicaSet", o.Name, string(o.UID)
 	}
 	if top := directOwner(rs.OwnerReferences); top != nil {
-		return top.Kind, top.Name
+		return top.Kind, top.Name, string(top.UID)
 	}
-	return "ReplicaSet", o.Name
+	return "ReplicaSet", o.Name, string(o.UID)
 }
 
-func (s *Store) podRef(p *corev1.Pod, workloadKind, workloadName string) contract.EntityRef {
+func (s *Store) podRef(p *corev1.Pod, workloadKind, workloadName, workloadUID string) contract.EntityRef {
 	return contract.EntityRef{
 		ClusterID:    s.opts.ClusterID,
 		Namespace:    p.Namespace,
 		WorkloadKind: workloadKind,
 		WorkloadName: workloadName,
+		WorkloadUID:  workloadUID,
 		PodName:      p.Name,
 		PodUID:       string(p.UID),
 	}

@@ -1,0 +1,81 @@
+[
+  {
+    "type": "metric",
+    "scope": {
+      "entity": {
+        "clusterId": "prod-seoul",
+        "namespace": "payments",
+        "workloadKind": "Deployment",
+        "workloadName": "payments-api",
+        "workloadUid": "d3f9a1c2-8f4e-4b6a-9c0d-2e5b7a1f6c3d",
+        "podName": "payments-api-7f9c6b-x2k4q",
+        "podUid": "0b6f2d84-5a1e-4c3b-8e7f-9d2a4b6c8e0f",
+        "containerName": "app"
+      },
+      "labels": { "node": "worker-3", "zone": "kr-seoul-1a" }
+    },
+    "name": "container_cpu_usage",
+    "unit": "millicores",
+    "timestampMs": 1765689600000,
+    "value": 412
+  },
+  {
+    "type": "log",
+    "scope": {
+      "entity": {
+        "clusterId": "prod-seoul",
+        "namespace": "payments",
+        "workloadKind": "Deployment",
+        "workloadName": "payments-api",
+        "workloadUid": "d3f9a1c2-8f4e-4b6a-9c0d-2e5b7a1f6c3d",
+        "podName": "payments-api-7f9c6b-x2k4q",
+        "podUid": "0b6f2d84-5a1e-4c3b-8e7f-9d2a4b6c8e0f",
+        "containerName": "app",
+        "serviceName": "payments-api",
+        "serviceNamespace": "payments",
+        "serviceVersion": "1.42.0"
+      },
+      "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spanId": "00f067aa0ba902b7"
+    },
+    "timestampMs": 1765689600120,
+    "level": "ERROR",
+    "message": "결제 승인 요청이 5초 안에 응답하지 않아 재시도합니다 (attempt=2)"
+  },
+  {
+    "type": "event",
+    "scope": {
+      "entity": {
+        "clusterId": "prod-seoul",
+        "namespace": "payments",
+        "workloadKind": "Deployment",
+        "workloadName": "payments-api",
+        "workloadUid": "d3f9a1c2-8f4e-4b6a-9c0d-2e5b7a1f6c3d",
+        "podName": "payments-api-7f9c6b-x2k4q",
+        "podUid": "0b6f2d84-5a1e-4c3b-8e7f-9d2a4b6c8e0f"
+      }
+    },
+    "timestampMs": 1765689601000,
+    "eventType": "Warning",
+    "reason": "BackOff",
+    "message": "Back-off restarting failed container app in pod payments-api-7f9c6b-x2k4q",
+    "count": 3
+  },
+  {
+    "type": "alert",
+    "scope": {
+      "entity": {
+        "clusterId": "prod-seoul",
+        "namespace": "payments",
+        "workloadKind": "Deployment",
+        "workloadName": "payments-api",
+        "workloadUid": "d3f9a1c2-8f4e-4b6a-9c0d-2e5b7a1f6c3d"
+      },
+      "labels": { "team": "payments", "runbook": "rb-payments-api-restarts" }
+    },
+    "timestampMs": 1765689660000,
+    "name": "PaymentsApiHighRestartRate",
+    "severity": "critical",
+    "status": "firing"
+  }
+]

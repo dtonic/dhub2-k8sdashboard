@@ -79,7 +79,15 @@ export interface EntityRef {
   workloadUid?: string;
   podName?: string;
   podUid?: string;
+  containerName?: string;
+  /** OpenTelemetry service.* 대응. namespace/version은 serviceName이 있어야 의미가 있습니다. */
+  serviceName?: string;
+  serviceNamespace?: string;
+  serviceVersion?: string;
 }
+
+/* ── Unified Telemetry Model (이슈 #4) ──────────────────────────────────── */
+export * from "./telemetry";
 
 /* ── Overview 섹션별 페이로드 ───────────────────────────────────────────── */
 
@@ -121,6 +129,10 @@ export interface TrendPoint {
 export interface TrendSeries {
   key: string;
   label: string;
+  /**
+   * 레거시 화면 DTO의 단위 부분집합입니다. 정본 텔레메트리 계약의 통합 단위는
+   * MetricUnit(telemetry.ts)이며, Query Catalog의 cores/millicores/mebibytes를 포함합니다.
+   */
   unit: "percent" | "bytes" | "bytes_per_sec" | "count";
   points: TrendPoint[];
 }

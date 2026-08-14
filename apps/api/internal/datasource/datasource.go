@@ -134,7 +134,10 @@ type CatalogPod struct {
 	UID          string
 	WorkloadKind string
 	WorkloadName string
-	Node         string
+	// WorkloadUID는 owner 체인에서 빌려온 워크로드 신원입니다. 어댑터가 EntityRef를
+	// 만들 때 이름 대신 UID로 상관할 수 있게 합니다. (이슈 #4)
+	WorkloadUID string
+	Node        string
 }
 
 // PodCatalog는 클러스터 상태에서 Pod 신원을 빌려오는 통로입니다.

@@ -17,13 +17,14 @@ func (s *Store) CatalogPods(namespace string, limit int) []datasource.CatalogPod
 	}
 	out := make([]datasource.CatalogPod, 0, len(pods))
 	for _, p := range pods {
-		kind, name := s.workloadOfPod(p)
+		kind, name, uid := s.workloadOfPod(p)
 		out = append(out, datasource.CatalogPod{
 			Namespace:    p.Namespace,
 			Name:         p.Name,
 			UID:          string(p.UID),
 			WorkloadKind: kind,
 			WorkloadName: name,
+			WorkloadUID:  uid,
 			Node:         p.Spec.NodeName,
 		})
 	}

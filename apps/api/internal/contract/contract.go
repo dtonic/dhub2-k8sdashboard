@@ -155,13 +155,18 @@ type TimeWindow struct {
 // EntityRef는 Unified Entity Model 참조입니다.
 // 식별 우선순위: Pod UID → Workload UID → ns+kind+name → Pod Name (README §5)
 type EntityRef struct {
-	ClusterID    string `json:"clusterId"`
-	Namespace    string `json:"namespace,omitempty"`
-	WorkloadKind string `json:"workloadKind,omitempty"`
-	WorkloadName string `json:"workloadName,omitempty"`
-	WorkloadUID  string `json:"workloadUid,omitempty"`
-	PodName      string `json:"podName,omitempty"`
-	PodUID       string `json:"podUid,omitempty"`
+	ClusterID     string `json:"clusterId"`
+	Namespace     string `json:"namespace,omitempty"`
+	WorkloadKind  string `json:"workloadKind,omitempty"`
+	WorkloadName  string `json:"workloadName,omitempty"`
+	WorkloadUID   string `json:"workloadUid,omitempty"`
+	PodName       string `json:"podName,omitempty"`
+	PodUID        string `json:"podUid,omitempty"`
+	ContainerName string `json:"containerName,omitempty"`
+	// OpenTelemetry service.* 대응. namespace/version은 serviceName이 있어야 의미가 있습니다.
+	ServiceName      string `json:"serviceName,omitempty"`
+	ServiceNamespace string `json:"serviceNamespace,omitempty"`
+	ServiceVersion   string `json:"serviceVersion,omitempty"`
 }
 
 /* ── Overview ───────────────────────────────────────────────────────────── */

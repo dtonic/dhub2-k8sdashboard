@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xenx96/k8s-dashboard/packages/contracts/schema/telemetry.schema.json",
+  "title": "Unified Telemetry Record",
+  "description": "Metric/Log/Event/Alert 공통 텔레메트리 계약의 기계가 읽는 단일 정본(SSoT)입니다. TS(packages/contracts/src)와 Go(apps/api/internal/contract)는 이 파일과의 동등성을 테스트로 증명합니다. 시각은 epoch milliseconds(timestampMs)입니다.",
+  "$ref": "#/$defs/TelemetryRecord",
+  "$defs": {
+    "EntityRef": {
+      "type": "object",
+      "description": "Unified Entity Model 참조. 식별 우선순위: Pod UID → Workload UID → ns+kind+name → Pod Name (README §5)",
+      "properties": {
+        "clusterId": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 },
+        "workloadKind": {
+          "enum": ["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "CronJob"]
+        },
+        "workloadName": { "type": "string", "minLength": 1 },
+        "workloadUid": { "type": "string", "minLength": 1 },
+        "podName": { "type": "string", "minLength": 1 },
+        "podUid": { "type": "string", "minLength": 1 },
+        "containerName": { "type": "string", "minLength": 1 },
+        "serviceName": { "type": "string", "minLength": 1 },
+        "serviceNamespace": { "type": "string", "minLength": 1 },
+        "serviceVersion": { "type": "string", "minLength": 1 }
+      },
+      "required": ["clusterId"],
+      "dependentRequired": {
+        "workloadKind": ["namespace", "workloadName"],
+        "workloadName": ["namespace", "workloadKind"],
+        "workloadUid": ["namespace"],
+        "podName": ["namespace", "podUid"],
+        "podUid": ["namespace", "podName"],
+        "containerName": ["namespace", "podName", "podUid"],
+        "serviceNamespace": ["serviceName"],
+        "serviceVersion": ["serviceName"]
+      },
+      "additionalProperties": false
+    },
+    "Labels": {
+      "type": "object",
+      "description": "부가 라벨. 최대 32개, 키 64자, 값 256자(코드포인트). 신원·서비스·트레이스·메시지 필드는 정규화된 이름은 물론 원본 속성 별칭(cluster.id, k8s.*, service.*, trace_id 등)으로도 라벨에 남길 수 없습니다 — EntityRef로 흡수됩니다.",
+      "maxProperties": 32,
+      "propertyNames": { "minLength": 1, "maxLength": 64 },
+      "properties": {
+        "clusterId": false,
+        "namespace": false,
+        "workloadKind": false,
+        "workloadName": false,
+        "workloadUid": false,
+        "podName": false,
+        "podUid": false,
+        "containerName": false,
+        "serviceName": false,
+        "serviceNamespace": false,
+        "serviceVersion": false,
+        "traceId": false,
+        "spanId": false,
+        "message": false,
+        "cluster.id": false,
+        "k8s.namespace.name": false,
+        "k8s.workload.kind": false,
+        "k8s.workload.name": false,
+        "k8s.workload.uid": false,
+        "k8s.pod.name": false,
+        "k8s.pod.uid": false,
+        "k8s.container.name": false,
+        "service.name": false,
+        "service.namespace": false,
+        "service.version": false,
+        "trace_id": false,
+        "span_id": false
+      },
+      "additionalProperties": { "type": "string", "maxLength": 256 }
+    },
+    "TelemetryScope": {
+      "type": "object",
+      "description": "모든 레코드가 공유하는 관측 범위입니다.",
+      "properties": {
+        "entity": { "$ref": "#/$defs/EntityRef" },
+        "labels": { "$ref": "#/$defs/Labels" },
+        "traceId": { "type": "string", "minLength": 1 },
+        "spanId": { "type": "string", "minLength": 1 }
+      },
+      "required": ["entity"],
+      "additionalProperties": false
+    },
+    "TimestampMs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "epoch milliseconds. 정본 텔레메트리 계약의 시각 규칙입니다."
+    },
+    "MetricUnit": {
+      "description": "Query Catalog(defaults/*.yaml)가 실제로 쓰는 모든 단위를 포함합니다.",
+      "enum": ["percent", "bytes", "bytes_per_sec", "count", "cores", "millicores", "mebibytes"]
+    },
+    "MetricRecord": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "metric" },
+        "scope": { "$ref": "#/$defs/TelemetryScope" },
+        "name": { "type": "string", "minLength": 1 },
+        "unit": { "$ref": "#/$defs/MetricUnit" },
+        "timestampMs": { "$ref": "#/$defs/TimestampMs" },
+        "value": { "type": "number" }
+      },
+      "required": ["type", "scope", "name", "unit", "timestampMs", "value"],
+      "additionalProperties": false
+    },
+    "LogRecord": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "log" },
+        "scope": { "$ref": "#/$defs/TelemetryScope" },
+        "timestampMs": { "$ref": "#/$defs/TimestampMs" },
+        "level": { "enum": ["ERROR", "WARN", "INFO", "DEBUG"] },
+        "message": { "type": "string" }
+      },
+      "required": ["type", "scope", "timestampMs", "level", "message"],
+      "additionalProperties": false
+    },
+    "EventRecord": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "event" },
+        "scope": { "$ref": "#/$defs/TelemetryScope" },
+        "timestampMs": { "$ref": "#/$defs/TimestampMs" },
+        "eventType": { "enum": ["Normal", "Warning"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "count": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["type", "scope", "timestampMs", "eventType", "reason"],
+      "additionalProperties": false
+    },
+    "AlertRecord": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "alert" },
+        "scope": { "$ref": "#/$defs/TelemetryScope" },
+        "timestampMs": { "$ref": "#/$defs/TimestampMs" },
+        "name": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["critical", "warning", "info"] },
+        "status": { "enum": ["firing", "resolved", "pending"] }
+      },
+      "required": ["type", "scope", "timestampMs", "name", "severity", "status"],
+      "additionalProperties": false
+    },
+    "TelemetryRecord": {
+      "description": "type 필드로 판별되는 discriminated union입니다.",
+      "oneOf": [
+        { "$ref": "#/$defs/MetricRecord" },
+        { "$ref": "#/$defs/LogRecord" },
+        { "$ref": "#/$defs/EventRecord" },
+        { "$ref": "#/$defs/AlertRecord" }
+      ]
+    }
+  }
+}

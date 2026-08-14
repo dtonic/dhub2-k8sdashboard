@@ -1,0 +1,38 @@
+{
+  "$comment": "telemetry.schema.json의 속성 이름·필수 여부를 TypeScript 컴파일 타임 검사가 읽을 수 있게 펼친 거울(mirror)입니다. 정본은 어디까지나 telemetry.schema.json이며, 이 파일과 스키마의 동등성은 test/schema-parity.test.mjs가 기계적으로 검증합니다. 손으로 고칠 때는 반드시 스키마를 먼저 고치고 이 파일을 맞춥니다.",
+  "EntityRef": {
+    "required": { "clusterId": true },
+    "optional": {
+      "namespace": true,
+      "workloadKind": true,
+      "workloadName": true,
+      "workloadUid": true,
+      "podName": true,
+      "podUid": true,
+      "containerName": true,
+      "serviceName": true,
+      "serviceNamespace": true,
+      "serviceVersion": true
+    }
+  },
+  "TelemetryScope": {
+    "required": { "entity": true },
+    "optional": { "labels": true, "traceId": true, "spanId": true }
+  },
+  "MetricRecord": {
+    "required": { "type": true, "scope": true, "name": true, "unit": true, "timestampMs": true, "value": true },
+    "optional": {}
+  },
+  "LogRecord": {
+    "required": { "type": true, "scope": true, "timestampMs": true, "level": true, "message": true },
+    "optional": {}
+  },
+  "EventRecord": {
+    "required": { "type": true, "scope": true, "timestampMs": true, "eventType": true, "reason": true },
+    "optional": { "message": true, "count": true }
+  },
+  "AlertRecord": {
+    "required": { "type": true, "scope": true, "timestampMs": true, "name": true, "severity": true, "status": true },
+    "optional": {}
+  }
+}
