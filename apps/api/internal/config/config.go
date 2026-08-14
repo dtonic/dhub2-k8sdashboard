@@ -41,6 +41,9 @@ type Config struct {
 	// 실제 어댑터를 씁니다 — 주소를 적은 것이 의도이기 때문입니다.
 	UseDemoData bool
 
+	// Auth는 인증 방식입니다. 기본은 none(정적 Scope)입니다. (#10)
+	Auth AuthConfig
+
 	// QueryCatalogDir이 비어 있으면 바이너리에 임베드된 기본 카탈로그를 씁니다.
 	// 지정하면 그 디렉터리의 *.yaml이 기본 카탈로그를 **대체**합니다. (#9)
 	QueryCatalogDir string
@@ -55,6 +58,24 @@ type Config struct {
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+}
+
+// AuthConfig는 인증 설정입니다. (#10)
+//
+// Mode:
+//   - "none": SCOPE_NAMESPACES 기반 정적 Scope. 인증 없는 개발·데모용입니다.
+//   - "oidc": 표준 OIDC provider의 Bearer JWT를 검증합니다. 운영 기본입니다.
+//   - "mock": 로컬 mock IdP를 함께 띄웁니다. 검증 경로는 oidc와 같고
+//     발급자만 로컬입니다. **운영 금지** — 누구나 토큰을 만들 수 있습니다.
+type AuthConfig struct {
+	Mode           string
+	Issuer         string
+	Audience       string
+	RolesClaim     string
+	Leeway         time.Duration
+	JWKSMinRefresh time.Duration
+	// MockAddr은 mock IdP의 바인드 주소입니다. loopback을 벗어나지 마세요.
+	MockAddr string
 }
 
 // GreptimeConfig는 GreptimeDB 접속 설정입니다. Credential은 서버만 압니다 —
@@ -98,6 +119,15 @@ func Load() Config {
 		CacheTTL:           envDuration("CACHE_TTL", 5*time.Second),
 		UseDemoData:        envBool("USE_DEMO_DATA", true),
 		QueryCatalogDir:    env("QUERY_CATALOG_DIR", ""),
+		Auth: AuthConfig{
+			Mode:           env("AUTH_MODE", "none"),
+			Issuer:         env("OIDC_ISSUER", ""),
+			Audience:       env("OIDC_AUDIENCE", ""),
+			RolesClaim:     env("OIDC_ROLES_CLAIM", "roles"),
+			Leeway:         envDuration("OIDC_LEEWAY", time.Minute),
+			JWKSMinRefresh: envDuration("OIDC_JWKS_MIN_REFRESH", 5*time.Minute),
+			MockAddr:       env("AUTH_MOCK_ADDR", "127.0.0.1:8091"),
+		},
 		Greptime: GreptimeConfig{
 			URL:           env("GREPTIME_URL", ""),
 			DB:            env("GREPTIME_DB", "public"),

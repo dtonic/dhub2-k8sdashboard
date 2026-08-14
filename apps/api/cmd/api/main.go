@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
@@ -90,6 +92,11 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("쿼리 카탈로그 로드", "refs", len(queries.Refs()), "panels", len(queries.Panels()))
 
+	resolver, err := buildResolver(ctx, logger, cfg)
+	if err != nil {
+		return err
+	}
+
 	metrics, logs, alerts, topo := sources(logger, cfg, store, queries)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
@@ -102,7 +109,7 @@ func run(logger *slog.Logger) error {
 		Logs:          logs,
 		Alerts:        alerts,
 		Topology:      topo,
-		Resolver:      scope.Static{S: cfg.Scope()},
+		Resolver:      resolver,
 		Cache:         cache.NewTTL(cfg.CacheTTL),
 		Logger:        logger,
 		AllowedOrigin: cfg.AllowedOrigin,
@@ -133,6 +140,56 @@ func run(logger *slog.Logger) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
 	}
+}
+
+// buildResolver는 AUTH_MODE에 따라 Scope 해석기를 만듭니다. (#10)
+//
+// 어느 모드든 핸들러는 scope.Resolver 뒤만 봅니다 — 인증 방식이 바뀌어도
+// 화면 코드와 Scope 강제 규칙은 같습니다.
+func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) (scope.Resolver, error) {
+	switch cfg.Auth.Mode {
+	case "", "none":
+		logger.Info("인증: 없음 (SCOPE_NAMESPACES 정적 Scope) — 개발·데모 전용")
+		return scope.Static{S: cfg.Scope()}, nil
+
+	case "oidc":
+		r, err := auth.NewResolver(ctx, auth.Config{
+			IssuerURL:      cfg.Auth.Issuer,
+			Audience:       cfg.Auth.Audience,
+			RolesClaim:     cfg.Auth.RolesClaim,
+			Leeway:         cfg.Auth.Leeway,
+			JWKSMinRefresh: cfg.Auth.JWKSMinRefresh,
+			ClusterID:      cfg.ClusterID,
+			ClusterName:    cfg.ClusterName,
+		}, logger)
+		if err != nil {
+			// 인증이 깨진 채로 뜨면 전부 401이 되어 장애처럼 보입니다. 여기서 멈춥니다.
+			return nil, err
+		}
+		logger.Info("인증: OIDC", "issuer", cfg.Auth.Issuer, "rolesClaim", cfg.Auth.RolesClaim)
+		return r, nil
+
+	case "mock":
+		idp, err := auth.StartMockIDP(cfg.Auth.MockAddr, cfg.Auth.Audience, nil)
+		if err != nil {
+			return nil, err
+		}
+		r, err := auth.NewResolver(ctx, auth.Config{
+			IssuerURL:   idp.Issuer,
+			Audience:    cfg.Auth.Audience,
+			ClusterID:   cfg.ClusterID,
+			ClusterName: cfg.ClusterName,
+		}, logger)
+		if err != nil {
+			return nil, err
+		}
+		// 개발 편의 — 토큰 발급 방법만 알려주고 토큰 자체는 로그에 남기지 않습니다.
+		logger.Warn("인증: mock IdP — 운영 금지. 누구나 토큰을 만들 수 있습니다",
+			"issuer", idp.Issuer,
+			"tokenHint", "curl -X POST '"+idp.Issuer+"/token?sub=dev&roles=platform.admin'")
+		return r, nil
+	}
+	return nil, fmt.Errorf("알 수 없는 AUTH_MODE %q (none|oidc|mock)", cfg.Auth.Mode)
 }
 
 // sources는 데이터소스 어댑터를 고릅니다.
