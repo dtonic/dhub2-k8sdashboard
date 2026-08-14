@@ -278,11 +278,43 @@ func TestStepWidensToRespectMaxDataPoints(t *testing.T) {
 	if sec%60 != 0 {
 		t.Fatalf("넓힌 Step은 원래 Step의 배수여야 합니다: %d", sec)
 	}
-	if got := int((24 * time.Hour).Seconds()) / sec; got > 100 {
+	if got := int((24*time.Hour).Seconds())/sec + 1; got > 100 {
 		t.Fatalf("포인트 수가 상한을 넘습니다: %d", got)
 	}
 	if panels[0].StepSeconds != sec {
 		t.Fatalf("응답 StepSeconds가 실제 질의 Step과 다릅니다: %d != %d", panels[0].StepSeconds, sec)
+	}
+}
+
+// TestStepWidensAtInclusiveBoundary는 전역 상한도 끝점 포함 포인트 수를
+// 지키며, 요청 step과 응답 계약의 StepSeconds가 일치하는지 확인합니다.
+func TestStepWidensAtInclusiveBoundary(t *testing.T) {
+	f := newFakeGreptime(nil)
+	s := newSource(t, f, func(c *Config) { c.MaxDataPoints = 60 })
+	w := window(time.Minute, time.Hour) // 기존 step이면 양 끝점을 포함해 61포인트
+
+	panels, err := s.Trends(context.Background(), datasource.Target{
+		ClusterID: "seoul", Namespace: "payments",
+	}, w, []string{"restarts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stepSeconds int
+	if _, err := fmt.Sscanf(f.requests[0].Get("step"), "%d", &stepSeconds); err != nil {
+		t.Fatalf("요청 step을 해석할 수 없습니다: %v", err)
+	}
+	if panels[0].StepSeconds != stepSeconds {
+		t.Fatalf("응답 StepSeconds가 요청 step과 다릅니다: %d != %d", panels[0].StepSeconds, stepSeconds)
+	}
+	var start, end int64
+	if _, err := fmt.Sscanf(f.requests[0].Get("start"), "%d", &start); err != nil {
+		t.Fatalf("요청 start를 해석할 수 없습니다: %v", err)
+	}
+	if _, err := fmt.Sscanf(f.requests[0].Get("end"), "%d", &end); err != nil {
+		t.Fatalf("요청 end를 해석할 수 없습니다: %v", err)
+	}
+	if expected := int(end-start)/stepSeconds + 1; expected > 60 {
+		t.Fatalf("표준 query_range의 예상 포인트 수가 상한을 넘습니다: %d", expected)
 	}
 }
 
@@ -305,6 +337,35 @@ func TestUpstreamFailureIsClassifiedAndRetriedOnce(t *testing.T) {
 	// degraded 사유로 노출될 수 있으므로 에러 문자열에 내부 정보가 없어야 합니다.
 	if s := err.Error(); strings.Contains(s, "127.0.0.1") || strings.Contains(s, "query") {
 		t.Fatalf("에러 문자열에 내부 정보가 있습니다: %s", s)
+	}
+}
+
+// TestTimeoutIsClassifiedAndRetriedOnce는 응답을 막은 실제 HTTP 요청이 client
+// timeout으로 취소되고 ErrUnavailable로 분류되며 1회만 재시도되는지 검증합니다.
+func TestTimeoutIsClassifiedAndRetriedOnce(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	qc, err := querycatalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{BaseURL: srv.URL, Timeout: 20 * time.Millisecond}, catalog, qc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.Trends(context.Background(), datasource.Target{
+		ClusterID: "seoul", Namespace: "payments",
+	}, window(time.Minute, time.Hour), []string{"restarts"})
+	if !errors.Is(err, datasource.ErrUnavailable) {
+		t.Fatalf("timeout은 ErrUnavailable이어야 합니다: %v", err)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("timeout 재시도는 1회여야 합니다: %d회 호출", got)
 	}
 }
 

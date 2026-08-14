@@ -168,14 +168,7 @@ func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.W
 // effectiveStep은 카탈로그가 선언한 한계에 전역 상한(cfg.MaxDataPoints)을 겹칩니다.
 func (s *Source) effectiveStep(q querycatalog.Query, step, span time.Duration) time.Duration {
 	eff := q.EffectiveStep(step, span)
-	if s.cfg.MaxDataPoints > 0 && span > 0 && int(span/eff) > s.cfg.MaxDataPoints {
-		widened := span / time.Duration(s.cfg.MaxDataPoints)
-		if rem := widened % eff; rem != 0 {
-			widened += eff - rem
-		}
-		eff = widened
-	}
-	return eff
+	return querycatalog.LimitStep(eff, span, s.cfg.MaxDataPoints)
 }
 
 /* ── Usage ──────────────────────────────────────────────────────────────── */

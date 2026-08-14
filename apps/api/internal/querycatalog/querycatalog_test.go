@@ -238,10 +238,34 @@ queries:
 		t.Fatalf("minStep이 적용되지 않았습니다: %v", got)
 	}
 	step := q.EffectiveStep(time.Minute, 30*24*time.Hour)
-	if points := int((30 * 24 * time.Hour) / step); points > 100 {
+	if points := int((30*24*time.Hour)/step) + 1; points > 100 {
 		t.Fatalf("maxDataPoints를 넘습니다: %d포인트", points)
 	}
 	if step%(2*time.Minute) != 0 {
 		t.Fatalf("넓힌 Step은 minStep 적용 후 Step의 배수여야 합니다: %v", step)
+	}
+}
+
+// TestEffectiveStepCountsInclusiveRangeEndpoints는 query_range가 start와 end를
+// 모두 포함하는 정확히 나누어지는 경계와 maxDataPoints=1을 검증합니다.
+func TestEffectiveStepCountsInclusiveRangeEndpoints(t *testing.T) {
+	const base = time.Minute
+	for _, tc := range []struct {
+		name string
+		span time.Duration
+		max  int
+	}{
+		{name: "exact boundary", span: 100 * base, max: 100},
+		{name: "single point", span: base, max: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			step := LimitStep(base, tc.span, tc.max)
+			if step < base || step%base != 0 {
+				t.Fatalf("Step은 좁아지지 않는 base의 배수여야 합니다: %v", step)
+			}
+			if points := int(tc.span/step) + 1; points > tc.max {
+				t.Fatalf("inclusive 포인트 수가 상한을 넘습니다: %d > %d (step=%v)", points, tc.max, step)
+			}
+		})
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/upstream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 )
 
@@ -97,8 +98,8 @@ func TestLiveGreptimeBadQueryIsClassified(t *testing.T) {
 	if err == nil {
 		t.Fatal("깨진 PromQL이 통과했습니다")
 	}
-	if !errors.Is(err, datasource.ErrUnavailable) && !strings.Contains(err.Error(), "거절") {
-		t.Logf("오류 분류 확인: %v", err)
+	if !errors.Is(err, upstream.ErrBadQuery) {
+		t.Fatalf("깨진 PromQL은 ErrBadQuery여야 합니다: %v", err)
 	}
 }
 

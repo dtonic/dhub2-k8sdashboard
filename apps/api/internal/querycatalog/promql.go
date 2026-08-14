@@ -115,17 +115,25 @@ func (q Query) EffectiveStep(step time.Duration, span time.Duration) time.Durati
 	if q.MinStep > 0 && step < q.MinStep {
 		step = q.MinStep
 	}
-	if span <= 0 || q.Limits.MaxDataPoints <= 0 {
+	return LimitStep(step, span, q.Limits.MaxDataPoints)
+}
+
+// LimitStep은 양 끝점을 포함하는 Prometheus range query의 포인트 수가
+// maxPoints를 넘지 않도록 step을 넓힙니다. 결과는 기존 step의 배수입니다.
+func LimitStep(step, span time.Duration, maxPoints int) time.Duration {
+	if step <= 0 || span <= 0 || maxPoints <= 0 || span/step < time.Duration(maxPoints) {
 		return step
 	}
-	if int(span/step) <= q.Limits.MaxDataPoints {
-		return step
+
+	// multiplier = floor(span/(step*maxPoints))+1을 step*maxPoints가
+	// overflow하지 않는 형태로 계산합니다. maxPoints=1이고 span이 표현 가능한
+	// 최댓값에 가까우면 더 넓은 duration이 없으므로 기존 step의 최대 배수로 포화합니다.
+	multiplier := (span/step)/time.Duration(maxPoints) + 1
+	maxDuration := time.Duration(1<<63 - 1)
+	if multiplier > maxDuration/step {
+		return maxDuration - maxDuration%step
 	}
-	widened := span / time.Duration(q.Limits.MaxDataPoints)
-	if rem := widened % step; rem != 0 {
-		widened += step - rem
-	}
-	return widened
+	return step * multiplier
 }
 
 // rateWindow는 rate/increase 구간입니다. Step보다 좁으면 샘플 간격에 따라 구멍이
