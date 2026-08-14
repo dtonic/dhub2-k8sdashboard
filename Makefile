@@ -34,12 +34,18 @@ api-build:          ## Go API 빌드
 api-test:           ## Go API 단위 테스트 (클러스터 불필요)
 	cd apps/api && go test ./...
 
-api-itest:          ## Go API 통합 테스트 (실제 kube-apiserver 대상)
-	# 대상 지정 — 둘 중 하나가 필요합니다.
+api-itest:          ## Go API 통합 테스트 (실제 kube-apiserver·GreptimeDB·Quickwit 대상)
+	# Kubernetes — 둘 중 하나가 필요합니다.
 	#   ITEST_KUBECONFIG=~/.kube/config   실제 클러스터. 기본은 읽기 전용입니다.
 	#   KUBEBUILDER_ASSETS=<dir>          etcd/kube-apiserver 바이너리를 직접 띄웁니다.
+	# 데이터소스 — 있으면 실인스턴스 검증이 함께 돕니다. 없으면 skip입니다.
+	#   GREPTIME_ITEST_URL=http://localhost:4000    실제 GreptimeDB
+	#   QUICKWIT_ITEST_URL=http://localhost:7280    실제 Quickwit
+	#   QUICKWIT_ITEST_INDEX=k8s-logs               읽기 전용 커서 검증에 쓸 인덱스
 	# 선택 —
-	#   ITEST_MUTATE=1                    상태 반영 지연 측정 (객체를 만듭니다)
+	#   ITEST_MUTATE=1                    쓰기 검증. k8s는 임시 namespace/Pod,
+	#                                     GreptimeDB는 k8s_dashboard_itest_metric 테이블,
+	#                                     Quickwit은 k8s-dashboard-itest 인덱스만 만들고 지웁니다.
 	#   ITEST_SERVICE_ACCOUNT=ns:name     배포된 ServiceAccount의 실제 권한 검사
 	cd apps/api && go test -tags integration -count=1 -v -timeout 15m ./...
 
