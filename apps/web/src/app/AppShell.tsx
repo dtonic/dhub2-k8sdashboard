@@ -51,6 +51,7 @@ export function AppShell() {
               {dashboard.title}
             </NavLink>
           ))}
+          <NavLink to={{ pathname: "/dashboard-builder", search }} className="app__nav-link">Dashboard Builder</NavLink>
         </div>
       </nav>
 

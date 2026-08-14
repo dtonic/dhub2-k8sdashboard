@@ -7,8 +7,8 @@
 //	cluster.viewer:<clusterID>              해당 클러스터 전체 (id가 일치할 때만)
 //	namespace.viewer:<ns>                   이 클러스터의 특정 namespace
 //	namespace.viewer:<clusterID>/<ns>       해당 클러스터의 특정 namespace
-//	dashboard.editor                        (예약) 대시보드 편집 — MVP는 조회 전용이라
-//	                                        Scope에는 영향이 없고 Principal에만 남습니다
+//	dashboard.editor                        대시보드 draft 편집 권한. 조회 Scope 범위에는
+//	                                        영향이 없고 편집 capability로만 전달됩니다
 //
 // 모르는 역할은 **무시**합니다. 거절하면 IdP에 다른 앱의 역할이 섞여 있을 때
 // 로그인 자체가 막힙니다. 무시된 역할은 Scope를 넓히지 못하므로 안전합니다.
@@ -38,9 +38,9 @@ type Principal struct {
 	Email    string
 	Username string
 	Roles    []string
-	// CanEdit는 dashboard.editor 보유 여부입니다. MVP 화면은 조회 전용이라
-	// 아직 쓰는 곳이 없지만, 편집 기능이 생길 때 이 값 하나로 판단합니다.
-	CanEdit bool
+	// CanEdit는 dashboard.editor 보유 여부이며 draft 편집 capability로 전달됩니다.
+	CanEdit    bool
+	CanPublish bool
 }
 
 // Name은 UI 등에 쓸 표시 이름입니다. 보안·감사 식별자는 Scope의 sub를 사용합니다.
@@ -76,6 +76,7 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 		case RolePlatformAdmin:
 			if !hasArg {
 				all = true
+				p.CanPublish = true
 			}
 		case RoleDashboardEditor:
 			if !hasArg {
@@ -111,5 +112,5 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 		sort.Strings(c.Namespaces)
 	}
 	// 보안 주체와 감사 식별자는 변경 가능한 표시용 클레임이 아니라 OIDC sub입니다.
-	return p, scope.Scope{Subject: p.Subject, Clusters: []scope.Cluster{c}}
+	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, Clusters: []scope.Cluster{c}}
 }

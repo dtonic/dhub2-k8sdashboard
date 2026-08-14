@@ -80,7 +80,8 @@ type Config struct {
 
 	// QueryCatalogDir이 비어 있으면 바이너리에 임베드된 기본 카탈로그를 씁니다.
 	// 지정하면 그 디렉터리의 *.yaml이 기본 카탈로그를 **대체**합니다. (#9)
-	QueryCatalogDir string
+	QueryCatalogDir  string
+	DashboardBuilder DashboardBuilderConfig
 
 	// Greptime은 메트릭 데이터소스(GreptimeDB) 설정입니다. URL이 비어 있으면 미사용입니다.
 	Greptime GreptimeConfig
@@ -110,6 +111,15 @@ type AuthConfig struct {
 	JWKSMinRefresh time.Duration
 	// MockAddr은 mock IdP의 바인드 주소입니다. loopback을 벗어나지 마세요.
 	MockAddr string
+}
+
+type DashboardBuilderConfig struct {
+	Enabled        bool
+	DatabaseURL    string
+	CursorKey      string
+	MaxConns       int
+	ConnectTimeout time.Duration
+	RequireTLS     bool
 }
 
 // GreptimeConfig는 GreptimeDB 접속 설정입니다. Credential은 서버만 압니다 —
@@ -179,6 +189,12 @@ func Load() Config {
 		AlertSnapshotMax:         envInt("ALERT_SNAPSHOT_MAX", 2000),
 		UseDemoData:              envBool("USE_DEMO_DATA", true),
 		QueryCatalogDir:          env("QUERY_CATALOG_DIR", ""),
+		DashboardBuilder: DashboardBuilderConfig{
+			Enabled: envBool("DASHBOARD_BUILDER_ENABLED", false), DatabaseURL: env("DATABASE_URL", ""),
+			CursorKey: env("DASHBOARD_CURSOR_KEY", ""), MaxConns: envInt("DASHBOARD_DB_MAX_CONNS", 8),
+			ConnectTimeout: envDuration("DASHBOARD_DB_CONNECT_TIMEOUT", 5*time.Second),
+			RequireTLS:     envBool("DASHBOARD_DB_REQUIRE_TLS", false),
+		},
 		Auth: AuthConfig{
 			Mode:           env("AUTH_MODE", "none"),
 			Issuer:         env("OIDC_ISSUER", ""),
@@ -219,6 +235,20 @@ func Load() Config {
 // 형식이 틀린 선택적 튜닝 env는 Load()가 기본값으로 대체합니다.
 func (c Config) Validate() error {
 	var errs []error
+	if c.DashboardBuilder.Enabled {
+		if c.DashboardBuilder.DatabaseURL == "" {
+			errs = append(errs, errors.New("DATABASE_URL is required when dashboard builder is enabled"))
+		}
+		if len(c.DashboardBuilder.CursorKey) < 32 {
+			errs = append(errs, errors.New("DASHBOARD_CURSOR_KEY must contain at least 32 bytes"))
+		}
+		if c.DashboardBuilder.MaxConns < 1 || c.DashboardBuilder.MaxConns > 32 {
+			errs = append(errs, errors.New("DASHBOARD_DB_MAX_CONNS must be between 1 and 32"))
+		}
+		if c.DashboardBuilder.ConnectTimeout <= 0 || c.DashboardBuilder.ConnectTimeout > 30*time.Second {
+			errs = append(errs, errors.New("DASHBOARD_DB_CONNECT_TIMEOUT must be between 0 and 30s"))
+		}
+	}
 	if err := validateListenAddr(c.Addr); err != nil {
 		errs = append(errs, fmt.Errorf("ADDR가 유효한 listen 주소가 아닙니다: %q: %w", c.Addr, err))
 	}

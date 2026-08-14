@@ -1,5 +1,9 @@
 # apps/web
 
+## Dashboard Builder (#24)
+
+`/dashboard-builder`는 embedded 표준 dashboard와 분리된 사용자 draft 목록입니다. 서버 capability가 enabled이고 `dashboard.editor`일 때만 자기 draft 편집·clone·submit controls를 노출하며 `platform.admin`은 제출본 approve controls만 봅니다. drag 중에는 네트워크를 호출하지 않고 pointer 종료 시 한 번 저장합니다. 키보드 이동/가로·세로 resize controls도 같은 deterministic 12x96 overlap 검사를 사용합니다. 409 충돌은 로컬 편집을 유지하고 최신본 reload 또는 로컬본 fork를 명시적으로 선택합니다. preview는 기존 aggregate `/overview` 한 건을 재사용합니다.
+
 React + TypeScript 기반 Custom Observability UI입니다.
 **MVP UI 화면이 모두 구현되어 있습니다** — Cluster Overview(#14),
 Namespace / Workload / Pod Drill-down(#15), Logs Explorer와 상관분석(#16),

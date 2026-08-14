@@ -54,6 +54,32 @@ docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/de
   --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
   --set telemetry.mode=disabled > "$TMP/disabled-explicit.yaml"
 cmp "$TMP/dev.yaml" "$TMP/disabled-explicit.yaml"
+for env in dev stage prod; do
+  docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+    --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" \
+    --set dashboardBuilder.enabled=false > "$TMP/$env-builder-disabled.yaml"
+  cmp "$TMP/$env.yaml" "$TMP/$env-builder-disabled.yaml"
+done
+
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24-fixture \
+  --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' > "$TMP/dashboard-builder-enabled.yaml"
+python3 - "$TMP/dashboard-builder-enabled.yaml" <<'PY'
+import sys, yaml
+docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+deploy=next(d for d in docs if d.get("kind")=="Deployment" and d["metadata"]["name"].endswith("-api"))
+env={e["name"]:e for e in deploy["spec"]["template"]["spec"]["containers"][0]["env"]}
+for name,key in (("DATABASE_URL","DATABASE_URL"),("DASHBOARD_CURSOR_KEY","DASHBOARD_CURSOR_KEY")):
+    ref=env[name]["valueFrom"]["secretKeyRef"]
+    assert ref=={"name":"issue24-fixture","key":key,"optional":False},ref
+assert env["DASHBOARD_DB_MAX_CONNS"]["value"]=="8"
+assert env["DASHBOARD_DB_CONNECT_TIMEOUT"]["value"]=="5s"
+assert env["DASHBOARD_DB_REQUIRE_TLS"]["value"]=="false"
+policy=next(d for d in docs if d.get("kind")=="NetworkPolicy" and d["metadata"]["name"].endswith("-api"))
+assert any(e.get("to")==[{"ipBlock":{"cidr":"192.0.2.30/32"}}] and e.get("ports")==[{"protocol":"TCP","port":5432}] for e in policy["spec"]["egress"])
+text=open(sys.argv[1]).read();assert "postgres://" not in text and "issue24-test-only" not in text
+PY
 
 docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
   --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
@@ -173,6 +199,18 @@ expect_render_failure() {
 expect_render_failure --set-json 'networkPolicy.ingress.cidrs=[]'
 expect_render_failure --set 'networkPolicy.monitoring.enabled=true'
 expect_render_failure --set-json 'networkPolicy.dns.namespaceSelector=null'
+expect_render_failure --set dashboardBuilder.enabled=true
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set-json 'dashboardBuilder.postgresEgress.cidrs=[]'
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=not-a-cidr'
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' --set dashboardBuilder.postgresEgress.port=0
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' --set dashboardBuilder.maxConnections=33
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' --set dashboardBuilder.connectTimeout=0s
+expect_render_failure --set dashboardBuilder.enabled=true --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' --set dashboardBuilder.connectTimeout=31s
+if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard --namespace observability \
+  --values /work/deploy/helm/observability-dashboard/values-stage.yaml --set dashboardBuilder.enabled=true \
+  --set api.existingSecret.name=issue24 --set 'dashboardBuilder.postgresEgress.cidrs[0]=192.0.2.30/32' >/dev/null 2>&1; then
+  echo "stage dashboard builder without verified TLS unexpectedly rendered" >&2; exit 1
+fi
 
 expect_cutover_failure() {
   if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \

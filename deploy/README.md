@@ -52,6 +52,11 @@ bundled Redis는 HA/replication/operator가 없는 단일 장애점입니다. st
 않으므로 외부 reloader를 사용하거나 `secretRevision`을 증가시켜 rollout을 유도합니다. OIDC issuer와
 audience는 비밀이 아니므로 ConfigMap에 둡니다.
 
+## Dashboard Builder PostgreSQL
+
+Dashboard Builder는 기본 `enabled=false`이며 disabled render에는 DB env/egress가 추가되지 않습니다. 활성화할 때는 `api.existingSecret.name`, `dashboardBuilder.databaseURLKey`, `cursorKeyKey`, `postgresEgress.cidrs/port`를 환경 소유 값으로 지정합니다. chart는 PostgreSQL을 배포하지 않으며 Secret의 URL을 출력하지 않습니다.
+stage/prod에서는 `dashboardBuilder.requireTLS=true`와 `sslmode=verify-full` DSN, 신뢰 CA 및 일치하는 DB hostname이 필수입니다. NetworkPolicy port와 Secret DSN port는 chart가 Secret을 읽을 수 없으므로 운영자가 동일하게 유지하며, 불일치는 API 시작 또는 readiness 503으로 진단합니다.
+
 ## NetworkPolicy 제한
 
 기본 deny 후 UI→API, API→Kubernetes API/Redis/선언된 데이터소스, DNS만 엽니다. Ingress는 UI

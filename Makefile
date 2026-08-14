@@ -95,6 +95,9 @@ api-itest:          ## Go API 통합 테스트 (실제 kube-apiserver·GreptimeD
 api-redis-itest:    ## Redis protocol/cache integration (REDIS_ITEST_ADDR required)
 	cd apps/api && go test -tags integration -count=1 -v -timeout 2m ./internal/cache
 
+api-postgres-itest: ## Dashboard metadata PostgreSQL CAS/migration integration
+	cd apps/api && GOWORK=off go test -count=1 -v -timeout 2m ./internal/dashboard -run TestPostgresConcurrencyMigrationAndPrivacy
+
 api-vet:            ## Go 정적 검사
 	cd apps/api && go vet ./...
 

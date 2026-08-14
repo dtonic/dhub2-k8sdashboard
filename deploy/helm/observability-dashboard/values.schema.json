@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["environment", "ui", "api", "redis", "networkPolicy", "telemetry"],
+  "required": ["environment", "ui", "api", "redis", "dashboardBuilder", "networkPolicy", "telemetry"],
   "properties": {
     "environment": {"enum": ["dev", "stage", "prod"]},
     "imagePullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]},
@@ -23,6 +23,15 @@
         "persistence": {"type": "object", "required": ["enabled", "size"], "properties": {"enabled": {"type": "boolean"}, "size": {"type": "string", "minLength": 1}, "storageClass": {"type": "string"}}},
         "resources": {"$ref": "#/definitions/resources"}
       }
+    },
+    "dashboardBuilder": {
+      "type": "object", "required": ["enabled", "databaseURLKey", "cursorKeyKey", "maxConnections", "connectTimeout", "requireTLS", "postgresEgress"],
+      "properties": {
+        "enabled": {"type": "boolean"}, "databaseURLKey": {"type": "string", "minLength": 1}, "cursorKeyKey": {"type": "string", "minLength": 1},
+        "maxConnections": {"type": "integer", "minimum": 1, "maximum": 32}, "connectTimeout": {"type": "string", "pattern": "^(?:[1-9]|[12][0-9]|30)s$"}, "requireTLS": {"type": "boolean"},
+        "postgresEgress": {"type": "object", "required": ["cidrs", "port"], "properties": {"cidrs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/cidr"}}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
+      },
+      "allOf": [{"if": {"properties": {"enabled": {"const": true}}}, "then": {"properties": {"postgresEgress": {"properties": {"cidrs": {"minItems": 1}}}}}}]
     },
     "networkPolicy": {
       "type": "object", "required": ["enabled", "ingress", "dns", "kubernetesApiCidrs", "external", "internal"],

@@ -1,4 +1,4 @@
-# Observability API/BFF — 등록된 GET 라우트의 계약입니다. (#5)
+# Observability API/BFF — 등록된 전체 HTTP method/path 라우트 계약입니다. (#5, #24)
 #
 # 유지 규칙:
 #   - 라우터(apps/api/internal/httpapi/server.go)와 이 문서의 메서드·경로가 어긋나면
@@ -18,6 +18,145 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/dashboard-capabilities:
+    get:
+      operationId: getDashboardCapabilities
+      responses:
+        "200": {$ref: "#/components/responses/DashboardCapabilitiesOK"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+  /api/v1/dashboard-drafts:
+    get:
+      operationId: listDashboardDrafts
+      parameters:
+        - {$ref: "#/components/parameters/DashboardListLimit"}
+        - {$ref: "#/components/parameters/DashboardCursor"}
+      responses:
+        "200": {$ref: "#/components/responses/DashboardPageOK"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+    post:
+      operationId: createDashboardDraft
+      requestBody: {$ref: "#/components/requestBodies/DashboardDefinitionRequest"}
+      responses:
+        "201": {$ref: "#/components/responses/DashboardCreated"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "413": {$ref: "#/components/responses/DashboardError"}
+        "415": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDashboardDraft
+      responses:
+        "200": {$ref: "#/components/responses/DashboardDraftOK"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+    put:
+      operationId: updateDashboardDraft
+      parameters: [{$ref: "#/components/parameters/IfMatchRevision"}]
+      requestBody: {$ref: "#/components/requestBodies/DashboardDefinitionRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/DashboardDraftOK"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "413": {$ref: "#/components/responses/DashboardError"}
+        "415": {$ref: "#/components/responses/DashboardError"}
+        "428": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+    delete:
+      operationId: deleteDashboardDraft
+      parameters: [{$ref: "#/components/parameters/IfMatchRevision"}]
+      responses:
+        "204": {$ref: "#/components/responses/DashboardNoContent"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "428": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/{id}/submit:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {$ref: "#/components/parameters/IfMatchRevision"}
+    post:
+      operationId: submitDashboardDraft
+      responses:
+        "200": {$ref: "#/components/responses/DashboardDraftOK"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "428": {$ref: "#/components/responses/DashboardError"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/{id}/approve:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {$ref: "#/components/parameters/IfMatchRevision"}
+    post:
+      operationId: approveDashboardDraft
+      responses:
+        "200": {$ref: "#/components/responses/DashboardDraftOK"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "428": {$ref: "#/components/responses/DashboardError"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/{id}/clone:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: cloneDashboardDraft
+      responses:
+        "200": {$ref: "#/components/responses/DashboardDraftOK"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/{id}/export:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: exportDashboard
+      parameters: [{$ref: "#/components/parameters/IfNoneMatchExport"}]
+      responses:
+        "200": {$ref: "#/components/responses/DashboardExportOK"}
+        "304": {$ref: "#/components/responses/DashboardNotModified"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "404": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "500": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
   /healthz:
     get:
       operationId: getHealthz
@@ -529,7 +668,38 @@ components:
       schema:
         type: string
         pattern: "^[A-Za-z0-9._:-]{1,128}$"
+    DashboardRevisionETag:
+      description: Current optimistic-lock revision.
+      schema: {type: string, pattern: '^"revision-[1-9][0-9]*"$'}
+    DashboardExportETag:
+      description: SHA-256 of the canonical exported bytes.
+      schema: {type: string, pattern: '^"sha256-[a-f0-9]{64}"$'}
+    DashboardContentDisposition:
+      description: Safe DSL filename derived from the validated dashboard definition id.
+      schema: {type: string, pattern: '^attachment; filename="[a-z][a-z0-9-]{0,63}\.json"$'}
   parameters:
+    IfMatchRevision:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string, pattern: '^"revision-[1-9][0-9]*"$'}
+    IfNoneMatchExport:
+      name: If-None-Match
+      in: header
+      required: false
+      description: Optional canonical export ETag returned by a previous successful export.
+      schema: {type: string, pattern: '^"sha256-[a-f0-9]{64}"$'}
+    DashboardListLimit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 50, default: 50}
+    DashboardCursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque, authenticated keyset cursor. It contains no owner or subject text.
+      schema: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$"}
     ClusterId:
       name: clusterId
       in: path
@@ -580,7 +750,53 @@ components:
         type: string
         maxLength: 64
         pattern: "^[0-9a-f]{32}-[0-9]{1,20}$"
+  requestBodies:
+    DashboardDefinitionRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DashboardDefinitionRequest"
   responses:
+    DashboardCapabilitiesOK:
+      description: Dashboard Builder availability and server-authoritative permissions.
+      headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}}
+      content: {application/json: {schema: {$ref: "#/components/schemas/DashboardCapabilities"}}}
+    DashboardDraftOK:
+      description: Dashboard draft envelope.
+      headers:
+        X-Request-ID: {$ref: "#/components/headers/XRequestID"}
+        ETag: {$ref: "#/components/headers/DashboardRevisionETag"}
+      content: {application/json: {schema: {$ref: "#/components/schemas/DashboardDraft"}}}
+    DashboardPageOK:
+      description: Bounded keyset page of visible dashboard drafts.
+      headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}}
+      content: {application/json: {schema: {$ref: "#/components/schemas/DashboardDraftPage"}}}
+    DashboardCreated:
+      description: Dashboard created
+      headers:
+        X-Request-ID: {$ref: "#/components/headers/XRequestID"}
+        ETag: {$ref: "#/components/headers/DashboardRevisionETag"}
+      content: {application/json: {schema: {$ref: "#/components/schemas/DashboardDraft"}}}
+    DashboardNoContent:
+      description: Dashboard deleted
+      headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}}
+    DashboardNotModified:
+      description: Export ETag matched
+      headers:
+        X-Request-ID: {$ref: "#/components/headers/XRequestID"}
+        ETag: {$ref: "#/components/headers/DashboardExportETag"}
+    DashboardExportOK:
+      description: Canonical approved Dashboard DSL JSON with a trailing newline.
+      headers:
+        X-Request-ID: {$ref: "#/components/headers/XRequestID"}
+        ETag: {$ref: "#/components/headers/DashboardExportETag"}
+        Content-Disposition: {$ref: "#/components/headers/DashboardContentDisposition"}
+      content: {application/json: {schema: {$ref: "#/components/schemas/DashboardDefinition"}}}
+    DashboardError:
+      description: Dashboard error
+      headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}}
+      content: {application/json: {schema: {$ref: "#/components/schemas/APIError"}}}
     StreamCapacity:
       description: >-
         스트림 연결 상한(전역 또는 주체별) 초과입니다. Retry-After 이후 재시도하세요.
@@ -664,6 +880,103 @@ components:
           schema:
             $ref: "#/components/schemas/APIError"
   schemas:
+    DashboardCapabilities:
+      type: object
+      additionalProperties: false
+      required: [enabled, canEdit, canPublish, maxDrafts, maxWidgets]
+      properties:
+        enabled: {type: boolean}
+        canEdit: {type: boolean}
+        canPublish: {type: boolean}
+        maxDrafts: {type: integer, const: 32}
+        maxWidgets: {type: integer, const: 24}
+    DashboardDefinitionRequest:
+      type: object
+      additionalProperties: false
+      required: [definition]
+      properties:
+        definition: {$ref: "#/components/schemas/DashboardDefinition"}
+    DashboardDefinition:
+      type: object
+      additionalProperties: false
+      description: >-
+        Dashboard DSL v1. Exact type-specific semantics and the Query Catalog allowlist are
+        enforced by packages/dashboard-schema/schema/dashboard.schema.json and the shared
+        Go/runtime parity corpus. Canonical exported bytes are limited to 65536.
+      x-canonical-max-bytes: 65536
+      required: [schemaVersion, id, title, variables, widgets]
+      properties:
+        schemaVersion: {type: integer, const: 1}
+        id: {type: string, pattern: "^[a-z][a-z0-9-]{0,63}$"}
+        title: {type: string, minLength: 1, maxLength: 160}
+        description: {type: string, minLength: 1, maxLength: 160}
+        variables:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, label, kind]
+            properties:
+              id: {type: string, pattern: "^[a-z][a-z0-9-]{0,63}$"}
+              label: {type: string, minLength: 1, maxLength: 160}
+              kind: {type: string, enum: [scope, range]}
+        widgets:
+          type: array
+          minItems: 1
+          maxItems: 24
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, title, type, binding, layout]
+            properties:
+              id: {type: string, pattern: "^[a-z][a-z0-9-]{0,63}$"}
+              title: {type: string, minLength: 1, maxLength: 160}
+              type: {type: string, enum: [TimeSeries, Stat, Gauge, Table, LogStream, EventTimeline]}
+              binding: {type: string, enum: [trends, nodes.ready, pods.running, pods.runningPercent, unhealthy, unsupported.logs, events]}
+              queryRefs:
+                type: array
+                minItems: 1
+                maxItems: 8
+                uniqueItems: true
+                items: {type: string, minLength: 1, maxLength: 160}
+              options:
+                type: object
+                additionalProperties: false
+                required: [maxRows]
+                properties: {maxRows: {type: integer, minimum: 1, maximum: 5000}}
+              layout:
+                type: object
+                additionalProperties: false
+                required: [x, y, w, h]
+                properties:
+                  x: {type: integer, minimum: 0, maximum: 11}
+                  y: {type: integer, minimum: 0, maximum: 95}
+                  w: {type: integer, minimum: 1, maximum: 12}
+                  h: {type: integer, minimum: 1, maximum: 96}
+    DashboardDraft:
+      type: object
+      additionalProperties: false
+      required: [id, revision, state, owned, schemaVersion, definition, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer, format: int64, minimum: 1}
+        state: {type: string, enum: [draft, submitted, approved]}
+        owned: {type: boolean}
+        schemaVersion: {type: integer, const: 1}
+        definition: {$ref: "#/components/schemas/DashboardDefinition"}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    DashboardDraftPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: {$ref: "#/components/schemas/DashboardDraft"}
+        nextCursor: {type: string, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$"}
     APIError:
       type: object
       description: 화면 전체가 실패했을 때만 쓰는 최상위 에러. 섹션 단위 실패는 Section 값입니다.
@@ -684,6 +997,18 @@ components:
             - bad_last_event_id
             - stream_capacity
             - internal
+            - invalid_dashboard
+            - invalid_revision
+            - invalid_page
+            - invalid_cursor
+            - precondition_required
+            - revision_conflict
+            - draft_limit
+            - approved_immutable
+            - invalid_state
+            - unsupported_media_type
+            - body_too_large
+            - dashboard_store_unavailable
         message:
           type: string
         requestId:

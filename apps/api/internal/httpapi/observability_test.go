@@ -44,9 +44,11 @@ func TestHTTPMetricsUseFixedRoutesExactBytesAndExcludeScrape(t *testing.T) {
 	m := observability.New()
 	f := newFixture(t, func(d *httpapi.Deps) { d.Observability = m })
 	health := f.get(t, "/healthz", nil)
+	f.get(t, "/api/v1/dashboard-capabilities", nil)
 	f.get(t, "/raw/secret@example.com?q=token&cursor=opaque", nil)
 	scrape := f.get(t, "/metrics", nil).Body.String()
 	if !strings.Contains(scrape, `dashboard_http_requests_total{route="healthz",status_class="2xx"} 1`) ||
+		!strings.Contains(scrape, `dashboard_http_requests_total{route="dashboard",status_class="2xx"} 1`) ||
 		!strings.Contains(scrape, `dashboard_http_requests_total{route="unmatched",status_class="4xx"} 1`) {
 		t.Fatalf("missing fixed status series:\n%s", scrape)
 	}

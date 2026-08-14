@@ -9,6 +9,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import { DASHBOARD_LIMITS, dashboardControlKinds, migrateDashboard, validateDashboard, validateEmbeddedFiles } from "../src/index.js";
 
 const schema = JSON.parse(await readFile(new URL("../schema/dashboard.schema.json", import.meta.url), "utf8"));
+const sharedParity = JSON.parse(await readFile(new URL("./fixtures/dashboard-parity.json", import.meta.url), "utf8"));
 const catalog = new Set(["metrics.cpu.used", "metrics.cpu.requested"]);
 const execFileAsync = promisify(execFile);
 const schemaSemantics = (_enabled, value) => {
@@ -39,6 +40,16 @@ const schemaSemantics = (_enabled, value) => {
 const ajv = new Ajv2020({ strict: true });
 ajv.addKeyword({ keyword: "x-dashboard-semantics", schemaType: "boolean", type: "object", validate: schemaSemantics });
 const schemaValidate = ajv.compile(schema);
+
+test("shared Go/runtime parity corpus has identical outcomes", () => {
+  const refs = new Set(sharedParity.queryRefs);
+  for (const entry of sharedParity.cases) {
+    const value = JSON.parse(entry.raw);
+    const schemaValid = schemaValidate(value) && schemaSemantics(true, value);
+    assert.equal(schemaValid, entry.valid, `${entry.name}: schema`);
+    assert.equal(validateDashboard(value, refs).valid, entry.valid, `${entry.name}: runtime`);
+  }
+});
 const widgets = [
   { id: "time", title: "Time", type: "TimeSeries", binding: "trends", queryRefs: ["metrics.cpu.used"], layout: { x: 0, y: 0, w: 2, h: 1 } },
   { id: "stat", title: "Stat", type: "Stat", binding: "nodes.ready", layout: { x: 2, y: 0, w: 2, h: 1 } },

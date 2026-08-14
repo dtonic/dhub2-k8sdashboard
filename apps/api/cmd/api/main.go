@@ -24,6 +24,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/greptime"
@@ -129,6 +130,16 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("쿼리 카탈로그 로드", "refs", len(queries.Refs()), "panels", len(queries.Panels()))
 
+	var dashboardStore *dashboard.Postgres
+	if cfg.DashboardBuilder.Enabled {
+		dashboardStore, err = dashboard.Open(ctx, cfg.DashboardBuilder.DatabaseURL, []byte(cfg.DashboardBuilder.CursorKey), int32(cfg.DashboardBuilder.MaxConns), cfg.DashboardBuilder.ConnectTimeout, cfg.DashboardBuilder.RequireTLS)
+		if err != nil {
+			return fmt.Errorf("dashboard metadata store: %w", err)
+		}
+		defer dashboardStore.Close()
+		logger.Info("dashboard builder metadata store ready")
+	}
+
 	resolver, err := buildResolver(ctx, logger, cfg)
 	if err != nil {
 		return err
@@ -167,24 +178,26 @@ func run(logger *slog.Logger) error {
 	guardCfg.QueryTimeout = cfg.QueryTimeout
 	guardCfg.SlowThreshold = cfg.QuerySlowThreshold
 	srv := httpapi.NewServer(httpapi.Deps{
-		Store:             store,
-		Metrics:           metrics,
-		Logs:              logs,
-		Alerts:            alerts,
-		Topology:          topo,
-		Resolver:          resolver,
-		Cache:             responseCache,
-		Guard:             queryprotect.New(guardCfg, protectionMetrics),
-		ProtectionMetrics: protectionMetrics,
-		Observability:     platformMetrics,
-		PlannedQueryRefs:  panelQueryRefs(queries),
-		CacheTTL:          cache.TTLPolicy{State: cfg.CacheTTL, Short: cfg.CacheShortTTL, Historical: cfg.CacheHistoricalTTL, HistoricalSafety: cfg.CacheHistoricalSafety},
-		Logger:            logger,
-		Stream:            hub,
-		StreamMetrics:     streamMetrics,
-		StreamOptions:     httpapi.StreamOptions{Heartbeat: cfg.StreamHeartbeat, WriteIdleTimeout: cfg.StreamWriteIdle},
-		AllowedOrigin:     cfg.AllowedOrigin,
-		Version:           contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
+		Store:              store,
+		Metrics:            metrics,
+		Logs:               logs,
+		Alerts:             alerts,
+		Topology:           topo,
+		Resolver:           resolver,
+		Cache:              responseCache,
+		Guard:              queryprotect.New(guardCfg, protectionMetrics),
+		ProtectionMetrics:  protectionMetrics,
+		Observability:      platformMetrics,
+		PlannedQueryRefs:   panelQueryRefs(queries),
+		CacheTTL:           cache.TTLPolicy{State: cfg.CacheTTL, Short: cfg.CacheShortTTL, Historical: cfg.CacheHistoricalTTL, HistoricalSafety: cfg.CacheHistoricalSafety},
+		Logger:             logger,
+		Stream:             hub,
+		StreamMetrics:      streamMetrics,
+		StreamOptions:      httpapi.StreamOptions{Heartbeat: cfg.StreamHeartbeat, WriteIdleTimeout: cfg.StreamWriteIdle},
+		DashboardStore:     dashboardStore,
+		DashboardQueryRefs: queries.Refs(),
+		AllowedOrigin:      cfg.AllowedOrigin,
+		Version:            contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
 
 	httpSrv := &http.Server{

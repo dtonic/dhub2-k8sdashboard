@@ -43,6 +43,17 @@ api:
       quickwitPassword: QUICKWIT_PASSWORD
       redisAddr: REDIS_ADDR
 
+dashboardBuilder:
+  enabled: false
+  databaseURLKey: DATABASE_URL
+  cursorKeyKey: DASHBOARD_CURSOR_KEY
+  maxConnections: 8
+  connectTimeout: 5s
+  requireTLS: false
+  postgresEgress:
+    cidrs: []
+    port: 5432
+
 redis:
   enabled: true
   image: {repository: redis, tag: 8.2.6-alpine, digest: ""}

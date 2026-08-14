@@ -20,6 +20,7 @@ mkdir -p "$SOURCE" "$TRIVY_CACHE"
 
 GITLEAKS_IMAGE='ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 TRIVY_IMAGE='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
+POSTGRES_IMAGE='cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3'
 TRIVY_USER="$(id -u):$(id -g)"
 
 is_secret_env_path() {
@@ -84,6 +85,11 @@ echo "negative mutation passed: fake secret was rejected"
 
 docker run --rm --user "$TRIVY_USER" -v "$SOURCE:/repo:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" fs --cache-dir /tmp/trivy-cache --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress /repo
 docker run --rm --user "$TRIVY_USER" -v "$SOURCE:/repo:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" fs --cache-dir /tmp/trivy-cache --scanners misconfig --severity HIGH,CRITICAL --exit-code 1 --no-progress /repo
+docker pull "$POSTGRES_IMAGE" >/dev/null
+docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$POSTGRES_IMAGE" | grep -Fx "$POSTGRES_IMAGE" >/dev/null
+docker image inspect --format '{{.Id}}' "$POSTGRES_IMAGE" | grep -E '^sha256:[a-f0-9]{64}$' >/dev/null
+docker save --output "$TMP/postgres-image.tar" "$POSTGRES_IMAGE"
+docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/postgres-image.tar --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress
 
 cat > "$SOURCE/negative-privileged.yaml" <<'EOF'
 apiVersion: v1

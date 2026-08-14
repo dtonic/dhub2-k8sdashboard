@@ -14,7 +14,7 @@ import (
 
 var routes = [...]string{
 	"healthz", "readyz", "version", "metrics", "scope", "overview", "namespaces", "namespace",
-	"workload", "pod", "logs", "topology", "edge_series", "alerts", "stream", "unmatched",
+	"workload", "pod", "logs", "topology", "edge_series", "alerts", "stream", "dashboard", "unmatched",
 }
 var statusClasses = [...]string{"2xx", "3xx", "4xx", "5xx", "other", "canceled"}
 var upstreams = [...]string{"other", "greptime", "quickwit"}
@@ -40,9 +40,9 @@ func (h *histogram) observe(v float64, sum uint64, bounds []float64) {
 }
 
 type Metrics struct {
-	httpRequests [16][6]atomic.Uint64
-	httpDuration [16]histogram
-	httpBytes    [16]histogram
+	httpRequests [17][6]atomic.Uint64
+	httpDuration [17]histogram
+	httpBytes    [17]histogram
 	inflight     atomic.Int64
 	upRequests   [3][6]atomic.Uint64
 	upDuration   [3]histogram
@@ -58,6 +58,11 @@ func (m *Metrics) ConfigureLogging(logger *slog.Logger, slow time.Duration) {
 }
 
 func routeIndex(route string) int {
+	switch route {
+	case "dashboard_capabilities", "dashboard_list", "dashboard_create", "dashboard_get", "dashboard_update",
+		"dashboard_delete", "dashboard_submit", "dashboard_approve", "dashboard_clone", "dashboard_export":
+		route = "dashboard"
+	}
 	for i, v := range routes {
 		if v == route {
 			return i

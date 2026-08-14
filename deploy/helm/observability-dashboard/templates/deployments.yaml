@@ -125,6 +125,20 @@ spec:
             - name: REDIS_ADDR
               valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.api.existingSecret.keys.redisAddr }}, optional: false}}
             {{- end }}
+            {{- if $.Values.dashboardBuilder.enabled }}
+            - name: DASHBOARD_BUILDER_ENABLED
+              value: "true"
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.dashboardBuilder.databaseURLKey }}, optional: false}}
+            - name: DASHBOARD_CURSOR_KEY
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.dashboardBuilder.cursorKeyKey }}, optional: false}}
+            - name: DASHBOARD_DB_MAX_CONNS
+              value: {{ $.Values.dashboardBuilder.maxConnections | quote }}
+            - name: DASHBOARD_DB_CONNECT_TIMEOUT
+              value: {{ $.Values.dashboardBuilder.connectTimeout | quote }}
+            - name: DASHBOARD_DB_REQUIRE_TLS
+              value: {{ $.Values.dashboardBuilder.requireTLS | quote }}
+            {{- end }}
           {{- end }}
           lifecycle: {preStop: {sleep: {seconds: 5}}}
           startupProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 30}

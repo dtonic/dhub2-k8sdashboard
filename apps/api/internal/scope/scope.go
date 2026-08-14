@@ -17,6 +17,9 @@ type Scope struct {
 	// 비어 있습니다. 캐시 키에는 넣지 않습니다 — 같은 Scope의 사용자끼리는
 	// 응답을 공유하는 것이 singleflight의 목적입니다.
 	Subject string
+	// Dashboard 권한은 인식된 OIDC 역할에서만 파생합니다.
+	CanEditDashboard    bool
+	CanPublishDashboard bool
 	// Clusters는 접근 가능한 클러스터입니다.
 	Clusters []Cluster
 }

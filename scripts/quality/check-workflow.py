@@ -26,6 +26,7 @@ ACTION_PINS = {
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
 }
 REDIS = "redis:8.2.6-alpine@sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e"
+POSTGRES = "cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3"
 GO_VERSION = "1.26.6"
 GO_LANGUAGE_VERSION = "1.26.0"
 GO_BUILDER = "golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df"
@@ -75,8 +76,13 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         if not re.fullmatch(r"[0-9a-f]{40}", ref):
             errors.append(f"action is not pinned to a full SHA: {action}@{ref}")
     service_images = re.findall(r"(?m)^\s{8}image:\s*(\S+)", text)
-    if service_images != [REDIS]:
-        errors.append("Redis service image is not pinned to the approved manifest digest")
+    if service_images != [REDIS, POSTGRES]:
+        errors.append("service images are not pinned to the approved manifest digests")
+    if text.count("run: make api-postgres-itest") != 1:
+        errors.append("dashboard PostgreSQL integration step is missing or duplicated")
+    postgres_test_url = "DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable"
+    if text.count(postgres_test_url) != 1:
+        errors.append("dashboard PostgreSQL integration URL drifted")
     # Web job(통합 E2E fixture)과 API job이 같은 고정 패치를 정확히 한 번씩 씁니다.
     go_versions = re.findall(r'(?m)^\s+go-version:\s*["\']?([^"\'\s]+)', text)
     if go_versions != [GO_VERSION, GO_VERSION]:
@@ -139,6 +145,19 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         errors.append("gitleaks image is not pinned to the approved digest")
     if "make security-scan" not in text or TRIVY not in security_scan:
         errors.append("Trivy image is not pinned to the approved digest")
+    if security_scan.count(POSTGRES) != 1:
+        errors.append("PostgreSQL integration image is not scanned at its approved digest")
+    for required in (
+        'docker pull "$POSTGRES_IMAGE"',
+        'docker save --output "$TMP/postgres-image.tar" "$POSTGRES_IMAGE"',
+        '--input /scan/postgres-image.tar',
+    ):
+        if security_scan.count(required) != 1:
+            errors.append("PostgreSQL scan must pull its pinned digest and scan a local tar")
+    if '--no-progress "$POSTGRES_IMAGE"' in security_scan:
+        errors.append("PostgreSQL scan must not fetch layers remotely through Trivy")
+    if "negative-privileged.yaml" not in security_scan or "KSV-0017" not in security_scan:
+        errors.append("Trivy privileged-workload negative fixture is missing")
     if telemetry_supply_source is None:
         telemetry_supply_source = "\n".join(path.read_text(encoding="utf-8") for path in (
             COLLECTOR_DOCKERFILE, COLLECTOR_BUILDER, MOCK_DOCKERFILE, COLLECTOR_BUILD_CHECK, TELEMETRY_IMAGE_CHECK,
@@ -165,6 +184,13 @@ if args.self_test:
     mutations = [
         ("mutable action", source.replace(f"actions/checkout@{ACTION_PINS['actions/checkout']}", "actions/checkout@v4", 1), makefile_source, security_source),
         ("mutable service", source.replace(REDIS, "redis:8.2.6-alpine", 1), makefile_source, security_source),
+        ("mutable postgres service", source.replace(POSTGRES, "cgr.dev/chainguard/postgres:latest", 1), makefile_source, security_source),
+        ("postgres scan removed", source, makefile_source, security_source.replace(POSTGRES, "cgr.dev/chainguard/postgres:latest", 1)),
+        ("postgres pinned pull removed", source, makefile_source, security_source.replace('docker pull "$POSTGRES_IMAGE"', "true", 1)),
+        ("postgres local tar input removed", source, makefile_source, security_source.replace("--input /scan/postgres-image.tar", "--input /scan/missing.tar", 1)),
+        ("Trivy negative fixture removed", source, makefile_source, security_source.replace("KSV-0017", "KSV-0000")),
+        ("postgres test removed", source.replace("run: make api-postgres-itest", "run: true", 1), makefile_source, security_source),
+        ("postgres test env drift", source.replace("dashboard_ci?sslmode=disable", "dashboard_ci?sslmode=require", 1), makefile_source, security_source),
         ("mutable govulncheck", source, makefile_source.replace(GOVULN, "golang.org/x/vuln/cmd/govulncheck@latest", 1), security_source),
         ("mutable gitleaks", source, makefile_source, security_source.replace(GITLEAKS, "ghcr.io/gitleaks/gitleaks:v8.30.1", 1)),
         ("mutable Trivy", source, makefile_source, security_source.replace(TRIVY, "aquasec/trivy:0.74.0", 1)),
@@ -252,4 +278,4 @@ if args.self_test:
 errors = validate(source, makefile_source, security_source)
 if errors:
     raise SystemExit("\n".join(errors))
-print("workflow policy: required contexts, permissions, action SHAs, and Redis digest are fixed")
+print("workflow policy: required contexts, permissions, action SHAs, and service digests are fixed")

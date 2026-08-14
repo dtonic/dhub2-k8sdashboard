@@ -36,6 +36,7 @@ import {
   scopedTrends,
   workloadsOf,
 } from "./drilldown";
+import { dashboardBuilderHandlers } from "./dashboard-builder";
 
 const scenarioOf = (req: Request): Scenario => {
   const s = new URL(req.url).searchParams.get("scenario");
@@ -75,6 +76,7 @@ const eventsFor = (predicate: (name: string, ns: string) => boolean) =>
   EVENTS.filter((e) => predicate(e.involvedName, e.namespace));
 
 export const handlers = [
+  ...dashboardBuilderHandlers,
   http.get("/api/v1/scope", async () => {
     await delay(80);
     return HttpResponse.json(SCOPE);

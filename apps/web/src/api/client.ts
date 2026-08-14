@@ -40,3 +40,22 @@ export async function apiGet<T>(path: string, params: Record<string, string> = {
   }
   return (await res.json()) as T;
 }
+
+export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const url = new URL(path, window.location.origin);
+  const res = await fetch(url, { ...init, headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers } });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as ApiError | null;
+    throw new HttpError(res.status, body ?? { code: "internal", message: `Request failed (${res.status})`, requestId: res.headers.get("X-Request-ID") ?? "" });
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export async function apiDownload(path: string, signal?: AbortSignal): Promise<{blob:Blob;filename:string}> {
+  const res=await fetch(new URL(path,window.location.origin),{signal,headers:{accept:"application/json"}});
+  if(!res.ok){const body=(await res.json().catch(()=>null)) as ApiError|null;throw new HttpError(res.status,body??{code:"internal",message:`Request failed (${res.status})`,requestId:res.headers.get("X-Request-ID")??""})}
+  if(!res.headers.get("content-type")?.startsWith("application/json"))throw new Error("Unexpected export content type");
+  const match=/filename="([a-z][a-z0-9-]{0,63}\.json)"/.exec(res.headers.get("content-disposition")??"");
+  return {blob:await res.blob(),filename:match?.[1]??"dashboard.json"};
+}

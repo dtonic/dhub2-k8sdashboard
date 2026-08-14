@@ -20,7 +20,7 @@ export function DashboardView() {
   return <ResolvedDashboard definition={definition} />;
 }
 
-function ResolvedDashboard({ definition }: { definition: DashboardDefinition }) {
+export function ResolvedDashboard({ definition }: { definition: DashboardDefinition }) {
   const { clusterId, namespace, range, refreshMs, patch } = useDashboardParams();
   const scope = useScope();
   const queryClient = useQueryClient();

@@ -71,6 +71,27 @@ func TestDynamicInputsCannotCreateSeries(t *testing.T) {
 	}
 }
 
+func TestKnownDashboardActionsUseAggregateRoute(t *testing.T) {
+	m := New()
+	m.HTTPStarted()
+	m.HTTPFinished("dashboard_update", 409, 0, time.Millisecond, false, false)
+	m.HTTPStarted()
+	m.HTTPFinished("dashboard_dynamic-secret", 404, 0, time.Millisecond, false, false)
+	var out bytes.Buffer
+	if err := m.WritePrometheus(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `dashboard_http_requests_total{route="dashboard",status_class="4xx"} 1`) {
+		t.Fatal("known dashboard action was not aggregated")
+	}
+	if !strings.Contains(out.String(), `dashboard_http_requests_total{route="unmatched",status_class="4xx"} 1`) {
+		t.Fatal("unknown dynamic dashboard label escaped the unmatched bucket")
+	}
+	if strings.Contains(out.String(), "dashboard_dynamic-secret") {
+		t.Fatal("dynamic dashboard route leaked into a metric label")
+	}
+}
+
 func TestInvalidEnumsAndStaleCircuitUpdateAreBounded(t *testing.T) {
 	m := New()
 	invalid := -1

@@ -1,0 +1,40 @@
+{
+  "queryRefs": ["metrics.cpu.used"],
+  "cases": [
+    {
+      "name": "minimal stat",
+      "valid": true,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"ready\",\"title\":\"Ready\",\"type\":\"Stat\",\"binding\":\"nodes.ready\",\"layout\":{\"x\":0,\"y\":0,\"w\":3,\"h\":2}}]}"
+    },
+    {
+      "name": "catalog time series",
+      "valid": true,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"cpu\",\"title\":\"CPU\",\"type\":\"TimeSeries\",\"binding\":\"trends\",\"queryRefs\":[\"metrics.cpu.used\"],\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":3}}]}"
+    },
+    {
+      "name": "empty optional description",
+      "valid": false,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"description\":\"\",\"variables\":[],\"widgets\":[{\"id\":\"ready\",\"title\":\"Ready\",\"type\":\"Stat\",\"binding\":\"nodes.ready\",\"layout\":{\"x\":0,\"y\":0,\"w\":3,\"h\":2}}]}"
+    },
+    {
+      "name": "raw expression property",
+      "valid": false,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"ready\",\"title\":\"Ready\",\"type\":\"Stat\",\"binding\":\"nodes.ready\",\"expr\":\"up\",\"layout\":{\"x\":0,\"y\":0,\"w\":3,\"h\":2}}]}"
+    },
+    {
+      "name": "null options",
+      "valid": false,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"table\",\"title\":\"Table\",\"type\":\"Table\",\"binding\":\"unhealthy\",\"options\":null,\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":3}}]}"
+    },
+    {
+      "name": "layout overlap",
+      "valid": false,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"one\",\"title\":\"One\",\"type\":\"Stat\",\"binding\":\"nodes.ready\",\"layout\":{\"x\":0,\"y\":0,\"w\":3,\"h\":2}},{\"id\":\"two\",\"title\":\"Two\",\"type\":\"Gauge\",\"binding\":\"pods.runningPercent\",\"layout\":{\"x\":2,\"y\":1,\"w\":3,\"h\":2}}]}"
+    },
+    {
+      "name": "unknown query ref",
+      "valid": false,
+      "raw": "{\"schemaVersion\":1,\"id\":\"operations\",\"title\":\"Operations\",\"variables\":[],\"widgets\":[{\"id\":\"cpu\",\"title\":\"CPU\",\"type\":\"TimeSeries\",\"binding\":\"trends\",\"queryRefs\":[\"raw.query\"],\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":3}}]}"
+    }
+  ]
+}

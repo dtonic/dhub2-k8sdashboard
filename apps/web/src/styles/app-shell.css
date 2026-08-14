@@ -13,6 +13,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.builder-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 40px; gap: var(--space-2); }
+.builder-widget { min-width: 0; touch-action: none; overflow: hidden; }
+.builder-widget .panel__header { cursor: grab; user-select: none; }
+
 a { color: var(--color-text-link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 

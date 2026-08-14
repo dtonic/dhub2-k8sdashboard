@@ -1,5 +1,13 @@
 # Observability API / BFF
 
+## Dashboard Builder metadata (#24)
+
+Builder는 기본 비활성입니다. `DASHBOARD_BUILDER_ENABLED=true`이면 `DATABASE_URL`, 32 byte 이상의 `DASHBOARD_CURSOR_KEY`, `DASHBOARD_DB_MAX_CONNS`(1..32), `DASHBOARD_DB_CONNECT_TIMEOUT`을 요구합니다. API는 시작 시 advisory lock 아래 migration을 적용하고 미래 DB schema version 또는 최초 ping 실패 시 시작하지 않습니다. 실행 중 DB ping 실패는 `/readyz`를 503으로 만들며 capability도 fail closed 합니다. PostgreSQL은 chart가 설치하지 않는 외부 서비스입니다.
+
+승인 export는 `GET /api/v1/dashboard-drafts/{id}/export`의 canonical DSL JSON을 운영자가 Git에 커밋하는 흐름입니다. API는 Git에 직접 쓰지 않습니다. 모든 mutation은 revision ETag의 `If-Match`를 요구합니다.
+
+운영에서는 `DASHBOARD_DB_REQUIRE_TLS=true`와 `sslmode=verify-full` DSN을 사용해 신뢰 CA와 DB hostname을 검증합니다. NetworkPolicy의 PostgreSQL port와 Secret DSN port는 운영자가 일치시켜야 하며, 불일치 또는 인증서 오류는 시작/`readyz` 실패로 진단합니다. Secret 회전은 Helm `secretRevision`도 증가시켜 Pod를 rollout합니다.
+
 화면 단위 집계 응답을 만드는 Go 서버입니다. Kubernetes 상태는 **watch 기반 informer 캐시**에서,
 메트릭·로그·알림은 각 데이터소스 어댑터에서 가져옵니다.
 
@@ -389,10 +397,10 @@ token은 현재 지원하지 않으며 401로 거절합니다.
 
 | 역할 | 효과 |
 |---|---|
-| `platform.admin` | 모든 클러스터 · 모든 namespace (exact match만 허용) |
+| `platform.admin` | 모든 클러스터 · 모든 namespace 및 제출된 Dashboard 승인·export (exact match만 허용) |
 | `cluster.viewer` / `cluster.viewer:<clusterID>` | 해당(또는 이) 클러스터 전체 |
 | `namespace.viewer:<ns>` / `namespace.viewer:<clusterID>/<ns>` | 특정 namespace |
-| `dashboard.editor` | (예약) 편집 플래그 — MVP 화면은 조회 전용이라 Scope에 영향 없음 (exact match만 허용) |
+| `dashboard.editor` | 자기 Dashboard draft 생성·편집·제출. 조회 Scope에는 영향 없음 (exact match만 허용) |
 
 모르는 역할은 무시합니다(다른 앱의 역할이 섞여도 로그인은 됩니다).
 역할이 하나도 없으면 **빈 Scope로 인증 성공** — 이후 화면 요청이 403입니다.

@@ -15,11 +15,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
@@ -49,7 +51,9 @@ type Deps struct {
 	// 넘길 때는 그 허브의 Observer와 같은 인스턴스여야 값이 한 곳에 모입니다.
 	StreamMetrics *stream.Metrics
 	// StreamOptions는 SSE 전송 동작(heartbeat·write 유휴 상한·재연결 힌트)입니다.
-	StreamOptions StreamOptions
+	StreamOptions      StreamOptions
+	DashboardStore     dashboard.Store
+	DashboardQueryRefs []string
 	// AllowedOrigin이 있으면 CORS 헤더를 붙입니다. 개발 중 Vite 오리진용입니다.
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
@@ -113,6 +117,14 @@ func (s *Server) routes() {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "syncing"})
 			return
 		}
+		if s.deps.DashboardStore != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if s.deps.DashboardStore.Ready(ctx) != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "dashboard-store-unavailable"})
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	m.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
@@ -129,6 +141,16 @@ func (s *Server) routes() {
 	})
 
 	m.HandleFunc("GET /api/v1/scope", s.handleScope)
+	m.HandleFunc("GET /api/v1/dashboard-capabilities", s.handleDashboardCapabilities)
+	m.HandleFunc("GET /api/v1/dashboard-drafts", s.handleDashboardList)
+	m.HandleFunc("POST /api/v1/dashboard-drafts", s.handleDashboardCreate)
+	m.HandleFunc("GET /api/v1/dashboard-drafts/{id}", s.handleDashboardGet)
+	m.HandleFunc("PUT /api/v1/dashboard-drafts/{id}", s.handleDashboardUpdate)
+	m.HandleFunc("DELETE /api/v1/dashboard-drafts/{id}", s.handleDashboardDelete)
+	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/submit", s.handleDashboardSubmit)
+	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/approve", s.handleDashboardApprove)
+	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/clone", s.handleDashboardClone)
+	m.HandleFunc("GET /api/v1/dashboard-drafts/{id}/export", s.handleDashboardExport)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.handleOverview)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces", s.handleNamespaceList)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces/{namespace}", s.handleNamespaceDetail)
@@ -200,12 +222,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 등록되지 않은 경로·메서드는 ServeMux의 text/plain 대신 JSON 에러 계약으로 답합니다.
 	// Handler()는 매칭만 확인하고 핸들러를 실행하지 않으므로 성공 응답은 버퍼링되지 않습니다.
-	if r.Method != http.MethodGet {
-		probe := r.Clone(r.Context())
-		probe.Method = http.MethodGet
-		if _, pattern := s.mux.Handler(probe); pattern != "" {
-			// Go's ServeMux treats HEAD as GET, so enforce the documented GET-only contract here.
-			w.Header().Set("Allow", http.MethodGet)
+	if _, currentPattern := s.mux.Handler(r); r.Method == http.MethodHead || currentPattern == "" {
+		allowed := registeredMethods(s.mux, r)
+		if len(allowed) > 0 {
+			// ServeMux는 HEAD를 GET처럼 처리하지만 API 계약은 메서드를 명시적으로 등록합니다.
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
 			writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "허용되지 않은 메서드입니다.")
 			s.audit(r, sc, http.StatusMethodNotAllowed, started)
 			return
@@ -268,6 +289,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, sc, rec.status, started)
 }
 
+func registeredMethods(mux *http.ServeMux, r *http.Request) []string {
+	methods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete}
+	allowed := make([]string, 0, len(methods))
+	for _, method := range methods {
+		probe := r.Clone(r.Context())
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed
+}
+
 // statusRecorder는 감사 로그에 결과 상태를 남기기 위해 상태 코드를 붙잡습니다.
 type statusRecorder struct {
 	http.ResponseWriter
@@ -311,6 +345,26 @@ func routeName(mux *http.ServeMux, r *http.Request) string {
 		return "metrics"
 	case "GET /api/v1/scope":
 		return "scope"
+	case "GET /api/v1/dashboard-capabilities":
+		return "dashboard_capabilities"
+	case "GET /api/v1/dashboard-drafts":
+		return "dashboard_list"
+	case "POST /api/v1/dashboard-drafts":
+		return "dashboard_create"
+	case "GET /api/v1/dashboard-drafts/{id}":
+		return "dashboard_get"
+	case "PUT /api/v1/dashboard-drafts/{id}":
+		return "dashboard_update"
+	case "DELETE /api/v1/dashboard-drafts/{id}":
+		return "dashboard_delete"
+	case "POST /api/v1/dashboard-drafts/{id}/submit":
+		return "dashboard_submit"
+	case "POST /api/v1/dashboard-drafts/{id}/approve":
+		return "dashboard_approve"
+	case "POST /api/v1/dashboard-drafts/{id}/clone":
+		return "dashboard_clone"
+	case "GET /api/v1/dashboard-drafts/{id}/export":
+		return "dashboard_export"
 	case "GET /api/v1/clusters/{clusterId}/overview":
 		return "overview"
 	case "GET /api/v1/clusters/{clusterId}/namespaces":

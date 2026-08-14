@@ -65,6 +65,18 @@ jobs:
           --health-interval 2s
           --health-timeout 2s
           --health-retries 20
+      postgres:
+        image: cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3
+        env:
+          POSTGRES_PASSWORD: dashboard-ci-only
+          POSTGRES_DB: dashboard_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dashboard_ci"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -79,6 +91,9 @@ jobs:
       - run: make api-redis-itest
         env:
           REDIS_ITEST_ADDR: 127.0.0.1:6379
+      - run: make api-postgres-itest
+        env:
+          DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable
       - name: Integration contracts (external adapters skip without endpoints)
         run: make api-itest
         env:

@@ -291,7 +291,7 @@ Pod Name
 | Logs | Quickwit REST Search API |
 | Alerting | Grafana Alerting 또는 Alertmanager |
 | Cache | Redis |
-| Dashboard Metadata | Git, 추후 PostgreSQL |
+| Dashboard Metadata | 표준은 Git, 사용자 draft는 외부 PostgreSQL (#24) |
 | Authentication | OIDC / MS Entra |
 | Telemetry | OpenTelemetry |
 | Deployment | Helm 또는 Kustomize |
@@ -365,7 +365,7 @@ k8s-dashboard/
 - Raw PromQL/SQL/Quickwit Query Editor
 - 자체 Alert Rule Evaluator
 - 자체 Silence/Grouping/Notification Router
-- 완전한 Dashboard Builder
+- Raw query/임의 component를 허용하는 범용 Dashboard Builder
 - AI 기반 이상 탐지
 - Multi-cluster 중앙 Agent 구조
 - 기존 수집 파이프라인의 즉시 교체

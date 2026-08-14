@@ -1,3 +1,5 @@
+import type { DashboardDefinition } from "@k8s-dashboard/dashboard-schema";
+
 /**
  * @k8s-dashboard/contracts
  * --------------------------------------------------------------------------
@@ -231,6 +233,12 @@ export interface ScopeResponse {
   }>;
 }
 
+export interface DashboardCapabilities { enabled:boolean; canEdit:boolean; canPublish:boolean; maxDrafts:number; maxWidgets:number; }
+export type DashboardDraftState = "draft" | "submitted" | "approved";
+export interface DashboardDraft { id:string; revision:number; state:DashboardDraftState; owned:boolean; schemaVersion:1; definition:DashboardDefinition; createdAt:string; updatedAt:string; }
+export interface DashboardDraftPage { items:DashboardDraft[]; nextCursor?:string; }
+export interface DashboardDefinitionRequest { definition:DashboardDefinition; }
+
 /** 화면 전체가 실패했을 때만 쓰는 최상위 에러. 섹션 단위 실패는 Section으로 표현합니다. */
 export interface ApiError {
   code:
@@ -240,6 +248,18 @@ export interface ApiError {
     | "method_not_allowed"
     | "upstream_unavailable"
     | "invalid_range"
+    | "invalid_dashboard"
+    | "invalid_revision"
+    | "invalid_page"
+    | "invalid_cursor"
+    | "precondition_required"
+    | "revision_conflict"
+    | "draft_limit"
+    | "approved_immutable"
+    | "invalid_state"
+    | "unsupported_media_type"
+    | "body_too_large"
+    | "dashboard_store_unavailable"
     | "internal";
   message: string;
   /** 응답 헤더 X-Request-ID와 항상 같은 값. 문의·로그 대조는 이 값 하나로 합니다. */

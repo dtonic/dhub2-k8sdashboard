@@ -12,6 +12,7 @@ import { LogsExplorer } from "@/features/logs/LogsExplorer";
 import { TopologyView } from "@/features/topology/TopologyView";
 import { AlertsView } from "@/features/alerts/AlertsView";
 import { DashboardView } from "@/features/dashboards/DashboardView";
+import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -49,6 +50,8 @@ async function bootstrap() {
               <Route path="/logs" element={<LogsExplorer />} />
               <Route path="/alerts" element={<AlertsView />} />
               <Route path="/dashboards/:id" element={<DashboardView />} />
+              <Route path="/dashboard-builder" element={<DashboardBuilderList />} />
+              <Route path="/dashboard-builder/:id" element={<DashboardBuilderEditor />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

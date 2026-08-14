@@ -5,6 +5,7 @@ package httpapi_test
 // 읽습니다 — 프로덕션 코드를 테스트용으로 고치지 않기 위해서입니다.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,8 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
 	"gopkg.in/yaml.v3"
 )
+
+func asSlice(v any) []any { s, _ := v.([]any); return s }
 
 // routePattern은 s.routes()의 등록 형식과 맞물립니다. 등록 방식을 바꾸면
 // 이 테스트가 라우트 0개로 실패해 함께 고치게 됩니다.
@@ -54,8 +58,7 @@ func asMap(v any) map[string]any {
 }
 
 // specOperations는 "METHOD /path" → operation 맵입니다.
-func specOperations(t *testing.T, doc map[string]any) map[string]map[string]any {
-	t.Helper()
+func specOperationsFromDoc(doc map[string]any) map[string]map[string]any {
 	ops := map[string]map[string]any{}
 	for path, item := range asMap(doc["paths"]) {
 		for method, op := range asMap(item) {
@@ -66,6 +69,11 @@ func specOperations(t *testing.T, doc map[string]any) map[string]map[string]any 
 		}
 	}
 	return ops
+}
+
+func specOperations(t *testing.T, doc map[string]any) map[string]map[string]any {
+	t.Helper()
+	return specOperationsFromDoc(doc)
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -195,6 +203,146 @@ func TestOpenAPITimeParametersMatchParser(t *testing.T) {
 		}
 		if !dateTime || !epochMillis {
 			t.Errorf("%s schema does not match timerange.Parse: %v", name, schema)
+		}
+	}
+}
+
+func dashboardContractErrors(doc map[string]any) []string {
+	var errors []string
+	components := asMap(doc["components"])
+	schemas := asMap(components["schemas"])
+	params := asMap(components["parameters"])
+	responses := asMap(components["responses"])
+	ops := specOperationsFromDoc(doc)
+	require := func(ok bool, message string) {
+		if !ok {
+			errors = append(errors, message)
+		}
+	}
+	requiredSet := func(schema map[string]any) string {
+		fields := make([]string, 0)
+		for _, field := range asSlice(schema["required"]) {
+			fields = append(fields, fmt.Sprint(field))
+		}
+		sort.Strings(fields)
+		return strings.Join(fields, ",")
+	}
+	capabilities := asMap(schemas["DashboardCapabilities"])
+	require(requiredSet(capabilities) == "canEdit,canPublish,enabled,maxDrafts,maxWidgets", "capabilities required fields drift")
+	capProps := asMap(capabilities["properties"])
+	require(asMap(capProps["maxDrafts"])["const"] == dashboard.MaxDraftsPerOwner, "maxDrafts drift")
+	require(asMap(capProps["maxWidgets"])["const"] == 24, "maxWidgets drift")
+	definition := asMap(schemas["DashboardDefinition"])
+	defProps := asMap(definition["properties"])
+	require(asMap(defProps["schemaVersion"])["const"] == dashboard.SchemaVersion, "schemaVersion drift")
+	require(asMap(defProps["widgets"])["maxItems"] == 24, "widget bound drift")
+	require(definition["x-canonical-max-bytes"] == dashboard.MaxDefinitionBytes, "canonical byte bound drift")
+	definitionRequest := asMap(schemas["DashboardDefinitionRequest"])
+	require(requiredSet(definitionRequest) == "definition", "definition request required fields drift")
+	draft := asMap(schemas["DashboardDraft"])
+	require(requiredSet(draft) == "createdAt,definition,id,owned,revision,schemaVersion,state,updatedAt", "draft required fields drift")
+	draftProps := asMap(draft["properties"])
+	states := asSlice(asMap(draftProps["state"])["enum"])
+	require(fmt.Sprint(states) == "[draft submitted approved]", "draft state drift")
+	require(asMap(draftProps["revision"])["minimum"] == 1, "draft revision drift")
+	require(asMap(draftProps["owned"])["type"] == "boolean", "draft ownership drift")
+	require(asMap(draftProps["definition"])["$ref"] == "#/components/schemas/DashboardDefinition", "draft definition drift")
+	page := asMap(schemas["DashboardDraftPage"])
+	require(requiredSet(page) == "items", "page required fields drift")
+	pageProps := asMap(page["properties"])
+	require(asMap(pageProps["items"])["maxItems"] == dashboard.MaxListPage, "page bound drift")
+	require(asMap(asMap(params["DashboardListLimit"])["schema"])["maximum"] == dashboard.MaxListPage, "limit bound drift")
+	require(asMap(params["IfMatchRevision"])["required"] == true, "If-Match must be required")
+	ifNoneMatch := asMap(params["IfNoneMatchExport"])
+	exportETagSchema := asMap(asMap(asMap(components["headers"])["DashboardExportETag"])["schema"])
+	require(ifNoneMatch["name"] == "If-None-Match" && ifNoneMatch["required"] == false, "If-None-Match export parameter drift")
+	require(asMap(ifNoneMatch["schema"])["pattern"] == exportETagSchema["pattern"], "export ETag pattern drift")
+
+	for operation, statuses := range map[string][]string{
+		"POST /api/v1/dashboard-drafts":              {"201", "400", "403", "409", "413", "415", "503"},
+		"PUT /api/v1/dashboard-drafts/{id}":          {"200", "400", "403", "404", "409", "413", "415", "428", "503"},
+		"GET /api/v1/dashboard-drafts":               {"200", "400", "403", "503"},
+		"POST /api/v1/dashboard-drafts/{id}/approve": {"200", "403", "404", "409", "428", "503"},
+		"GET /api/v1/dashboard-drafts/{id}/export":   {"200", "304", "403", "404", "503"},
+	} {
+		actual := asMap(ops[operation]["responses"])
+		for _, status := range statuses {
+			require(actual[status] != nil, operation+" missing status "+status)
+		}
+	}
+	for _, operation := range []string{"POST /api/v1/dashboard-drafts", "PUT /api/v1/dashboard-drafts/{id}"} {
+		require(asMap(ops[operation]["requestBody"])["$ref"] == "#/components/requestBodies/DashboardDefinitionRequest", operation+" requestBody drift")
+	}
+	listParams := asSlice(ops["GET /api/v1/dashboard-drafts"]["parameters"])
+	require(len(listParams) == 2, "list parameters drift")
+	for _, response := range []string{"DashboardCreated", "DashboardDraftOK"} {
+		require(asMap(asMap(responses[response])["headers"])["ETag"] != nil, response+" revision ETag missing")
+	}
+	exportHeaders := asMap(asMap(responses["DashboardExportOK"])["headers"])
+	require(exportHeaders["ETag"] != nil && exportHeaders["Content-Disposition"] != nil, "export headers missing")
+	return errors
+}
+
+func TestDashboardOpenAPIAndTypeDriftGuards(t *testing.T) {
+	doc := loadSpec(t)
+	if errors := dashboardContractErrors(doc); len(errors) != 0 {
+		t.Fatal(strings.Join(errors, "; "))
+	}
+	ts, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "contracts", "src", "index.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`export type DashboardDraftState = "draft" | "submitted" | "approved"`,
+		`export interface DashboardCapabilities { enabled:boolean; canEdit:boolean; canPublish:boolean; maxDrafts:number; maxWidgets:number; }`,
+		`export interface DashboardDefinitionRequest { definition:DashboardDefinition; }`,
+		`export interface DashboardDraft { id:string; revision:number; state:DashboardDraftState; owned:boolean; schemaVersion:1; definition:DashboardDefinition; createdAt:string; updatedAt:string; }`,
+		`export interface DashboardDraftPage { items:DashboardDraft[]; nextCursor?:string; }`,
+	} {
+		if !strings.Contains(string(ts), expected) {
+			t.Errorf("TypeScript dashboard contract drifted: %s", expected)
+		}
+	}
+
+	mutations := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"request body removed", func(d map[string]any) {
+			delete(asMap(asMap(asMap(d["paths"])["/api/v1/dashboard-drafts"])["post"]), "requestBody")
+		}},
+		{"state enum drift", func(d map[string]any) {
+			asMap(asMap(asMap(asMap(asMap(d["components"])["schemas"])["DashboardDraft"])["properties"])["state"])["enum"] = []any{"draft", "approved"}
+		}},
+		{"widget cap drift", func(d map[string]any) {
+			asMap(asMap(asMap(asMap(d["components"])["schemas"])["DashboardDefinition"])["properties"])["widgets"] = map[string]any{"type": "array", "maxItems": 25}
+		}},
+		{"415 removed", func(d map[string]any) {
+			delete(asMap(asMap(asMap(asMap(d["paths"])["/api/v1/dashboard-drafts/{id}"])["put"])["responses"]), "415")
+		}},
+		{"If-Match optional", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["parameters"])["IfMatchRevision"])["required"] = false
+		}},
+		{"page cap drift", func(d map[string]any) {
+			asMap(asMap(asMap(asMap(asMap(d["components"])["schemas"])["DashboardDraftPage"])["properties"])["items"])["maxItems"] = 51
+		}},
+		{"export ETag removed", func(d map[string]any) {
+			delete(asMap(asMap(asMap(asMap(d["components"])["responses"])["DashboardExportOK"])["headers"]), "ETag")
+		}},
+		{"draft definition no longer required", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["schemas"])["DashboardDraft"])["required"] = []any{"id", "revision", "state", "owned", "schemaVersion", "createdAt", "updatedAt"}
+		}},
+		{"export conditional request removed", func(d map[string]any) { delete(asMap(asMap(d["components"])["parameters"]), "IfNoneMatchExport") }},
+	}
+	for _, mutation := range mutations {
+		raw, _ := yaml.Marshal(doc)
+		var changed map[string]any
+		if err := yaml.Unmarshal(raw, &changed); err != nil {
+			t.Fatal(err)
+		}
+		mutation.edit(changed)
+		if errors := dashboardContractErrors(changed); len(errors) == 0 {
+			t.Errorf("negative mutation was masked: %s", mutation.name)
 		}
 	}
 }
