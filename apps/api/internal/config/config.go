@@ -146,9 +146,9 @@ func Load() Config {
 			MaxLines:    envInt("QUICKWIT_MAX_LINES", 5000),
 			Fields:      envPairs("QUICKWIT_FIELDS"),
 		},
-		AllowedOrigin:      env("ALLOWED_ORIGIN", ""),
-		ReadTimeout:        envDuration("READ_TIMEOUT", 15*time.Second),
-		WriteTimeout:       envDuration("WRITE_TIMEOUT", 30*time.Second),
+		AllowedOrigin: env("ALLOWED_ORIGIN", ""),
+		ReadTimeout:   envDuration("READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:  envDuration("WRITE_TIMEOUT", 30*time.Second),
 	}
 }
 

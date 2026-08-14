@@ -163,7 +163,16 @@ GET /healthz   GET /readyz
 ```bash
 make api-test     # 단위 테스트 — fake clientset. 클러스터 불필요
 make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
+
+# 커버리지 (전 패키지 병합 기준 80% 이상 유지)
+cd apps/api && go test -coverprofile=cover.out -coverpkg=./internal/...,./cmd/... ./... \
+  && go tool cover -func=cover.out | tail -1
 ```
+
+커버리지 기준: **전 패키지 병합 80% 이상**(2026-08-14 기준 88.5%), 개별 패키지도
+80% 이상을 유지합니다. 예외 두 곳 — `cmd/api`는 main/run이 실클러스터 없이는
+돌지 않아 56%(배선 함수는 전부 테스트됨), `internal/testcluster`는 테스트 픽스처라
+자체 테스트가 없습니다(모든 스위트가 사용).
 
 값이 맞는지보다 **규칙이 지켜지는지**를 봅니다.
 

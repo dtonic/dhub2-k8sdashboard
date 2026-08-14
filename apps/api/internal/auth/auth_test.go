@@ -122,11 +122,11 @@ func TestForgedAndBrokenTokensAreRejected(t *testing.T) {
 	noneToken := noneHeader + "." + parts[1] + "."
 
 	for name, token := range map[string]string{
-		"다른 키 서명": forged,
-		"본문 변조":   tampered,
+		"다른 키 서명":  forged,
+		"본문 변조":    tampered,
 		"alg none": noneToken,
-		"구조 파괴":   "not.a.jwt.at.all",
-		"빈 문자열":   ".",
+		"구조 파괴":    "not.a.jwt.at.all",
+		"빈 문자열":    ".",
 	} {
 		if _, err := r.Resolve(request(token)); !errors.Is(err, ErrInvalidToken) {
 			t.Fatalf("%s 토큰이 통과했습니다", name)
