@@ -19,7 +19,7 @@ test.describe("Drill-down (#15)", () => {
     const footer = await page.locator(".vtable__footer").innerText();
     expect(footer).toContain("240");
     const rendered = await page.locator(".vtable__body tbody tr").count();
-    expect(rendered).toBeLessThan(60);
+    expect(rendered).toBeLessThanOrEqual(30);
     expect(rendered).toBeGreaterThan(5);
 
     /* 스크롤해도 렌더 행 수가 늘지 않아야 가상화가 동작하는 것입니다. */
@@ -27,7 +27,7 @@ test.describe("Drill-down (#15)", () => {
       el.scrollTop = 4000;
     });
     await page.waitForTimeout(200);
-    expect(await page.locator(".vtable__body tbody tr").count()).toBeLessThan(60);
+    expect(await page.locator(".vtable__body tbody tr").count()).toBeLessThanOrEqual(30);
   });
 
   test("갱신과 범위 변경이 스크롤·필터 선택을 지우지 않는다", async ({ page }) => {

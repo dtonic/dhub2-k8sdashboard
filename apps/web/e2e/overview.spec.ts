@@ -62,4 +62,37 @@ test.describe("Cluster Overview (#14)", () => {
     await expect(page.locator("h1")).toContainText("batch-sync");
     expect(new URL(page.url()).searchParams.get("ns")).toBe("payments");
   });
+  test("range change aborts the previous overview fetch and renders the latest result", async ({ page }) => {
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch;
+      const records: Array<{ url: string; aborted: boolean }> = [];
+      Object.defineProperty(window, "__overviewFetchSignals", { value: records });
+      window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        if (url.includes("/overview")) {
+          const record = { url, aborted: signal?.aborted ?? false };
+          records.push(record);
+          signal?.addEventListener("abort", () => { record.aborted = true; }, { once: true });
+        }
+        return originalFetch(input, init);
+      }) as typeof window.fetch;
+    });
+
+    await page.goto("/?scenario=slow&range=1h");
+    await page.waitForFunction(() => ((window as any).__overviewFetchSignals?.length ?? 0) === 1);
+    await page.getByRole("button", { name: "7일", exact: true }).click();
+    await page.waitForFunction(() => (window as any).__overviewFetchSignals?.[0]?.aborted === true);
+    await waitForData(page);
+
+    const requests = await page.evaluate(
+      () => (window as any).__overviewFetchSignals as Array<{ url: string; aborted: boolean }>,
+    );
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.url).toContain("range=1h");
+    expect(requests[0]!.aborted).toBe(true);
+    expect(requests[1]!.url).toContain("range=7d");
+    await expect(page.locator(".page__subtitle")).toContainText("최근 7일");
+    await expect(page.locator(".panel__subtitle", { hasText: "step" }).first()).toContainText("step 15분");
+  });
 });

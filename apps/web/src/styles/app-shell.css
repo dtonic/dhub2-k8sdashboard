@@ -185,7 +185,7 @@ a:hover { text-decoration: underline; }
   forced-color-adjust: none;
 }
 .state--forbidden { --_c: var(--status-warning); }
-.state--forbidden .state__glyph { color: #0b0b0b; }
+.state--forbidden .state__glyph { color: var(--color-text-on-warning); }
 .state--error { --_c: var(--status-critical); }
 .state--degraded { --_c: var(--status-degraded); }
 

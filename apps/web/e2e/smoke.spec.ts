@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { trackFailures, waitForData } from "./helpers";
 
 /**
@@ -52,4 +53,13 @@ test("접근성 이름 없는 컨트롤이 없다", async ({ page }) => {
   expect(missing).toEqual([]);
   await expect(page.locator("main")).toHaveCount(1);
   await expect(page.locator("nav")).not.toHaveCount(0);
+});
+
+test("app shell and common controls have no serious accessibility violations", async ({ page }) => {
+  await page.goto("/?range=1h");
+  await waitForData(page);
+
+  const { violations } = await new AxeBuilder({ page }).analyze();
+  const serious = violations.filter(({ impact }) => impact === "critical" || impact === "serious");
+  expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
 });

@@ -25,9 +25,10 @@
   /* --- Ink ---------------------------------------------------------------- */
   --color-text-primary:       #0b0b0b;
   --color-text-secondary:     #52514e;
-  --color-text-muted:         #898781; /* 축 라벨 · 보조 메타 */
+  --color-text-muted:         #6f6e69; /* 축 라벨 · 보조 메타, 최소 대비 4.85:1 */
   --color-text-inverse:       #ffffff;
-  --color-text-link:          #2a78d6;
+  --color-text-on-warning:    #0b0b0b;
+  --color-text-link:          #2468b5;
 
   /* --- Border / Divider --------------------------------------------------- */
   --color-border-subtle:      rgba(11, 11, 11, 0.10);
@@ -114,6 +115,7 @@
     --color-text-secondary:   #c3c2b7;
     --color-text-muted:       #898781;
     --color-text-inverse:     #0b0b0b;
+    --color-text-on-warning:  #0b0b0b;
     --color-text-link:        #3987e5;
 
     --color-border-subtle:    rgba(255, 255, 255, 0.10);
@@ -163,6 +165,7 @@
   --color-text-secondary:   #c3c2b7;
   --color-text-muted:       #898781;
   --color-text-inverse:     #0b0b0b;
+  --color-text-on-warning:  #0b0b0b;
   --color-text-link:        #3987e5;
 
   --color-border-subtle:    rgba(255, 255, 255, 0.10);

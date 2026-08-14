@@ -87,7 +87,9 @@ export const handlers = [
       await delay(60);
       return denied(auth.message);
     }
-    await delay(220);
+    /* E2E 전용 slow 시나리오는 range 전환 시 fetch abort 전파를 관찰할 시간을 확보합니다. */
+    const slow = new URL(request.url).searchParams.get("scenario") === "slow";
+    await delay(slow ? 1_500 : 220);
     const body = buildOverview(rangeOf(request), scenarioOf(request));
     return HttpResponse.json({ ...body, clusterId: auth.cluster.id, clusterName: auth.cluster.name });
   }),

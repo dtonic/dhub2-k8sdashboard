@@ -54,7 +54,7 @@
 .ds-status-badge--unknown      { --_status-color: var(--status-unknown); }
 
 /* warning은 밝은 노랑이라 흰 글리프 텍스트 대비가 부족합니다. */
-.ds-status-badge--warning .ds-status-badge__glyph { color: #0b0b0b; }
+.ds-status-badge--warning .ds-status-badge__glyph { color: var(--color-text-on-warning); }
 
 /* --- Sizes ---------------------------------------------------------------- */
 .ds-status-badge--sm {
