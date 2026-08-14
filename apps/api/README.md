@@ -41,8 +41,43 @@ KUBECONFIG=~/.kube/config make dev-api
 | `K8S_QPS` / `K8S_BURST` | `20` / `30` | client-side rate limit |
 | `K8S_DISABLE_PROTOBUF` | `false` | protobuf를 지원하지 않는 aggregated API 뒤에서만 켭니다 |
 | `CACHE_TTL` | `5s` | 화면 응답 재사용 시간. 0으로 두면 자동 갱신 사용자 수만큼 팬아웃이 늘어납니다 |
-| `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행 |
+| `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행. **실주소가 설정된 데이터소스는 이 값과 무관하게 실제 어댑터를 씁니다** |
 | `ALLOWED_ORIGIN` | (비움) | 개발 중 Vite 오리진 허용 |
+
+### 실데이터소스 설정
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `GREPTIME_URL` | (비움) | GreptimeDB HTTP 주소. 예: `http://greptimedb:4000`. 비우면 메트릭은 데모 또는 degraded |
+| `GREPTIME_DB` | `public` | 데이터베이스 이름 |
+| `GREPTIME_USERNAME` / `GREPTIME_PASSWORD` | (비움) | Basic 인증. **브라우저로 나가는 응답 어디에도 실리지 않습니다** |
+| `GREPTIME_TIMEOUT` | `10s` | 질의 1건 상한 |
+| `GREPTIME_MAX_POINTS` | `1000` | 시리즈당 최대 포인트. 넘으면 **Step을 서버가 넓힙니다** |
+| `QUICKWIT_URL` | (비움) | Quickwit 주소. 예: `http://quickwit:7280` |
+| `QUICKWIT_INDEX` | `k8s-logs` | 로그 인덱스 id |
+| `QUICKWIT_USERNAME` / `QUICKWIT_PASSWORD` | (비움) | Basic 인증 |
+| `QUICKWIT_TIMEOUT` | `10s` | 검색 1건 상한 |
+| `QUICKWIT_MAX_PAGE` | `500` | 페이지 크기 상한. 브라우저가 큰 값을 보내도 넘지 못합니다 |
+| `QUICKWIT_MAX_LINES` | `5000` | 조회 범위 총량 상한. 넘으면 `truncated`로 알립니다 |
+| `QUICKWIT_FIELDS` | (비움) | 인덱스 필드 이름 재정의. `message=body.message,level=severity_text` 형식. 키: `timestamp` `level` `message` `namespace` `pod_name` `pod_uid` `container` `workload_kind` `workload_name` `node` `trace_id` `span_id` |
+
+Quickwit의 `namespace` `pod_name` `pod_uid` `level` `container` `workload_name` 필드는
+필터·집계에 쓰이므로 인덱스에서 **fast field**(raw 토크나이저)여야 합니다.
+
+### 실어댑터가 지키는 규칙
+
+- **질의는 서버 카탈로그에서만 나옵니다.** 프런트는 패널 id·검색어만 보낼 수 있고,
+  PromQL 매처와 ES 필터는 `greptime/queries.go` · `quickwit/query.go`가 만듭니다.
+  사용자 검색어는 match 노드의 **값**으로만 들어가므로 연산자 주입으로
+  Scope 필터를 우회할 수 없습니다.
+- **Pod 신원은 카탈로그에서 빌려옵니다.** 메트릭 라벨은 pod 이름이지만 화면 신원은
+  UID입니다. UID → 이름 변환과 facet의 UID·Kind는 informer 캐시(`CatalogPods`)를
+  거칩니다. 인덱스의 uid를 믿으면 사라진 Pod의 딥링크가 404가 됩니다.
+- **로그 커서는 (경계 timestamp, 경계 id 집합)입니다.** offset(`from`)은 어떤 요청에도
+  없습니다. 같은 밀리초에 몰린 로그가 경계에 걸려도 중복·누락이 없습니다. (ADR 0003)
+- **오류는 두 가지로만 분류합니다.** 연결 실패·타임아웃·5xx는 `datasource.ErrUnavailable`,
+  4xx는 `upstream.ErrBadQuery`. 에러 문자열에 내부 주소·질의를 담지 않습니다 —
+  섹션 degraded 사유로 노출될 수 있기 때문입니다. 일시 오류는 **1회만** 재시도합니다.
 
 ## 구조
 
@@ -58,6 +93,10 @@ internal/
   datasource/            메트릭·로그·알림·토폴로지 어댑터 경계
     mask/                  로그 마스킹 (서버에서만)
     demo/                  결정적 데모 어댑터
+    upstream/              공용 HTTP 클라이언트 — 오류 분류 · 1회 재시도 · 취소 전파
+    greptime/              GreptimeDB 메트릭 어댑터 (#6) — Prometheus 호환 API
+      queries.go             서버 측 쿼리 카탈로그. 프런트는 패널 id만 고를 수 있습니다
+    quickwit/              Quickwit 로그 어댑터 (#7) — ES 호환 검색 · 커서 페이징
   httpapi/               화면 단위 엔드포인트 · Scope 강제 · 섹션 봉투
   contract/              packages/contracts와 같은 JSON을 만드는 Go 타입
   timerange/             범위별 강제 Step, Custom 30일 상한
@@ -121,6 +160,14 @@ make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
 | `TestLogMessagesAreMaskedBeforeLeavingTheServer` | 원문이 서버 밖으로 나가지 않음 |
 | `TestDatasourceOutageDegradesSectionsNotThePage` | 부분 장애가 화면 전체를 죽이지 않음 |
 | `TestOverviewIsOneRequestWithoutPerWidgetFanout` | 요청 하나 안에서도 데이터소스 팬아웃 없음 |
+| `TestDatasourceTargetCarriesAllowedNamespaces` | 허용 namespace 목록이 어댑터 Target까지 전달됨 |
+| `TestCursorPagingHasNoDuplicatesOrGaps` (quickwit) | 실어댑터 커서에 중복·누락 없음, 경계 충돌 포함 (ADR 0003) |
+| `TestOffsetPagingIsNeverUsed` (quickwit) | 요청 본문에 offset(`from`)이 존재하지 않음 (ADR 0003) |
+| `TestScopeFilterIsAlwaysInjected` (quickwit) | 검색어로 namespace 필터를 우회할 수 없음 |
+| `TestMessagesAreMaskedBeforeLeavingTheServer` (quickwit) | 원문이 서버 밖으로 나가지 않음 |
+| `TestRangeQueryCarriesWindowAndScope` (greptime) | 범위·Step·Scope 매처가 서버 확정 값 그대로 |
+| `TestStepWidensToRespectMaxDataPoints` (greptime) | 장기 조회에서도 포인트 상한 준수 |
+| `TestUpstreamFailureIsClassifiedAndRetriedOnce` (양쪽) | 표준 오류 분류 · 재시도는 1회 |
 
 ### 실클러스터 통합 테스트
 
@@ -203,8 +250,13 @@ ITEST_KUBECONFIG=~/.kube/config \
 
 ## 아직 없는 것
 
-- GreptimeDB / Quickwit / Alertmanager 실제 클라이언트. 지금은 `USE_DEMO_DATA=true`의 결정적 어댑터를 씁니다.
-  끄면 해당 섹션이 degraded로 내려가고 화면은 그대로 동작합니다.
-- OIDC/SubjectAccessReview 기반 Scope. `scope.Resolver` 인터페이스 뒤에 끼우면 핸들러는 바뀌지 않습니다.
+- Alertmanager/Grafana Alerting 실제 클라이언트 (#17 잔여). 알림·토폴로지는
+  데모 또는 degraded입니다. 메트릭·로그는 `GREPTIME_URL`·`QUICKWIT_URL`을 설정하면
+  실제 어댑터로 동작합니다 (#6·#7 구현됨 — 계약 테스트는 httptest 기반이고,
+  실 GreptimeDB/Quickwit 인스턴스 대상 검증은 배포 환경에서 남아 있습니다).
+- 등록형 Query Catalog(queryRef) 계층 (#9). 지금은 `greptime/queries.go`의
+  고정 패널 카탈로그가 최소 구현입니다.
+- OIDC/SubjectAccessReview 기반 Scope (#10). `scope.Resolver` 인터페이스 뒤에 끼우면 핸들러는 바뀌지 않습니다.
+- Redis 캐시 (#11). 지금은 프로세스 내 TTL + singleflight입니다.
 - 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
 - 멀티 클러스터. 지금은 프로세스당 클러스터 하나입니다.

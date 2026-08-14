@@ -84,4 +84,27 @@ Logs Explorer는 두 가지를 동시에 만족해야 합니다.
 - [ ] 마스킹 규칙 목록과 우회 사례 정리 (이슈 #7)
 - [ ] 수집 단계(OTel Collector) 마스킹으로 앞당길지 검토 — Post-MVP
 - [ ] 로그 조회 감사 로그 형식 확정 (이슈 #10)
-- [ ] Quickwit search-after 응답을 이 커서 형식으로 매핑 (이슈 #7)
+- [x] Quickwit search-after 응답을 이 커서 형식으로 매핑 (이슈 #7) — 아래 구현 노트
+
+## 구현 노트 — 실 Quickwit 어댑터의 커서 (2026-08-14, #7)
+
+`apps/api/internal/datasource/quickwit`에서 이 결정을 실제 백엔드에 적용하며
+커서 형식을 한 단계 구체화했다.
+
+**커서 = (경계 timestamp, 경계에서 이미 내려간 문서 id 집합).**
+Quickwit ES 호환 API의 `search_after`는 정렬 키가 timestamp 하나뿐이면
+같은 밀리초에 몰린 문서를 건너뛰거나 중복시킨다. 유일한 tie-breaker 필드를
+인덱스에 강제할 수 없어서, 대신 다음 페이지를 `timestamp <= 경계`(경계 포함)로
+질의하고 **경계 timestamp에서 이미 내려간 id를 서버가 걸러낸다.**
+
+- 다음 페이지 요청 크기는 `size + len(경계 id)`다. 경계 문서를 다시 받는 비용을
+  선지불하고 중복을 0으로 만든다.
+- 경계 id가 이전 커서와 같은 timestamp에서 이어지면 목록을 이어받는다.
+  같은 밀리초의 문서가 페이지 크기보다 많아도 전진이 보장된다.
+- 경계 id는 512개에서 자른다(`maxBoundaryIDs`). 같은 밀리초에 그 이상 몰리는
+  극단에서는 중복 가능성을 감수한다 — 커서가 무한히 자라는 것보다 낫다.
+- 문서 id는 Quickwit `_id`를 쓰고, 없으면 (timestamp, pod, container, message)의
+  결정적 해시로 만든다. 재조회해도 같은 id가 나와야 경계 걸러내기가 성립한다.
+
+검증은 `TestCursorPagingHasNoDuplicatesOrGaps`(900건, 7건씩 같은 밀리초 공유)와
+`TestOffsetPagingIsNeverUsed`(어떤 요청 본문에도 `from`/`start_offset` 없음)가 한다.

@@ -15,7 +15,10 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 현재 단계: `design-system/`, `apps/web`의 **MVP UI 화면 전체**(Cluster Overview,
 Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts)와
 `apps/api`의 **Go Observability API/BFF**가 구현되어 있습니다.
-남은 것은 GreptimeDB·Quickwit·Alertmanager 실제 클라이언트와 OIDC/RBAC 연결입니다.
+GreptimeDB·Quickwit 실클라이언트는 구현되어 있습니다
+(`apps/api/internal/datasource/greptime`, `quickwit` — `GREPTIME_URL`·`QUICKWIT_URL`로 활성화).
+남은 것은 Alertmanager 실클라이언트(#17 잔여), 등록형 Query Catalog(#9),
+OIDC/RBAC 연결(#10), Redis 캐시(#11), SSE(#12)입니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`,
 프런트엔드 규칙은 `apps/web/README.md`, 백엔드 규칙은 `apps/api/README.md`에 있습니다.
 
