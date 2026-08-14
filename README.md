@@ -486,7 +486,7 @@ Custom Range의 최대 폭은 30일입니다.
 - GreptimeDB Adapter *(완료 — Prometheus 호환 API · 서버 측 쿼리 카탈로그 · Step 상한)*
 - Quickwit Adapter *(완료 — ES 호환 검색 · 커서 페이징 · 서버 마스킹)*
 - Query Catalog *(완료 — `apps/api/internal/querycatalog`. Git 임베디드 YAML, $__scope 강제, 변수 allowlist, 시작·CI 검증)*
-- OIDC/RBAC *(`scope.Resolver` 인터페이스까지 준비됨)*
+- OIDC/RBAC *(완료 — `apps/api/internal/auth`. 표준 OIDC JWT 검증, 역할 4종 → Scope, 401/403 구분, 감사 로그, mock IdP)*
 - Redis Cache 및 Query Guardrail *(프로세스 내 TTL + singleflight까지 구현됨)*
 
 ### Phase 3 — Core UI

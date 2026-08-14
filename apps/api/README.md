@@ -54,6 +54,18 @@ KUBECONFIG=~/.kube/config make dev-api
 | `GREPTIME_TIMEOUT` | `10s` | 질의 1건 상한 |
 | `GREPTIME_MAX_POINTS` | `1000` | **전역** 포인트 상한. 카탈로그의 쿼리별 `maxDataPoints`보다 작으면 이 값이 이깁니다 |
 | `QUERY_CATALOG_DIR` | (비움) | 쿼리 카탈로그 디렉터리. 비우면 임베디드 기본 카탈로그. 지정하면 기본을 **대체**합니다(병합 없음) |
+
+### 인증 설정 (#10)
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `AUTH_MODE` | `none` | `none`(정적 Scope · 개발/데모) · `oidc`(운영) · `mock`(로컬 IdP · **운영 금지**) |
+| `OIDC_ISSUER` | (비움) | 발급자 URL. 예: `https://login.microsoftonline.com/<tenant>/v2.0` |
+| `OIDC_AUDIENCE` | (비움) | 이 API의 client id. 비우면 aud 검사 생략 — 운영에서는 반드시 설정합니다 |
+| `OIDC_ROLES_CLAIM` | `roles` | 역할이 실린 클레임 이름 |
+| `OIDC_LEEWAY` | `60s` | 시계 오차 허용 |
+| `OIDC_JWKS_MIN_REFRESH` | `5m` | 모르는 kid로 인한 JWKS 재조회 하한 |
+| `AUTH_MOCK_ADDR` | `127.0.0.1:8091` | mock IdP 바인드 주소. loopback을 벗어나지 마세요 |
 | `QUICKWIT_URL` | (비움) | Quickwit 주소. 예: `http://quickwit:7280` |
 | `QUICKWIT_INDEX` | `k8s-logs` | 로그 인덱스 id |
 | `QUICKWIT_USERNAME` / `QUICKWIT_PASSWORD` | (비움) | Basic 인증 |
@@ -99,6 +111,7 @@ internal/
     greptime/              GreptimeDB 메트릭 어댑터 (#6) — Prometheus 호환 API
       queries.go             서버 측 쿼리 카탈로그. 프런트는 패널 id만 고를 수 있습니다
     quickwit/              Quickwit 로그 어댑터 (#7) — ES 호환 검색 · 커서 페이징
+  auth/                  OIDC 인증 · 역할 → Scope 계산 (#10) · 로컬 mock IdP
   querycatalog/          등록형 쿼리 카탈로그 (#9) — 실행 가능한 질의의 유일한 원천
     defaults/              Git에 커밋되고 바이너리에 임베드되는 기본 카탈로그(YAML)
   httpapi/               화면 단위 엔드포인트 · Scope 강제 · 섹션 봉투
@@ -176,6 +189,10 @@ make api-itest    # 통합 테스트 — 실제 kube-apiserver 대상
 | `TestRangeQueryWithoutScopeIsRejected` (querycatalog) | $__scope 없는 range 질의는 로드 거부 |
 | `TestVariableValuesAreConstrainedAndQuoted` (querycatalog) | 변수는 allowlist + 라벨 값 리터럴 — matcher 조각 삽입 불가 |
 | `TestUnregisteredPanelIsNotExecuted` (greptime) | 미등록 패널 id는 질의가 나가지 않음 (#9) |
+| `TestAuthnAndAuthzAreDistinguished` (httpapi) | 401/403 구분 · URL 변조로 범위 밖 데이터가 나가지 않음 (#10) |
+| `TestForgedAndBrokenTokensAreRejected` (auth) | 서명 위조·본문 변조·alg none이 전부 거절됨 |
+| `TestUnknownKidTriggersOneRefresh` (auth) | 키 회전 시 JWKS 1회 재조회로 회복 |
+| `TestAuditLogRecordsWhoDidWhatWithWhatResult` (httpapi) | 감사 로그에 user·scope·요청·결과 기록, 토큰은 미기록 (#10) |
 
 ### 실클러스터 통합 테스트
 
@@ -277,6 +294,49 @@ ITEST_MUTATE=1 GREPTIME_ITEST_URL=... QUICKWIT_ITEST_URL=... make api-itest
 Quickwit `k8s-dashboard-itest` 인덱스뿐이며 끝나면 지웁니다.
 운영 메트릭 테이블·로그 인덱스에는 절대 쓰지 않습니다.
 
+### 인증과 RBAC (#10)
+
+`AUTH_MODE=oidc`면 모든 화면 요청은 표준 OIDC Bearer JWT가 필요합니다.
+검증은 외부 라이브러리 없이 표준 crypto로 합니다(RS256·ES256 allowlist —
+`alg:none`·HS256 혼동 공격이 구조적으로 막힙니다). 핸들러는 여전히
+`scope.Resolver` 뒤만 보므로 인증 방식이 바뀌어도 화면 코드는 같습니다.
+
+**역할 → Scope** — 토큰의 역할 클레임(기본 `roles`)의 문자열로 계산합니다.
+
+| 역할 | 효과 |
+|---|---|
+| `platform.admin` | 모든 클러스터 · 모든 namespace |
+| `cluster.viewer` / `cluster.viewer:<clusterID>` | 해당(또는 이) 클러스터 전체 |
+| `namespace.viewer:<ns>` / `namespace.viewer:<clusterID>/<ns>` | 특정 namespace |
+| `dashboard.editor` | (예약) 편집 플래그 — MVP 화면은 조회 전용이라 Scope에 영향 없음 |
+
+모르는 역할은 무시합니다(다른 앱의 역할이 섞여도 로그인은 됩니다).
+역할이 하나도 없으면 **빈 Scope로 인증 성공** — 이후 화면 요청이 403입니다.
+
+**401과 403은 다른 상태입니다.** 토큰이 없거나 깨지면 401(+`WWW-Authenticate`),
+유효한 토큰의 권한 부족·범위 밖 접근은 403입니다. URL을 변조해도 범위 밖
+데이터는 부분도 나가지 않습니다 (`TestAuthnAndAuthzAreDistinguished`).
+
+**감사 로그** — 화면 요청마다 `audit` 레코드를 남깁니다:
+`user · route · params · scope · decision(allowed/forbidden/unauthorized/error) · status · durMs`.
+화면 하나 = 카탈로그의 고정 쿼리 집합이므로(ADR 0002 · #9) route+params가 곧
+실행된 queryRef 집합을 식별합니다.
+
+**감사 로그 마스킹 정책** — 절대 남지 않는 것: Authorization 헤더·토큰 원문
+(읽지 않습니다), 이름에 token/secret/password/key/auth가 든 파라미터의 값.
+로그 **본문**의 민감정보는 `datasource/mask`(서버 마스킹, ADR 0003) 담당입니다.
+
+**로컬 개발 (mock IdP)** — 검증 경로는 운영과 같고 발급자만 로컬입니다.
+
+```bash
+AUTH_MODE=mock make dev-api
+# 기동 로그의 issuer로 토큰 발급:
+curl -X POST 'http://127.0.0.1:8091/token?sub=dev&roles=platform.admin'
+curl -X POST 'http://127.0.0.1:8091/token?sub=kim&roles=namespace.viewer:payments'
+```
+
+SSE 이벤트의 Scope 반영은 #12(SSE)에서 함께 구현합니다.
+
 ### 쿼리 카탈로그 (#9)
 
 실행 가능한 질의의 유일한 원천은 `internal/querycatalog/defaults/*.yaml`입니다.
@@ -328,7 +388,9 @@ ITEST_KUBECONFIG=~/.kube/config \
   데모 또는 degraded입니다. 메트릭·로그는 `GREPTIME_URL`·`QUICKWIT_URL`을 설정하면
   실제 어댑터로 동작합니다 (#6·#7 구현됨 — 실인스턴스 검증은
   `GREPTIME_ITEST_URL`/`QUICKWIT_ITEST_URL`로 `make api-itest`가 수행합니다).
-- OIDC/SubjectAccessReview 기반 Scope (#10). `scope.Resolver` 인터페이스 뒤에 끼우면 핸들러는 바뀌지 않습니다.
+- SubjectAccessReview 연동 Scope. OIDC 역할 기반 Scope는 #10으로 구현되었고
+  (`internal/auth`, `AUTH_MODE=oidc`), K8s RBAC와의 대조는 후속 과제입니다.
+- SSE의 Scope 반영 (#12와 함께).
 - Redis 캐시 (#11). 지금은 프로세스 내 TTL + singleflight입니다.
 - 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
 - 멀티 클러스터. 지금은 프로세스당 클러스터 하나입니다.
