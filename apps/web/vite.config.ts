@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       "@k8s-dashboard/contracts": fileURLToPath(new URL("../../packages/contracts/src/index.ts", import.meta.url)),
+      "@k8s-dashboard/dashboard-schema": fileURLToPath(new URL("../../packages/dashboard-schema/src/index.js", import.meta.url)),
       "@k8s-dashboard/design-system": fileURLToPath(new URL("../../design-system", import.meta.url)),
     },
   },

@@ -48,6 +48,7 @@ src/
 ├── components/     # 공통 조각 (상태, primitives, LineChart, 컨트롤)
 ├── features/
 │   ├── overview/   # Cluster Overview 화면과 패널
+│   ├── dashboards/ # Git embedded Dashboard generic view와 폐쇄형 Widget Registry
 │   └── drill/      # Namespace 목록·상세, Workload 상세, Pod 상세
 ├── lib/            # 포맷터
 ├── mocks/          # MSW 핸들러와 고정 데이터
@@ -67,6 +68,7 @@ src/
 | `/logs?ns=&uid=&levels=&q=&from=&to=` | Logs Explorer (히스토그램 · 구간 선택 · 커서 페이징) | #16 |
 | `/topology?edge=` | Pod Topology (방향별 선 · 엣지 상세 · 시계열) | #16 |
 | `/alerts?tab=&alert=` | Alerts (Active/Resolved · 상세 · deep link) | #17 |
+| `/dashboards/:id` | `packages/dashboard-schema/dashboards/*.json` 자동 발견 Dashboard | #18 |
 
 ## 설계 규칙
 

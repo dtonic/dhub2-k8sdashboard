@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:dashboards": "node ../../packages/dashboard-schema/scripts/generate-embedded.mjs",
+    "predev": "npm run generate:dashboards",
     "dev": "vite",
+    "prebuild": "npm run generate:dashboards",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "precheck": "npm run generate:dashboards",
     "check": "tsc --noEmit",
     "test": "playwright test",
     "test:ui": "playwright test --ui"
   },
   "dependencies": {
     "@k8s-dashboard/contracts": "*",
+    "@k8s-dashboard/dashboard-schema": "*",
     "@tanstack/react-query": "^5.59.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

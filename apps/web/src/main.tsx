@@ -11,6 +11,7 @@ import { PodDetail } from "@/features/drill/PodDetail";
 import { LogsExplorer } from "@/features/logs/LogsExplorer";
 import { TopologyView } from "@/features/topology/TopologyView";
 import { AlertsView } from "@/features/alerts/AlertsView";
+import { DashboardView } from "@/features/dashboards/DashboardView";
 import "./styles/index.css";
 
 const queryClient = new QueryClient({
@@ -44,6 +45,7 @@ async function bootstrap() {
               <Route path="/topology" element={<TopologyView />} />
               <Route path="/logs" element={<LogsExplorer />} />
               <Route path="/alerts" element={<AlertsView />} />
+              <Route path="/dashboards/:id" element={<DashboardView />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

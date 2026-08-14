@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://k8s-dashboard.local/schema/dashboard-v1.json",
+  "title": "Embedded dashboard",
+  "type": "object",
+  "x-dashboard-semantics": true,
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "title", "variables", "widgets"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "title": { "$ref": "#/$defs/text" },
+    "description": { "$ref": "#/$defs/text" },
+    "variables": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/variable" } },
+    "widgets": { "type": "array", "minItems": 1, "maxItems": 24, "items": { "oneOf": [
+      { "$ref": "#/$defs/timeSeries" }, { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/gauge" },
+      { "$ref": "#/$defs/table" }, { "$ref": "#/$defs/logStream" }, { "$ref": "#/$defs/eventTimeline" }
+    ] } }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "layout": { "type": "object", "additionalProperties": false, "required": ["x", "y", "w", "h"], "properties": {
+      "x": { "type": "integer", "minimum": 0, "maximum": 11 }, "y": { "type": "integer", "minimum": 0, "maximum": 95 },
+      "w": { "type": "integer", "minimum": 1, "maximum": 12 }, "h": { "type": "integer", "minimum": 1, "maximum": 96 }
+    } },
+    "variable": { "type": "object", "additionalProperties": false, "required": ["id", "label", "kind"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "label": { "$ref": "#/$defs/text" }, "kind": { "enum": ["scope", "range"] }
+    } },
+    "options": { "type": "object", "additionalProperties": false, "required": ["maxRows"], "properties": { "maxRows": { "type": "integer", "minimum": 1, "maximum": 5000 } } },
+    "timeSeries": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout", "queryRefs"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "TimeSeries" }, "binding": { "const": "trends" },
+      "layout": { "$ref": "#/$defs/layout" }, "queryRefs": { "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } }
+    } },
+    "stat": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "Stat" }, "binding": { "enum": ["nodes.ready", "pods.running"] }, "layout": { "$ref": "#/$defs/layout" }
+    } },
+    "gauge": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "Gauge" }, "binding": { "const": "pods.runningPercent" }, "layout": { "$ref": "#/$defs/layout" }
+    } },
+    "table": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "Table" }, "binding": { "const": "unhealthy" }, "layout": { "$ref": "#/$defs/layout" }, "options": { "$ref": "#/$defs/options" }
+    } },
+    "logStream": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "LogStream" }, "binding": { "const": "unsupported.logs" }, "layout": { "$ref": "#/$defs/layout" }
+    } },
+    "eventTimeline": { "type": "object", "additionalProperties": false, "required": ["id", "title", "type", "binding", "layout"], "properties": {
+      "id": { "$ref": "#/$defs/id" }, "title": { "$ref": "#/$defs/text" }, "type": { "const": "EventTimeline" }, "binding": { "const": "events" }, "layout": { "$ref": "#/$defs/layout" }, "options": { "$ref": "#/$defs/options" }
+    } }
+  }
+}

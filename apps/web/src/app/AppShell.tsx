@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useScope } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
+import { embeddedDashboards } from "@/generated/dashboards";
 
 const NAV = [
   { to: "/", label: "Cluster Overview", end: true },
@@ -43,6 +44,11 @@ export function AppShell() {
           {NAV.map((n) => (
             <NavLink key={n.to} to={{ pathname: n.to, search }} end={n.end} className="app__nav-link">
               {n.label}
+            </NavLink>
+          ))}
+          {embeddedDashboards.map((dashboard) => (
+            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search }} className="app__nav-link">
+              {dashboard.title}
             </NavLink>
           ))}
         </div>

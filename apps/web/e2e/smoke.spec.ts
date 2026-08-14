@@ -14,6 +14,7 @@ const ROUTES = [
   { path: "/logs?range=1h", title: "Logs Explorer" },
   { path: "/topology?range=1h", title: "Pod Topology" },
   { path: "/alerts?range=7d", title: "Alerts" },
+  { path: "/dashboards/cluster-operations?range=1h&refresh=0", title: "Cluster Operations" },
 ];
 
 for (const r of ROUTES) {

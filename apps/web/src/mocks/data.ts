@@ -301,7 +301,7 @@ function trends(key: RangeKey): TrendPanel[] {
       stepSeconds,
       series: [
         { key: "used", label: "사용량", unit: "percent", points: series("cpu-used", buckets, stepSeconds, 58, 12) },
-        { key: "request", label: "Request 대비", unit: "percent", points: series("cpu-req", buckets, stepSeconds, 74, 8) },
+        { key: "requested", label: "Request", unit: "percent", points: series("cpu-req", buckets, stepSeconds, 74, 8) },
       ],
     },
     {
@@ -310,7 +310,7 @@ function trends(key: RangeKey): TrendPanel[] {
       stepSeconds,
       series: [
         { key: "used", label: "사용량", unit: "percent", points: series("mem-used", buckets, stepSeconds, 63, 9) },
-        { key: "limit", label: "Limit 대비", unit: "percent", points: series("mem-lim", buckets, stepSeconds, 81, 6) },
+        { key: "requested", label: "Request", unit: "percent", points: series("mem-req", buckets, stepSeconds, 81, 6) },
       ],
     },
     {
