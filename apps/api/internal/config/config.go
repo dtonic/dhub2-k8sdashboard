@@ -7,6 +7,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -36,13 +37,44 @@ type Config struct {
 	CacheTTL time.Duration
 
 	// UseDemoData는 GreptimeDB/Quickwit/Alertmanager 없이 결정적 값을 씁니다.
+	// 실주소(GREPTIME_URL·QUICKWIT_URL)가 설정된 데이터소스는 이 값과 무관하게
+	// 실제 어댑터를 씁니다 — 주소를 적은 것이 의도이기 때문입니다.
 	UseDemoData bool
+
+	// Greptime은 메트릭 데이터소스(GreptimeDB) 설정입니다. URL이 비어 있으면 미사용입니다.
+	Greptime GreptimeConfig
+	// Quickwit은 로그 데이터소스 설정입니다. URL이 비어 있으면 미사용입니다.
+	Quickwit QuickwitConfig
 
 	// AllowedOrigin은 개발 중 Vite 오리진을 허용할 때 씁니다. 비어 있으면 CORS 헤더를 붙이지 않습니다.
 	AllowedOrigin string
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+}
+
+// GreptimeConfig는 GreptimeDB 접속 설정입니다. Credential은 서버만 압니다 —
+// 브라우저로 나가는 응답 어디에도 실리지 않습니다. (README §10)
+type GreptimeConfig struct {
+	URL           string
+	DB            string
+	Username      string
+	Password      string
+	Timeout       time.Duration
+	MaxDataPoints int
+}
+
+// QuickwitConfig는 Quickwit 접속 설정입니다.
+type QuickwitConfig struct {
+	URL         string
+	Index       string
+	Username    string
+	Password    string
+	Timeout     time.Duration
+	MaxPageSize int
+	MaxLines    int
+	// Fields는 인덱스 필드 이름 재정의입니다. "message=body.message,level=severity" 형식입니다.
+	Fields map[string]string
 }
 
 func Load() Config {
@@ -61,6 +93,24 @@ func Load() Config {
 		AllNS:              all,
 		CacheTTL:           envDuration("CACHE_TTL", 5*time.Second),
 		UseDemoData:        envBool("USE_DEMO_DATA", true),
+		Greptime: GreptimeConfig{
+			URL:           env("GREPTIME_URL", ""),
+			DB:            env("GREPTIME_DB", "public"),
+			Username:      env("GREPTIME_USERNAME", ""),
+			Password:      env("GREPTIME_PASSWORD", ""),
+			Timeout:       envDuration("GREPTIME_TIMEOUT", 10*time.Second),
+			MaxDataPoints: envInt("GREPTIME_MAX_POINTS", 1000),
+		},
+		Quickwit: QuickwitConfig{
+			URL:         env("QUICKWIT_URL", ""),
+			Index:       env("QUICKWIT_INDEX", "k8s-logs"),
+			Username:    env("QUICKWIT_USERNAME", ""),
+			Password:    env("QUICKWIT_PASSWORD", ""),
+			Timeout:     envDuration("QUICKWIT_TIMEOUT", 10*time.Second),
+			MaxPageSize: envInt("QUICKWIT_MAX_PAGE", 500),
+			MaxLines:    envInt("QUICKWIT_MAX_LINES", 5000),
+			Fields:      envPairs("QUICKWIT_FIELDS"),
+		},
 		AllowedOrigin:      env("ALLOWED_ORIGIN", ""),
 		ReadTimeout:        envDuration("READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:       envDuration("WRITE_TIMEOUT", 30*time.Second),
@@ -122,6 +172,23 @@ func envFloat(k string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+// envPairs는 "a=b,c=d" 형식을 맵으로 해석합니다. 잘못된 항목은 무시합니다.
+func envPairs(k string) map[string]string {
+	v := os.Getenv(k)
+	if v == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, pair := range strings.Split(v, ",") {
+		key, val, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || key == "" || val == "" {
+			continue
+		}
+		out[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+	return out
 }
 
 func envDuration(k string, def time.Duration) time.Duration {

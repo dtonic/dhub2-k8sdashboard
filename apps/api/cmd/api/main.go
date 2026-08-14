@@ -23,6 +23,8 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/greptime"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/quickwit"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 )
@@ -79,7 +81,7 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("informer 캐시 동기화 완료")
 
-	metrics, logs, alerts, topo := sources(cfg, store)
+	metrics, logs, alerts, topo := sources(logger, cfg, store)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
@@ -125,17 +127,95 @@ func run(logger *slog.Logger) error {
 }
 
 // sources는 데이터소스 어댑터를 고릅니다.
-// 아직 GreptimeDB/Quickwit/Alertmanager 클라이언트가 없으므로,
-// demo가 아니면 **연결 실패로 취급**해 화면이 degraded를 그리게 합니다.
-func sources(cfg config.Config, store *clusterstate.Store) (
+//
+// 우선순위는 **실주소 > 데모 > Unavailable**입니다. GREPTIME_URL·QUICKWIT_URL을
+// 적으면 USE_DEMO_DATA와 무관하게 실제 어댑터를 씁니다 — 주소를 적은 것이
+// 의도이기 때문입니다. 알림·토폴로지는 아직 실클라이언트가 없습니다(#17 잔여) —
+// 데모가 아니면 연결 실패로 취급해 화면이 degraded를 그리게 합니다.
+func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
+	var d *demo.Source
 	if cfg.UseDemoData {
-		d := demo.New(store)
-		return d, d, d, d
+		d = demo.New(store)
 	}
-	u := datasource.Unavailable{Reason: "데이터소스가 아직 연결되지 않았습니다"}
-	return u, u, u, u
+
+	var metrics datasource.Metrics
+	switch {
+	case cfg.Greptime.URL != "":
+		g, err := greptime.New(greptime.Config{
+			BaseURL:       cfg.Greptime.URL,
+			DB:            cfg.Greptime.DB,
+			Username:      cfg.Greptime.Username,
+			Password:      cfg.Greptime.Password,
+			Timeout:       cfg.Greptime.Timeout,
+			MaxDataPoints: cfg.Greptime.MaxDataPoints,
+		}, store)
+		if err != nil {
+			logger.Error("GreptimeDB 설정이 잘못되었습니다 · 메트릭 섹션은 degraded로 내려갑니다", "err", err)
+			metrics = datasource.Unavailable{Reason: "GreptimeDB 설정 오류"}
+			break
+		}
+		logger.Info("메트릭 데이터소스: GreptimeDB", "db", cfg.Greptime.DB)
+		metrics = g
+	case d != nil:
+		metrics = d
+	default:
+		metrics = datasource.Unavailable{Reason: "메트릭 데이터소스가 설정되지 않았습니다"}
+	}
+
+	var logs datasource.Logs
+	switch {
+	case cfg.Quickwit.URL != "":
+		q, err := quickwit.New(quickwit.Config{
+			BaseURL:     cfg.Quickwit.URL,
+			Index:       cfg.Quickwit.Index,
+			Username:    cfg.Quickwit.Username,
+			Password:    cfg.Quickwit.Password,
+			Timeout:     cfg.Quickwit.Timeout,
+			MaxPageSize: cfg.Quickwit.MaxPageSize,
+			MaxLines:    cfg.Quickwit.MaxLines,
+			Fields:      quickwitFields(cfg.Quickwit.Fields),
+		}, store)
+		if err != nil {
+			logger.Error("Quickwit 설정이 잘못되었습니다 · 로그 섹션은 degraded로 내려갑니다", "err", err)
+			logs = datasource.Unavailable{Reason: "Quickwit 설정 오류"}
+			break
+		}
+		logger.Info("로그 데이터소스: Quickwit", "index", cfg.Quickwit.Index)
+		logs = q
+	case d != nil:
+		logs = d
+	default:
+		logs = datasource.Unavailable{Reason: "로그 데이터소스가 설정되지 않았습니다"}
+	}
+
+	var alerts datasource.Alerts = datasource.Unavailable{Reason: "알림 데이터소스가 아직 연결되지 않았습니다"}
+	var topo datasource.Topology = datasource.Unavailable{Reason: "토폴로지 데이터소스가 아직 연결되지 않았습니다"}
+	if d != nil {
+		alerts, topo = d, d
+	}
+	return metrics, logs, alerts, topo
+}
+
+// quickwitFields는 "message=body.message" 재정의를 FieldMap에 적용합니다.
+// 모르는 키는 조용히 무시하지 않고 기동 로그에 남길 수도 있지만,
+// 오타가 곧 빈 화면이므로 여기서는 알려진 키만 받습니다.
+func quickwitFields(m map[string]string) quickwit.FieldMap {
+	var f quickwit.FieldMap
+	set := map[string]*string{
+		"timestamp": &f.Timestamp, "level": &f.Level, "message": &f.Message,
+		"namespace": &f.Namespace, "pod_name": &f.PodName, "pod_uid": &f.PodUID,
+		"container": &f.Container, "workload_kind": &f.WorkloadKind,
+		"workload_name": &f.WorkloadName, "node": &f.Node,
+		"trace_id": &f.TraceID, "span_id": &f.SpanID,
+	}
+	for k, v := range m {
+		if p, ok := set[k]; ok {
+			*p = v
+		}
+	}
+	return f
 }
 
 const usageRefreshInterval = 30 * time.Second
