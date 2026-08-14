@@ -32,9 +32,13 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: "npm run build && npx vite preview --port 4173 --strictPort",
+        /* readiness가 127.0.0.1을 폴링하므로 바인딩도 127.0.0.1로 고정합니다.
+         * 기본 host(localhost)는 환경에 따라 ::1(IPv6)에만 바인딩되어 180초 타임아웃이 났습니다. */
+        command: "npm run build && npx vite preview --host 127.0.0.1 --port 4173 --strictPort",
         url: "http://127.0.0.1:4173",
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,
+        /* CI 로그에 서버 기동 출력을 남겨 다음 진단을 쉽게 합니다. */
+        stdout: "pipe",
       },
 });

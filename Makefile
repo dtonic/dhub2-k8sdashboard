@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install dev dev-web dev-api build lint test test-web check design api-build api-test api-itest api-vet clean
+.PHONY: install dev dev-web dev-api build build-web lint test test-web check design api-build api-test api-itest api-vet clean
 
 install:            ## 의존성 설치
 	npm install
@@ -14,14 +14,15 @@ dev-web:            ## React UI (MSW mock API 위에서 단독 실행)
 dev-api:            ## Go Observability API/BFF (kubeconfig 또는 in-cluster)
 	cd apps/api && go run ./cmd/api
 
-build:              ## 전체 빌드
+build: build-web api-build  ## 전체 빌드 (Web + API)
+
+build-web:          ## Web/디자인 시스템 빌드 (Go 툴체인 불필요 — CI Web job이 사용)
 	npm run build --workspaces --if-present
 
 check:              ## 타입체크 + 디자인 시스템 preview 검증
 	npm run check --workspaces --if-present
 
-lint:               ## 린트 (도구 확정 후 연결)
-	npm run lint --workspaces --if-present
+lint: check api-vet ## 정적 검사 (TypeScript 타입체크 + go vet — 별도 린터 도입 전까지)
 
 test: test-web api-test  ## 전체 테스트
 

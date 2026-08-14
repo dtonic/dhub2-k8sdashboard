@@ -21,8 +21,8 @@ jobs:
       - run: make install
       - name: 타입체크 · design-system preview 검증
         run: make check
-      - name: 빌드
-        run: make build
+      - name: 빌드 (Web/디자인 시스템만 — Go 툴체인 불필요)
+        run: make build-web
       - name: Playwright 브라우저 설치
         run: npx playwright install --with-deps chromium
         working-directory: apps/web

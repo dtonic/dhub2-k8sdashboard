@@ -523,7 +523,20 @@ Custom Range의 최대 폭은 30일입니다.
 
 ## 13. 개발 환경
 
-프로젝트 초기 구조가 생성되기 전까지 아래 명령은 예정 인터페이스입니다.
+### 사전 요구사항
+
+- Node.js >= 20
+- Go >= 1.24
+- Make
+
+### 환경변수
+
+`.env.example`은 로컬 개발용 참고 파일이며 **자동으로 로드되지 않습니다.**
+필요한 값(`USE_DEMO_DATA`, `AUTH_MODE` 등)은 셸 환경변수로 직접 내보내거나,
+배포 환경에서는 Secret 관리자(예: Kubernetes Secret)로 주입합니다.
+`.env` 파일과 Credential은 Git에 커밋하지 않습니다.
+
+### 명령
 
 ```bash
 # 저장소 복제
@@ -544,8 +557,13 @@ make design
 
 # 검증
 make check          # 타입체크 + preview 빌드 검증
-make build          # 전체 빌드
+make lint           # 정적 검사 (TypeScript 타입체크 + go vet)
+make build          # 전체 빌드 (Web + API — Go 툴체인 필요)
+make build-web      # Web/디자인 시스템만 빌드 (Go 불필요)
 make test           # Web E2E(Playwright) + Go 테스트
+
+# API 단독 검증
+make api-vet && make api-test && make api-build
 ```
 
 Web과 API는 각각 단독으로 돌아갑니다. Web은 MSW mock 위에서, API는 `USE_DEMO_DATA=true`로
