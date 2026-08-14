@@ -1,0 +1,653 @@
+# Observability API/BFF — 등록된 GET 라우트의 계약입니다. (#5)
+#
+# 유지 규칙:
+#   - 라우터(apps/api/internal/httpapi/server.go)와 이 문서의 메서드·경로가 어긋나면
+#     apps/api의 TestOpenAPIMatchesRouter가 실패합니다. 라우트를 바꾸면 여기도 고칩니다.
+#   - 화면 응답 DTO의 원본은 packages/contracts/src/index.ts입니다. 여기서는 전체 모델을
+#     복제하지 않고 이름만 참조합니다 — 두 곳에서 필드를 관리하지 않기 위해서입니다.
+#   - 모든 응답은 X-Request-ID 헤더를 달고, 에러 본문 requestId와 같은 값입니다.
+openapi: 3.1.0
+info:
+  title: k8s-dashboard Observability API
+  description: >-
+    Kubernetes 운영 흐름에 특화된 화면 단위 조회 API입니다. 화면 하나 = 요청 하나(ADR 0002),
+    Scope는 서버가 강제합니다(README §10). 부분 장애는 HTTP 에러가 아니라 Section 값입니다.
+  version: 0.5.0
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: 프로세스 생존 확인
+      description: 인증 없이 호출 가능한 운영 경로입니다.
+      security: []
+      responses:
+        "200":
+          description: 프로세스가 살아 있습니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: 트래픽 수용 준비 확인
+      description: >-
+        informer 캐시 최초 동기화가 끝난 뒤에만 200입니다. 동기화 전 트래픽은
+        "Pod 0개"를 정상처럼 보이게 하므로 503으로 거절합니다. 인증 없이 호출 가능합니다.
+      security: []
+      responses:
+        "200":
+          description: 준비되었습니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: informer 캐시 동기화 중입니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyStatus"
+  /version:
+    get:
+      operationId: getVersion
+      summary: 빌드 버전 정보
+      description: >-
+        빌드 시 ldflags로 주입된 버전·커밋·빌드 시각입니다. 로컬 빌드 기본값은
+        dev/unknown입니다. 인증 없이 호출 가능합니다.
+      security: []
+      responses:
+        "200":
+          description: 빌드 정보입니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionInfo"
+  /api/v1/scope:
+    get:
+      operationId: getScope
+      summary: 사용자가 접근 가능한 클러스터·네임스페이스 범위
+      responses:
+        "200":
+          description: "ScopeResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScopeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/overview:
+    get:
+      operationId: getClusterOverview
+      summary: Cluster Overview 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: namespace
+          in: query
+          description: Scope와 교차해 적용할 namespace. 비우거나 all이면 Scope 전체입니다.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "ClusterOverviewResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterOverviewResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/namespaces:
+    get:
+      operationId: listNamespaces
+      summary: Namespace 목록 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "NamespaceListResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamespaceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/namespaces/{namespace}:
+    get:
+      operationId: getNamespaceDetail
+      summary: Namespace Drill-down 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "NamespaceDetailResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamespaceDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/workloads/{kind}/{name}:
+    get:
+      operationId: getWorkloadDetail
+      summary: Workload Drill-down 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - name: kind
+          in: path
+          required: true
+          description: Deployment · StatefulSet · DaemonSet · ReplicaSet · CronJob
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Ns"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "WorkloadDetailResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkloadDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/pods/{name}:
+    get:
+      operationId: getPodDetail
+      summary: Pod Drill-down 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Ns"
+        - name: uid
+          in: query
+          description: Pod UID. 이름 재사용에 안전하도록 이름보다 UID를 우선합니다. (README §5)
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "PodDetailResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PodDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/logs:
+    get:
+      operationId: searchLogs
+      summary: Logs Explorer 화면 집계
+      description: Cursor/Search-after 페이징만 지원합니다. offset 페이징은 없습니다. (ADR 0003)
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/Ns"
+        - name: workload
+          in: query
+          schema:
+            type: string
+        - name: podUid
+          in: query
+          schema:
+            type: string
+        - name: container
+          in: query
+          schema:
+            type: string
+        - name: levels
+          in: query
+          description: 쉼표로 구분한 로그 레벨 (ERROR,WARN,INFO,DEBUG). 모르는 값은 무시합니다.
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: 본문 검색어
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: 이전 응답 cursor.next 값
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "LogSearchResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogSearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/topology:
+    get:
+      operationId: getTopology
+      summary: Pod Topology 화면 집계
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/Ns"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "TopologyResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopologyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series:
+    get:
+      operationId: getTopologyEdgeSeries
+      summary: Topology Edge 시계열
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - name: edgeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Ns"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "TopologyEdgeSeriesResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopologyEdgeSeriesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/alerts:
+    get:
+      operationId: listAlerts
+      summary: Alerts 화면 집계 (조회 전용)
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/Ns"
+        - $ref: "#/components/parameters/Range"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          description: "AlertListResponse — 원본: packages/contracts/src/index.ts"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        AUTH_MODE=oidc|mock일 때 필요한 Bearer JWT입니다. AUTH_MODE=none이면 정적 Scope로
+        동작합니다. /healthz · /readyz · /version은 어느 모드에서든 인증이 필요 없습니다.
+  headers:
+    XRequestID:
+      description: >-
+        요청 상관관계 ID. 인바운드 X-Request-ID가 1..128자의 [A-Za-z0-9._:-]이면 재사용하고,
+        아니면 서버가 128bit 난수 소문자 hex를 새로 만듭니다. 에러 본문 requestId와 같은 값입니다.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._:-]{1,128}$"
+  parameters:
+    ClusterId:
+      name: clusterId
+      in: path
+      required: true
+      description: 클러스터 ID. Scope 밖이면 403입니다.
+      schema:
+        type: string
+    Ns:
+      name: ns
+      in: query
+      description: Scope와 교차해 적용할 namespace. 비우거나 all이면 Scope 전체입니다.
+      schema:
+        type: string
+    Range:
+      name: range
+      in: query
+      description: 조회 범위 프리셋 (1h·1d·7d·30d). Step은 서버가 범위에 따라 강제합니다.
+      schema:
+        type: string
+    From:
+      name: from
+      in: query
+      description: Custom 범위 시작. RFC3339 또는 epoch milliseconds 숫자 문자열이며 from/to는 함께 씁니다.
+      schema:
+        oneOf:
+          - type: string
+            format: date-time
+          - type: string
+            pattern: "^-?[0-9]+$"
+    To:
+      name: to
+      in: query
+      description: Custom 범위 끝. RFC3339 또는 epoch milliseconds 숫자 문자열입니다.
+      schema:
+        oneOf:
+          - type: string
+            format: date-time
+          - type: string
+            pattern: "^-?[0-9]+$"
+  responses:
+    BadRequest:
+      description: 요청이 성립하지 않습니다 (예 invalid_range).
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    Unauthorized:
+      description: 인증이 필요합니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    Forbidden:
+      description: 요청한 클러스터·namespace가 Scope 밖입니다. 부분 데이터도 내려가지 않습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    NotFound:
+      description: 등록되지 않은 경로입니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    MethodNotAllowed:
+      description: 허용되지 않은 메서드입니다. Allow 헤더에 허용 메서드가 담깁니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+        Allow:
+          description: 허용 메서드 (전 라우트 GET)
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    InternalError:
+      description: 서버 내부 오류입니다. 내부 주소·질의·스택트레이스는 담기지 않습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+  schemas:
+    APIError:
+      type: object
+      description: 화면 전체가 실패했을 때만 쓰는 최상위 에러. 섹션 단위 실패는 Section 값입니다.
+      required:
+        - code
+        - message
+        - requestId
+      properties:
+        code:
+          type: string
+          enum:
+            - unauthorized
+            - forbidden
+            - not_found
+            - method_not_allowed
+            - upstream_unavailable
+            - invalid_range
+            - internal
+        message:
+          type: string
+        requestId:
+          type: string
+          description: 응답 헤더 X-Request-ID와 같은 값
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: ok
+    ReadyStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: syncing
+    VersionInfo:
+      type: object
+      required:
+        - version
+        - commit
+        - buildDate
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        buildDate:
+          type: string
+    # 화면 응답 DTO — 필드 정의의 원본은 packages/contracts/src/index.ts입니다.
+    # 여기서 전체 모델을 복제하면 두 곳을 관리하게 되므로 이름만 고정합니다.
+    ScopeResponse:
+      type: object
+      description: "원본: src/index.ts의 ScopeResponse"
+    ClusterOverviewResponse:
+      type: object
+      description: "원본: src/index.ts의 ClusterOverviewResponse"
+    NamespaceListResponse:
+      type: object
+      description: "원본: src/index.ts의 NamespaceListResponse"
+    NamespaceDetailResponse:
+      type: object
+      description: "원본: src/index.ts의 NamespaceDetailResponse"
+    WorkloadDetailResponse:
+      type: object
+      description: "원본: src/index.ts의 WorkloadDetailResponse"
+    PodDetailResponse:
+      type: object
+      description: "원본: src/index.ts의 PodDetailResponse"
+    LogSearchResponse:
+      type: object
+      description: "원본: src/index.ts의 LogSearchResponse"
+    TopologyResponse:
+      type: object
+      description: "원본: src/index.ts의 TopologyResponse"
+    TopologyEdgeSeriesResponse:
+      type: object
+      description: "원본: src/index.ts의 TopologyEdgeSeriesResponse"
+    AlertListResponse:
+      type: object
+      description: "원본: src/index.ts의 AlertListResponse"

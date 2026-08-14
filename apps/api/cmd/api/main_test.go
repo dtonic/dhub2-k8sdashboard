@@ -29,6 +29,40 @@ func defaultCatalog(t *testing.T) querycatalog.Catalog {
 	return qc
 }
 
+// TestRunStopsOnInvalidConfigBeforeKubernetes — 잘못된 필수 설정은 Kubernetes
+// 클라이언트·informer를 만들기 전에 설정 오류로 멈춰야 합니다. (#5)
+// kubeconfig 없는 환경에서도 이 테스트가 통과한다는 것 자체가 Validate가
+// 클러스터 접속 시도보다 먼저 실행된다는 증거입니다.
+func TestRunStopsOnInvalidConfigBeforeKubernetes(t *testing.T) {
+	t.Setenv("AUTH_MODE", "what-is-this")
+	err := run(discardLogger())
+	if err == nil {
+		t.Fatal("잘못된 AUTH_MODE로 run이 통과했습니다")
+	}
+	if !strings.Contains(err.Error(), "설정 오류") || !strings.Contains(err.Error(), "AUTH_MODE") {
+		t.Fatalf("설정 검증이 아닌 다른 단계에서 실패했습니다: %v", err)
+	}
+
+	t.Setenv("AUTH_MODE", "oidc")
+	t.Setenv("OIDC_ISSUER", "not-an-absolute-url")
+	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "OIDC_ISSUER") {
+		t.Fatalf("잘못된 issuer가 기동 전에 잡히지 않았습니다: %v", err)
+	}
+
+	t.Setenv("AUTH_MODE", "none")
+	t.Setenv("ADDR", "not-an-address")
+	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "ADDR") {
+		t.Fatalf("잘못된 listen 주소가 Kubernetes 설정 전에 잡히지 않았습니다: %v", err)
+	}
+
+	t.Setenv("ADDR", ":8080")
+	t.Setenv("AUTH_MODE", "mock")
+	t.Setenv("AUTH_MOCK_ADDR", "0.0.0.0:8091")
+	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "AUTH_MOCK_ADDR") {
+		t.Fatalf("안전하지 않은 mock 주소가 Kubernetes 설정 전에 잡히지 않았습니다: %v", err)
+	}
+}
+
 // TestSourcesSelectionMatrix — 데이터소스 선택 우선순위(실주소 > 데모 >
 // Unavailable)의 전체 조합입니다. 어댑터 자체는 각 패키지가 검증하고,
 // 여기는 **배선**이 맞는지만 봅니다.

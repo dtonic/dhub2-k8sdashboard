@@ -233,8 +233,24 @@ export interface ScopeResponse {
 
 /** 화면 전체가 실패했을 때만 쓰는 최상위 에러. 섹션 단위 실패는 Section으로 표현합니다. */
 export interface ApiError {
-  code: "unauthorized" | "forbidden" | "upstream_unavailable" | "invalid_range" | "internal";
+  code:
+    | "unauthorized"
+    | "forbidden"
+    | "not_found"
+    | "method_not_allowed"
+    | "upstream_unavailable"
+    | "invalid_range"
+    | "internal";
   message: string;
+  /** 응답 헤더 X-Request-ID와 항상 같은 값. 문의·로그 대조는 이 값 하나로 합니다. */
+  requestId: string;
+}
+
+/** GET /version 응답. 값은 빌드 시 주입되며 로컬 기본값은 dev/unknown입니다. */
+export interface VersionInfo {
+  version: string;
+  commit: string;
+  buildDate: string;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

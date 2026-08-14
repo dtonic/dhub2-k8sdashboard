@@ -5,6 +5,10 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -150,6 +154,74 @@ func Load() Config {
 		ReadTimeout:   envDuration("READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:  envDuration("WRITE_TIMEOUT", 30*time.Second),
 	}
+}
+
+// Validate는 서버를 띄우면 안 되는 필수 설정 오류를 기동 전에 모아 돌려줍니다. (#5)
+//
+// 여기서 잡는 것은 **유효하지 않은 서버**를 만드는 값뿐입니다. 데이터소스 주소
+// 오류는 문서된 대로 해당 섹션만 degraded로 내려가므로 여기서 막지 않고,
+// 형식이 틀린 선택적 튜닝 env는 Load()가 기본값으로 대체합니다.
+func (c Config) Validate() error {
+	var errs []error
+	if err := validateListenAddr(c.Addr); err != nil {
+		errs = append(errs, fmt.Errorf("ADDR가 유효한 listen 주소가 아닙니다: %q: %w", c.Addr, err))
+	}
+	if c.ClusterID == "" {
+		errs = append(errs, errors.New("CLUSTER_ID가 비어 있습니다"))
+	}
+	if c.QPS <= 0 {
+		errs = append(errs, fmt.Errorf("K8S_QPS는 0보다 커야 합니다: %v", c.QPS))
+	}
+	if c.Burst <= 0 {
+		errs = append(errs, fmt.Errorf("K8S_BURST는 0보다 커야 합니다: %d", c.Burst))
+	}
+	if c.Resync <= 0 {
+		errs = append(errs, fmt.Errorf("K8S_RESYNC는 0보다 커야 합니다: %v", c.Resync))
+	}
+	if c.CacheTTL <= 0 {
+		// 0이면 자동 갱신 사용자 수만큼 데이터소스 팬아웃이 늘어납니다.
+		errs = append(errs, fmt.Errorf("CACHE_TTL은 0보다 커야 합니다: %v", c.CacheTTL))
+	}
+	if c.ReadTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("READ_TIMEOUT은 0보다 커야 합니다: %v", c.ReadTimeout))
+	}
+	if c.WriteTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("WRITE_TIMEOUT은 0보다 커야 합니다: %v", c.WriteTimeout))
+	}
+
+	switch c.Auth.Mode {
+	case "", "none":
+	case "mock":
+		host, _, err := net.SplitHostPort(c.Auth.MockAddr)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("AUTH_MOCK_ADDR가 유효한 host:port가 아닙니다: %q", c.Auth.MockAddr))
+		} else if ip := net.ParseIP(host); !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+			errs = append(errs, fmt.Errorf("AUTH_MOCK_ADDR는 loopback literal 또는 localhost여야 합니다: %q", c.Auth.MockAddr))
+		} else if err := validateListenAddr(c.Auth.MockAddr); err != nil {
+			errs = append(errs, fmt.Errorf("AUTH_MOCK_ADDR가 유효한 host:port가 아닙니다: %q: %w", c.Auth.MockAddr, err))
+		}
+	case "oidc":
+		u, err := url.Parse(c.Auth.Issuer)
+		if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			errs = append(errs, fmt.Errorf(
+				"AUTH_MODE=oidc에는 절대 http(s) OIDC_ISSUER가 필요합니다: %q", c.Auth.Issuer))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("알 수 없는 AUTH_MODE %q (none|oidc|mock)", c.Auth.Mode))
+	}
+	return errors.Join(errs...)
+}
+
+func validateListenAddr(addr string) error {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > 65535 {
+		return errors.New("port must be an integer between 0 and 65535")
+	}
+	return nil
 }
 
 // Scope는 설정에서 만든 정적 Scope입니다.

@@ -32,6 +32,15 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 )
 
+// 빌드 정보 — GET /version이 그대로 돌려줍니다. 릴리스 빌드는 ldflags로 덮어씁니다:
+//
+//	go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDate=2026-08-14T00:00:00Z"
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -44,6 +53,10 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	cfg := config.Load()
+	// 필수 설정 오류는 Kubernetes 클라이언트·informer를 만들기 전에 멈춥니다. (#5)
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("설정 오류: %w", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -113,6 +126,7 @@ func run(logger *slog.Logger) error {
 		Cache:         cache.NewTTL(cfg.CacheTTL),
 		Logger:        logger,
 		AllowedOrigin: cfg.AllowedOrigin,
+		Version:       contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
 
 	httpSrv := &http.Server{

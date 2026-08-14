@@ -46,6 +46,11 @@ func (c *TTL) Do(ctx context.Context, key string, fn func(context.Context) (any,
 		if err != nil {
 			return nil, err
 		}
+		// A handler may map adapter cancellation to a degraded value.
+		// Never retain that request-local result after its caller has gone away.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		c.set(key, v)
 		return v, nil
 	})

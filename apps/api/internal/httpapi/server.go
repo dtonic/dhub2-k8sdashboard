@@ -37,6 +37,10 @@ type Deps struct {
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
 	Now func() time.Time
+	// Version은 GET /version 응답입니다. 값은 cmd/api가 ldflags로 채웁니다. (#5)
+	Version contract.VersionInfo
+	// NewRequestID는 테스트에서 요청 ID 생성을 고정합니다. 기본은 crypto/rand입니다.
+	NewRequestID func() string
 }
 
 type Server struct {
@@ -53,6 +57,9 @@ func NewServer(d Deps) *Server {
 	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
+	}
+	if d.NewRequestID == nil {
+		d.NewRequestID = newRequestID
 	}
 	s := &Server{deps: d, mux: http.NewServeMux()}
 	s.routes()
@@ -73,6 +80,9 @@ func (s *Server) routes() {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	m.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, s.deps.Version)
+	})
 
 	m.HandleFunc("GET /api/v1/scope", s.handleScope)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.handleOverview)
@@ -86,29 +96,65 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/alerts", s.handleAlerts)
 }
 
+// operationalPath는 인증 없이 접근 가능한 운영 경로입니다. probe·버전 확인은
+// Credential 없이 가능해야 하고, /api/v1/*의 인증 경계는 그대로 유지합니다. (#5)
+var operationalPath = map[string]bool{"/healthz": true, "/readyz": true, "/version": true}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 요청 ID는 가장 먼저 확정합니다 — 401·404·패닉을 포함한 모든 응답이 달고 나갑니다.
+	reqID := r.Header.Get(requestIDHeader)
+	if !safeRequestID(reqID) {
+		reqID = s.deps.NewRequestID()
+	}
+	w.Header().Set(requestIDHeader, reqID)
+	r = r.WithContext(withRequestID(r.Context(), reqID))
+
 	if s.deps.AllowedOrigin != "" {
 		w.Header().Set("Access-Control-Allow-Origin", s.deps.AllowedOrigin)
 		w.Header().Set("Vary", "Origin")
 	}
 	// 대시보드 응답은 항상 지금의 상태입니다. 중간 캐시가 끼면 낡은 값이 정상처럼 보입니다.
 	w.Header().Set("Cache-Control", "no-store")
+	started := s.deps.Now()
+	sc := scope.Scope{}
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			s.deps.Logger.Error("패닉", "path", r.URL.Path, "recover", fmt.Sprint(rec))
-			writeError(w, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
+			s.deps.Logger.Error("패닉", "path", r.URL.Path, "requestId", reqID, "recover", fmt.Sprint(rec))
+			writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
+			s.audit(r, sc, http.StatusInternalServerError, started)
 		}
 	}()
 
-	started := s.deps.Now()
-	sc, err := s.deps.Resolver.Resolve(r)
-	if err != nil {
-		// 인증 실패(401)와 권한 부족(403)은 다른 상태입니다. 여기는 401만 나갑니다 —
-		// 유효한 토큰의 권한 부족은 빈 Scope로 통과해 아래에서 403이 됩니다. (#10)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-dashboard"`)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "인증이 필요합니다.")
-		s.audit(r, scope.Scope{}, http.StatusUnauthorized, started)
+	if !operationalPath[r.URL.Path] {
+		var err error
+		sc, err = s.deps.Resolver.Resolve(r)
+		if err != nil {
+			// 인증 실패(401)와 권한 부족(403)은 다른 상태입니다. 여기는 401만 나갑니다 —
+			// 유효한 토큰의 권한 부족은 빈 Scope로 통과해 아래에서 403이 됩니다. (#10)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-dashboard"`)
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", "인증이 필요합니다.")
+			s.audit(r, scope.Scope{}, http.StatusUnauthorized, started)
+			return
+		}
+	}
+
+	// 등록되지 않은 경로·메서드는 ServeMux의 text/plain 대신 JSON 에러 계약으로 답합니다.
+	// Handler()는 매칭만 확인하고 핸들러를 실행하지 않으므로 성공 응답은 버퍼링되지 않습니다.
+	if r.Method != http.MethodGet {
+		probe := r.Clone(r.Context())
+		probe.Method = http.MethodGet
+		if _, pattern := s.mux.Handler(probe); pattern != "" {
+			// Go's ServeMux treats HEAD as GET, so enforce the documented GET-only contract here.
+			w.Header().Set("Allow", http.MethodGet)
+			writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "허용되지 않은 메서드입니다.")
+			s.audit(r, sc, http.StatusMethodNotAllowed, started)
+			return
+		}
+	}
+	if _, pattern := s.mux.Handler(r); pattern == "" {
+		writeError(w, r, http.StatusNotFound, "not_found", "등록되지 않은 경로입니다.")
+		s.audit(r, sc, http.StatusNotFound, started)
 		return
 	}
 
@@ -147,16 +193,19 @@ func serve[T any](s *Server, w http.ResponseWriter, r *http.Request, fn func(con
 	key := cacheKey(r)
 	v, err := cache.Typed(r.Context(), s.deps.Cache, key, fn)
 	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
 		var fb errForbidden
 		var br errBadRequest
 		switch {
 		case errors.As(err, &fb):
-			writeError(w, http.StatusForbidden, "forbidden", fb.msg)
+			writeError(w, r, http.StatusForbidden, "forbidden", fb.msg)
 		case errors.As(err, &br):
-			writeError(w, http.StatusBadRequest, br.code, br.msg)
+			writeError(w, r, http.StatusBadRequest, br.code, br.msg)
 		default:
-			s.deps.Logger.Error("요청 처리 실패", "path", r.URL.Path, "err", err)
-			writeError(w, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
+			s.deps.Logger.Error("요청 처리 실패", "path", r.URL.Path, "requestId", requestIDFrom(r.Context()), "err", err)
+			writeError(w, r, http.StatusInternalServerError, "internal", "요청을 처리하지 못했습니다.")
 		}
 		return
 	}

@@ -87,6 +87,32 @@ func TestErrorsAreNotCached(t *testing.T) {
 	}
 }
 
+func TestCanceledSuccessfulResultIsNotCached(t *testing.T) {
+	c := cache.NewTTL(time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls int
+
+	_, err := cache.Typed(ctx, c, "k", func(context.Context) (int, error) {
+		calls++
+		cancel()
+		return 1, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v, want context.Canceled", err)
+	}
+	if c.Len() != 0 {
+		t.Fatalf("취소된 결과가 캐시되었습니다: len=%d", c.Len())
+	}
+
+	v, err := cache.Typed(context.Background(), c, "k", func(context.Context) (int, error) {
+		calls++
+		return 2, nil
+	})
+	if err != nil || v != 2 || calls != 2 {
+		t.Fatalf("취소 후 재조회가 실행되지 않았습니다: v=%d err=%v calls=%d", v, err, calls)
+	}
+}
+
 func TestExpiredEntryIsRefetched(t *testing.T) {
 	c := cache.NewTTL(20 * time.Millisecond)
 	var calls int

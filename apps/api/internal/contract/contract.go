@@ -308,9 +308,21 @@ type ScopeResponse struct {
 }
 
 // APIError는 화면 전체가 실패했을 때만 씁니다. 섹션 단위 실패는 Section으로 표현합니다.
+//
+// RequestID는 응답 헤더 X-Request-ID와 항상 같은 값입니다. 문의·로그 대조는
+// 이 값 하나로 합니다. (#5)
 type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"requestId"`
+}
+
+// VersionInfo는 GET /version 응답입니다. 값은 빌드 시 ldflags로 주입되며
+// 로컬 빌드 기본값은 dev/unknown입니다. (#5)
+type VersionInfo struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"buildDate"`
 }
 
 /* ── Drill-down ─────────────────────────────────────────────────────────── */

@@ -30,7 +30,12 @@ export async function apiGet<T>(path: string, params: Record<string, string> = {
     const body = (await res.json().catch(() => null)) as ApiError | null;
     throw new HttpError(
       res.status,
-      body ?? { code: res.status === 403 ? "forbidden" : "internal", message: `요청이 실패했습니다 (${res.status})` },
+      body ?? {
+        code: res.status === 403 ? "forbidden" : "internal",
+        message: `요청이 실패했습니다 (${res.status})`,
+        // 본문이 JSON이 아닐 때의 합성 에러입니다. 상관관계 ID는 응답 헤더에서 가져옵니다.
+        requestId: res.headers.get("X-Request-ID") ?? "",
+      },
     );
   }
   return (await res.json()) as T;

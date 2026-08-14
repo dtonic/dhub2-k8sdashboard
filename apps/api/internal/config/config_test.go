@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,6 +86,112 @@ func TestInvalidEnvFallsBackToDefaults(t *testing.T) {
 	cfg := Load()
 	if cfg.Resync != 10*time.Minute || cfg.QPS != 20 || cfg.Burst != 30 || !cfg.UseDemoData {
 		t.Fatalf("기본값 복귀 실패: %+v", cfg)
+	}
+}
+
+// TestValidateAcceptsDefaults — 기본 설정은 그대로 유효해야 합니다.
+func TestValidateAcceptsDefaults(t *testing.T) {
+	if err := Load().Validate(); err != nil {
+		t.Fatalf("기본 설정이 Validate를 통과하지 못했습니다: %v", err)
+	}
+	for _, mode := range []string{"none", "mock", ""} {
+		cfg := Load()
+		cfg.Auth.Mode = mode
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("AUTH_MODE=%q: %v", mode, err)
+		}
+	}
+	cfg := Load()
+	cfg.Auth.Mode = "oidc"
+	cfg.Auth.Issuer = "https://idp.example.com/realms/ops"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("유효한 oidc 설정이 거절되었습니다: %v", err)
+	}
+}
+
+// TestValidateRejectsInvalidRequiredConfig — 유효하지 않은 서버를 만드는
+// 필수 설정은 기동 전에 잡혀야 합니다. (#5)
+func TestValidateRejectsInvalidRequiredConfig(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*Config)
+		want   string
+	}{
+		"알 수 없는 AUTH_MODE": {func(c *Config) { c.Auth.Mode = "what-is-this" }, "AUTH_MODE"},
+		"issuer 없는 oidc":   {func(c *Config) { c.Auth.Mode = "oidc" }, "OIDC_ISSUER"},
+		"상대경로 issuer": {func(c *Config) {
+			c.Auth.Mode = "oidc"
+			c.Auth.Issuer = "idp.example.com/realms/ops"
+		}, "OIDC_ISSUER"},
+		"http(s) 아닌 issuer": {func(c *Config) {
+			c.Auth.Mode = "oidc"
+			c.Auth.Issuer = "ftp://idp.example.com"
+		}, "OIDC_ISSUER"},
+		"빈 ADDR":         {func(c *Config) { c.Addr = "" }, "ADDR"},
+		"잘못된 ADDR":       {func(c *Config) { c.Addr = "not-an-address" }, "ADDR"},
+		"범위 밖 ADDR port": {func(c *Config) { c.Addr = "localhost:65536" }, "ADDR"},
+		"빈 CLUSTER_ID":   {func(c *Config) { c.ClusterID = "" }, "CLUSTER_ID"},
+		"QPS 0":          {func(c *Config) { c.QPS = 0 }, "K8S_QPS"},
+		"음수 Burst":       {func(c *Config) { c.Burst = -1 }, "K8S_BURST"},
+		"Resync 0":       {func(c *Config) { c.Resync = 0 }, "K8S_RESYNC"},
+		"CacheTTL 0":     {func(c *Config) { c.CacheTTL = 0 }, "CACHE_TTL"},
+		"ReadTimeout 0":  {func(c *Config) { c.ReadTimeout = 0 }, "READ_TIMEOUT"},
+		"WriteTimeout 0": {func(c *Config) { c.WriteTimeout = 0 }, "WRITE_TIMEOUT"},
+	}
+
+	for _, addr := range []string{":8080", "localhost:8080", "127.0.0.1:8080", "[::1]:8080"} {
+		cfg := Load()
+		cfg.Addr = addr
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("유효한 ADDR %q가 거절되었습니다: %v", addr, err)
+		}
+	}
+
+	for _, addr := range []string{"localhost:0", "127.0.0.1:0", "[::1]:0"} {
+		cfg := Load()
+		cfg.Auth.Mode = "mock"
+		cfg.Auth.MockAddr = addr
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("유효한 AUTH_MOCK_ADDR %q가 거절되었습니다: %v", addr, err)
+		}
+	}
+	for _, addr := range []string{"", "bad", "0.0.0.0:8091", "example.com:8091", "localhost:nope"} {
+		cfg := Load()
+		cfg.Auth.Mode = "mock"
+		cfg.Auth.MockAddr = addr
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AUTH_MOCK_ADDR") {
+			t.Errorf("안전하지 않은 AUTH_MOCK_ADDR %q가 거절되지 않았습니다: %v", addr, err)
+		}
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := Load()
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("잘못된 설정이 Validate를 통과했습니다")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("오류가 %q를 지목하지 않습니다: %v", tc.want, err)
+			}
+		})
+	}
+
+	// 복수 오류는 한 번에 전부 보고합니다 — 하나 고칠 때마다 재기동하지 않게.
+	cfg := Load()
+	cfg.Addr = ""
+	cfg.Auth.Mode = "bogus"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "ADDR") || !strings.Contains(err.Error(), "AUTH_MODE") {
+		t.Fatalf("복수 오류가 합쳐지지 않았습니다: %v", err)
+	}
+
+	// 데이터소스 주소 오류는 여기서 막지 않습니다 — 문서된 대로 해당 섹션만
+	// degraded로 내려갑니다.
+	cfg = Load()
+	cfg.Greptime.URL = "not-a-url"
+	cfg.Quickwit.URL = "::also-broken"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("데이터소스 주소는 기동 차단 대상이 아닙니다: %v", err)
 	}
 }
 

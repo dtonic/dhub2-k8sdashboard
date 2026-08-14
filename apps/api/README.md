@@ -44,6 +44,15 @@ KUBECONFIG=~/.kube/config make dev-api
 | `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행. **실주소가 설정된 데이터소스는 이 값과 무관하게 실제 어댑터를 씁니다** |
 | `ALLOWED_ORIGIN` | (비움) | 개발 중 Vite 오리진 허용 |
 
+필수 설정은 기동 직후 `Config.Validate()`가 검사하고, 오류가 있으면 Kubernetes
+클라이언트·informer를 만들기 전에 전부 모아 보고하고 멈춥니다 — 알 수 없는
+`AUTH_MODE`, 유효한 listen 주소가 아닌 `ADDR`, 절대 http(s) URL이 아닌
+`OIDC_ISSUER`(`AUTH_MODE=oidc`일 때), loopback이 아닌 `AUTH_MOCK_ADDR`
+(`AUTH_MODE=mock`일 때), 비거나 0 이하인 `CLUSTER_ID`·`K8S_QPS`·`K8S_BURST`·`K8S_RESYNC`·
+`CACHE_TTL`·`READ_TIMEOUT`·`WRITE_TIMEOUT`이 대상입니다. 형식이 틀린 선택적
+튜닝 env는 지금처럼 기본값으로 물러나고, 데이터소스 주소 오류는 기동을 막지
+않고 해당 섹션만 degraded로 내려갑니다.
+
 ### 실데이터소스 설정
 
 | 환경변수 | 기본값 | 설명 |
@@ -148,14 +157,31 @@ GET /api/v1/clusters/{clusterId}/logs?ns=&levels=&q=&cursor=
 GET /api/v1/clusters/{clusterId}/topology?ns=
 GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series
 GET /api/v1/clusters/{clusterId}/alerts?ns=
-GET /healthz   GET /readyz
+GET /healthz   GET /readyz   GET /version
 ```
+
+`/healthz` · `/readyz` · `/version`은 어느 `AUTH_MODE`에서든 인증 없이 호출할 수 있습니다.
+`/version`은 빌드 시 주입된 값(`{version, commit, buildDate}`)을 돌려주며, 로컬 빌드
+기본값은 `dev`/`unknown`입니다:
+
+```bash
+go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDate=2026-08-14T00:00:00Z" ./cmd/api
+```
+
+등록된 전체 라우트의 계약은 [`packages/contracts/openapi.yaml`](../../packages/contracts/openapi.yaml)에
+있습니다. 라우트를 바꾸면 그 문서도 고칩니다 — 어긋나면 `TestOpenAPIMatchesRouter`가 실패합니다.
+화면 응답 DTO의 원본은 여전히 `packages/contracts/src/index.ts`입니다.
 
 ### 응답 규칙
 
 - 패널마다 `Section<T>`로 감쌉니다. `ok | empty | forbidden | degraded` — **세 가지 실패가 서로 다릅니다.**
   "결과 0건"과 "권한 없음"과 "데이터소스 장애"를 하나로 접으면 사용자가 대응을 못 합니다.
-- 화면 전체가 실패할 때만 최상위 에러(`{code, message}`)를 씁니다. 403 / 400이 여기에 해당합니다.
+- 화면 전체가 실패할 때만 최상위 에러(`{code, message, requestId}`)를 씁니다.
+  400 / 401 / 403 / 404 / 405 / 500 전부 이 JSON 계약입니다 — 등록되지 않은 경로(`not_found`)와
+  허용되지 않은 메서드(`method_not_allowed`, `Allow: GET` 포함)도 text/plain으로 답하지 않습니다.
+- 모든 응답은 `X-Request-ID` 헤더를 답니다. 인바운드 값이 1..128자의 `[A-Za-z0-9._:-]`이면
+  재사용하고, 아니면 서버가 128bit 난수 소문자 hex를 새로 만듭니다(헤더·로그 injection 차단).
+  에러 본문 `requestId`·감사 로그의 `requestId`가 같은 값입니다.
 - degraded 사유에 내부 주소·질의·스택트레이스를 담지 않습니다.
 
 ## 테스트

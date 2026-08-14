@@ -16,6 +16,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError는 **화면 전체가 실패**했을 때만 씁니다.
 // 섹션 하나의 문제는 Section의 degraded/forbidden으로 표현합니다. (ADR 0002)
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, contract.APIError{Code: code, Message: message})
+// 본문 requestId는 응답 헤더 X-Request-ID와 항상 같은 값입니다. (#5)
+func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	writeJSON(w, status, contract.APIError{Code: code, Message: message, RequestID: requestIDFrom(r.Context())})
 }
