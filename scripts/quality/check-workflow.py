@@ -27,6 +27,7 @@ ACTION_PINS = {
 }
 REDIS = "redis:8.2.6-alpine@sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e"
 POSTGRES = "cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3"
+POSTGRES_TEST_URL_LINE = "DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable"
 GO_VERSION = "1.26.6"
 GO_LANGUAGE_VERSION = "1.26.0"
 GO_BUILDER = "golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df"
@@ -80,9 +81,11 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         errors.append("service images are not pinned to the approved manifest digests")
     if text.count("run: make api-postgres-itest") != 1:
         errors.append("dashboard PostgreSQL integration step is missing or duplicated")
-    postgres_test_url = "DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable"
-    if text.count(postgres_test_url) != 1:
+    if text.count(POSTGRES_TEST_URL_LINE) != 2:
         errors.append("dashboard PostgreSQL integration URL drifted")
+    coverage_step = "      - run: make api-coverage\n        env:\n          " + POSTGRES_TEST_URL_LINE
+    if text.count(coverage_step) != 1:
+        errors.append("coverage step must run the actual PostgreSQL suite with the fixed CI URL")
     # Web job(통합 E2E fixture)과 API job이 같은 고정 패치를 정확히 한 번씩 씁니다.
     go_versions = re.findall(r'(?m)^\s+go-version:\s*["\']?([^"\'\s]+)', text)
     if go_versions != [GO_VERSION, GO_VERSION]:
@@ -190,7 +193,9 @@ if args.self_test:
         ("postgres local tar input removed", source, makefile_source, security_source.replace("--input /scan/postgres-image.tar", "--input /scan/missing.tar", 1)),
         ("Trivy negative fixture removed", source, makefile_source, security_source.replace("KSV-0017", "KSV-0000")),
         ("postgres test removed", source.replace("run: make api-postgres-itest", "run: true", 1), makefile_source, security_source),
-        ("postgres test env drift", source.replace("dashboard_ci?sslmode=disable", "dashboard_ci?sslmode=require", 1), makefile_source, security_source),
+        ("coverage postgres env removed", source.replace("      - run: make api-coverage\n        env:\n          " + POSTGRES_TEST_URL_LINE, "      - run: make api-coverage", 1), makefile_source, security_source),
+        ("coverage postgres env drift", source.replace(POSTGRES_TEST_URL_LINE, POSTGRES_TEST_URL_LINE.replace("sslmode=disable", "sslmode=require"), 1), makefile_source, security_source),
+        ("postgres test env drift", source.replace("      - run: make api-postgres-itest\n        env:\n          " + POSTGRES_TEST_URL_LINE, "      - run: make api-postgres-itest\n        env:\n          " + POSTGRES_TEST_URL_LINE.replace("sslmode=disable", "sslmode=require"), 1), makefile_source, security_source),
         ("mutable govulncheck", source, makefile_source.replace(GOVULN, "golang.org/x/vuln/cmd/govulncheck@latest", 1), security_source),
         ("mutable gitleaks", source, makefile_source, security_source.replace(GITLEAKS, "ghcr.io/gitleaks/gitleaks:v8.30.1", 1)),
         ("mutable Trivy", source, makefile_source, security_source.replace(TRIVY, "aquasec/trivy:0.74.0", 1)),

@@ -86,6 +86,8 @@ jobs:
       - run: go version
       - run: make api-vet
       - run: make api-coverage
+        env:
+          DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable
       - run: make api-race
       - run: make api-govuln
       - run: make api-redis-itest

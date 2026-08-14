@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	urlpkg "net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +63,61 @@ func TestRunStopsOnInvalidConfigBeforeKubernetes(t *testing.T) {
 	t.Setenv("AUTH_MOCK_ADDR", "0.0.0.0:8091")
 	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "AUTH_MOCK_ADDR") {
 		t.Fatalf("안전하지 않은 mock 주소가 Kubernetes 설정 전에 잡히지 않았습니다: %v", err)
+	}
+
+	t.Setenv("AUTH_MODE", "none")
+	t.Setenv("AUTH_MOCK_ADDR", "")
+	t.Setenv("DASHBOARD_BUILDER_ENABLED", "true")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DASHBOARD_CURSOR_KEY", "")
+	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("builder without database did not fail before Kubernetes setup: %v", err)
+	}
+}
+
+func TestPanelQueryRefsAreSortedAndUnique(t *testing.T) {
+	refs := panelQueryRefs(defaultCatalog(t))
+	if len(refs) == 0 {
+		t.Fatal("default catalog has no panel query refs")
+	}
+	for i, ref := range refs {
+		if i > 0 && refs[i-1] >= ref {
+			t.Fatalf("refs are not strictly sorted and unique: %v", refs)
+		}
+	}
+}
+
+func TestOpenDashboardStoreDisabledAndFailFast(t *testing.T) {
+	store, err := openDashboardStore(context.Background(), config.DashboardBuilderConfig{})
+	if err != nil || store != nil {
+		t.Fatalf("disabled store=%v err=%v", store, err)
+	}
+	_, err = openDashboardStore(context.Background(), config.DashboardBuilderConfig{
+		Enabled: true, DatabaseURL: "postgres://localhost/dashboard", CursorKey: "short", MaxConns: 1, ConnectTimeout: time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "dashboard metadata store") {
+		t.Fatalf("enabled invalid store error=%v", err)
+	}
+}
+
+func TestOpenDashboardStoreWithActualPostgres(t *testing.T) {
+	url := os.Getenv("DASHBOARD_POSTGRES_TEST_URL")
+	if url == "" {
+		t.Skip("DASHBOARD_POSTGRES_TEST_URL is not set")
+	}
+	parsedURL, err := urlpkg.Parse(url)
+	if err != nil || parsedURL.Path != "/dashboard_ci" {
+		t.Fatal("integration test requires dedicated dashboard_ci database")
+	}
+	store, err := openDashboardStore(context.Background(), config.DashboardBuilderConfig{
+		Enabled: true, DatabaseURL: url, CursorKey: "cmd-wiring-cursor-key-00000000000000", MaxConns: 1, ConnectTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Ready(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -144,6 +202,17 @@ func TestBuildResolverModes(t *testing.T) {
 	cfg.Auth.Mode = "what-is-this"
 	if _, err := buildResolver(ctx, discardLogger(), cfg); err == nil {
 		t.Fatal("알 수 없는 AUTH_MODE가 통과했습니다")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	cfg.Auth.Mode = "mock"
+	cfg.Auth.MockAddr = listener.Addr().String()
+	if _, err := buildResolver(ctx, discardLogger(), cfg); err == nil {
+		t.Fatal("mock resolver accepted an occupied listen address")
 	}
 }
 

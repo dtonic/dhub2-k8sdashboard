@@ -3,10 +3,17 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"fmt"
+	urlpkg "net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
@@ -14,8 +21,32 @@ func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
 	if url == "" {
 		t.Skip("DASHBOARD_POSTGRES_TEST_URL is not set")
 	}
+	parsedURL, err := urlpkg.Parse(url)
+	if err != nil || parsedURL.Path != "/dashboard_ci" {
+		t.Fatalf("integration test requires dedicated dashboard_ci database")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	schema := "dashboard_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	adminPool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminPool.Close()
+	if _, err = adminPool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, cleanupErr := adminPool.Exec(cleanupCtx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE"); cleanupErr != nil {
+			t.Errorf("cleanup integration schema: %v", cleanupErr)
+		}
+	}()
+	query := parsedURL.Query()
+	query.Set("search_path", schema)
+	parsedURL.RawQuery = query.Encode()
+	url = parsedURL.String()
 	key := []byte("issue24-integration-cursor-key-000000000")
 	var stores [2]*Postgres
 	var openErr [2]error
@@ -25,16 +56,21 @@ func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
 		go func(i int) { defer wg.Done(); stores[i], openErr[i] = Open(ctx, url, key, 4, 5*time.Second) }(i)
 	}
 	wg.Wait()
+	defer func() {
+		for _, store := range stores {
+			if store != nil {
+				store.Close()
+			}
+		}
+	}()
 	for _, err := range openErr {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	defer stores[0].Close()
-	defer stores[1].Close()
 	p := stores[0]
-	if _, err := p.pool.Exec(ctx, `DELETE FROM dashboard_drafts`); err != nil {
-		t.Fatal(err)
+	if err := p.Ready(ctx); err != nil {
+		t.Fatalf("ready: %v", err)
 	}
 	base := validDefinition()
 	d, err := p.Create(ctx, "owner-a", base)
@@ -67,13 +103,13 @@ func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
 	race := make(chan error, 2)
 	go func() { _, e := p.Submit(ctx, traced.ID, traced.Owner, traced.Revision); race <- e }()
 	go func() { race <- stores[1].Delete(ctx, traced.ID, traced.Owner, traced.Revision) }()
-	assertOneCASWinner(t, race)
+	assertOneCASWinner(t, race, ErrConflict, ErrNotFound)
 	approved, _ := p.Create(ctx, "race-approve-delete", base)
 	approved, _ = p.Submit(ctx, approved.ID, approved.Owner, approved.Revision)
 	race = make(chan error, 2)
 	go func() { _, e := p.Approve(ctx, approved.ID, approved.Revision); race <- e }()
 	go func() { race <- stores[1].Delete(ctx, approved.ID, approved.Owner, approved.Revision) }()
-	assertOneCASWinner(t, race)
+	assertOneCASWinner(t, race, ErrImmutable, ErrNotFound)
 
 	private, _ := p.Create(ctx, "private-owner", base)
 	page, err := p.List(ctx, "publisher", true, "", 50)
@@ -100,12 +136,41 @@ func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
 	if _, err = p.Get(ctx, private.ID, "intruder", false); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("owner IDOR err=%v", err)
 	}
+	if _, err = p.Submit(ctx, submitted.ID, submitted.Owner, submitted.Revision); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("repeat submit err=%v", err)
+	}
+	immutable, err := p.Create(ctx, "immutable-owner", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	immutable, err = p.Submit(ctx, immutable.ID, immutable.Owner, immutable.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	immutable, err = p.Approve(ctx, immutable.ID, immutable.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.Update(ctx, immutable.ID, immutable.Owner, immutable.Revision, base); !errors.Is(err, ErrImmutable) {
+		t.Fatalf("approved update err=%v", err)
+	}
 
 	if _, err = p.List(ctx, "owner-a", false, "tampered", 10); !errors.Is(err, ErrInvalidCursor) {
 		t.Fatalf("invalid cursor err=%v", err)
 	}
 	if page, err = p.List(ctx, "owner-a", false, "", 1); err != nil || len(page.Items) != 1 {
 		t.Fatalf("first page=%+v err=%v", page, err)
+	}
+	if _, err = p.Create(ctx, "owner-a", base); err != nil {
+		t.Fatal(err)
+	}
+	page, err = p.List(ctx, "owner-a", false, "", 1)
+	if err != nil || page.NextCursor == "" {
+		t.Fatalf("cursor page=%+v err=%v", page, err)
+	}
+	next, err := p.List(ctx, "owner-a", false, page.NextCursor, 1)
+	if err != nil || len(next.Items) != 1 || next.Items[0].ID == page.Items[0].ID {
+		t.Fatalf("next page=%+v err=%v", next, err)
 	}
 	for i := 0; i < MaxDraftsPerOwner; i++ {
 		if _, err = p.Create(ctx, "capped-owner", base); err != nil {
@@ -144,19 +209,50 @@ func TestPostgresConcurrencyMigrationAndPrivacy(t *testing.T) {
 	if _, err = p.pool.Exec(ctx, `DELETE FROM dashboard_schema_version WHERE version=2`); err != nil {
 		t.Fatal(err)
 	}
+
+	canceled, cancelNow := context.WithCancel(ctx)
+	cancelNow()
+	if err = p.migrate(canceled); err == nil {
+		t.Fatal("migration ignored canceled context")
+	}
+	if _, err = p.Create(canceled, "canceled-owner", base); err == nil {
+		t.Fatal("create ignored canceled context")
+	}
+	if _, err = p.List(canceled, "canceled-owner", false, "", 1); err == nil {
+		t.Fatal("list ignored canceled context")
+	}
+	if err = p.Delete(canceled, private.ID, private.Owner, private.Revision); err == nil {
+		t.Fatal("delete ignored canceled context")
+	}
+
+	corrupt, err := p.Create(ctx, "corrupt-owner", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.pool.Exec(ctx, `UPDATE dashboard_drafts SET definition='"invalid"'::jsonb WHERE id=$1`, corrupt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.List(ctx, "corrupt-owner", false, "", 1); err == nil {
+		t.Fatal("list accepted corrupt stored definition")
+	}
 }
 
-func assertOneCASWinner(t *testing.T, ch <-chan error) {
+func assertOneCASWinner(t *testing.T, ch <-chan error, allowed ...error) {
 	t.Helper()
 	success, loser := 0, 0
 	for range 2 {
 		e := <-ch
 		if e == nil {
 			success++
-		} else if errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrInvalidState) {
-			loser++
 		} else {
-			t.Fatal(e)
+			matched := false
+			for _, sentinel := range allowed {
+				matched = matched || errors.Is(e, sentinel)
+			}
+			if !matched {
+				t.Fatal(fmt.Errorf("unexpected CAS loser: %w", e))
+			}
+			loser++
 		}
 	}
 	if success != 1 || loser != 1 {

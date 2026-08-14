@@ -130,12 +130,11 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("쿼리 카탈로그 로드", "refs", len(queries.Refs()), "panels", len(queries.Panels()))
 
-	var dashboardStore *dashboard.Postgres
-	if cfg.DashboardBuilder.Enabled {
-		dashboardStore, err = dashboard.Open(ctx, cfg.DashboardBuilder.DatabaseURL, []byte(cfg.DashboardBuilder.CursorKey), int32(cfg.DashboardBuilder.MaxConns), cfg.DashboardBuilder.ConnectTimeout, cfg.DashboardBuilder.RequireTLS)
-		if err != nil {
-			return fmt.Errorf("dashboard metadata store: %w", err)
-		}
+	dashboardStore, err := openDashboardStore(ctx, cfg.DashboardBuilder)
+	if err != nil {
+		return err
+	}
+	if dashboardStore != nil {
 		defer dashboardStore.Close()
 		logger.Info("dashboard builder metadata store ready")
 	}
@@ -228,6 +227,17 @@ func run(logger *slog.Logger) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
 	}
+}
+
+func openDashboardStore(ctx context.Context, cfg config.DashboardBuilderConfig) (*dashboard.Postgres, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	store, err := dashboard.Open(ctx, cfg.DatabaseURL, []byte(cfg.CursorKey), int32(cfg.MaxConns), cfg.ConnectTimeout, cfg.RequireTLS)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard metadata store: %w", err)
+	}
+	return store, nil
 }
 
 func panelQueryRefs(c querycatalog.Catalog) []string {
