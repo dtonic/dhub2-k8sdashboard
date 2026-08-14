@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install install-ci dev dev-web dev-api build build-web build-web-production lint test test-web web-unit contract-test web-performance dependency-audit check design api-build api-test api-coverage api-race api-performance api-govuln api-itest api-redis-itest api-vet quality-policy security-scan observability-check deploy-check deploy-images clean
+.PHONY: install install-ci dev dev-web dev-api build build-web build-web-production lint test test-web test-web-integration web-unit contract-test web-performance dependency-audit check design api-build api-test api-coverage api-race api-performance api-govuln api-itest api-redis-itest api-vet quality-policy security-scan observability-check deploy-check deploy-images clean
 
 install:            ## 의존성 설치
 	npm install
@@ -27,7 +27,7 @@ build-web:          ## Web/디자인 시스템 빌드 (Go 툴체인 불필요 �
 	npm run build --workspaces --if-present
 
 build-web-production: ## Production Web bundle without MSW runtime
-	VITE_USE_MOCK=false npm run build --workspace @k8s-dashboard/web
+	npm run build --workspace @k8s-dashboard/web
 
 check:              ## 타입체크 + 디자인 시스템 preview 검증
 	npm run check --workspaces --if-present
@@ -38,6 +38,11 @@ test: test-web api-test  ## 전체 테스트
 
 test-web:           ## Web E2E (Playwright · mock API 위에서 실행)
 	npm run test --workspace @k8s-dashboard/web
+
+test-web-integration: ## 통합 E2E (#22 · 프로덕션 번들 + 실제 Go BFF fixture · 클러스터/Docker 불필요)
+	cd apps/api && go test -tags e2efixture -count=1 ./internal/e2efixture/
+	npm run build --workspace @k8s-dashboard/web
+	npm run test:integration --workspace @k8s-dashboard/web
 
 web-unit:           ## Vitest + Testing Library unit/component tests
 	npm run test:unit --workspace @k8s-dashboard/web

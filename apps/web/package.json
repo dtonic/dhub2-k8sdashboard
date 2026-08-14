@@ -13,6 +13,7 @@
     "precheck": "npm run generate:dashboards",
     "check": "tsc --noEmit",
     "test": "playwright test",
+    "test:integration": "playwright test --config playwright.integration.config.ts",
     "test:unit": "vitest run",
     "test:ui": "playwright test --ui"
   },

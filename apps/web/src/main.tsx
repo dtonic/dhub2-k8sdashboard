@@ -26,7 +26,10 @@ const queryClient = new QueryClient({
 });
 
 async function bootstrap() {
-  if (import.meta.env.VITE_USE_MOCK !== "false") {
+  // WSL→Windows npm 경계에서 인라인 환경 변수가 유실되어도 프로덕션은 mock 없이 빌드됩니다.
+  // 프로덕션 mock은 명시적 true에서만 켜고, 개발 서버는 기존 기본값을 유지합니다.
+  const useMock = import.meta.env.VITE_USE_MOCK === "true" || (import.meta.env.DEV && import.meta.env.VITE_USE_MOCK !== "false");
+  if (useMock) {
     const { startMockApi } = await import("./mocks/browser");
     await startMockApi();
   }

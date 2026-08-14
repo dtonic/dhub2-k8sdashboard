@@ -4,8 +4,8 @@ import { handlers } from "./handlers";
 export const worker = setupWorker(...handlers);
 
 /**
- * Mock API를 켭니다. 실제 API가 붙으면 `VITE_USE_MOCK=false`로 끄고
- * 같은 계약(@k8s-dashboard/contracts)을 그대로 사용합니다.
+ * 개발 서버와 명시적 `--mode e2e` 번들의 Mock API를 시작합니다.
+ * Production은 기본 mock-off이고 명시적인 `VITE_USE_MOCK=true`에서만 호출합니다.
  */
 export async function startMockApi() {
   await worker.start({

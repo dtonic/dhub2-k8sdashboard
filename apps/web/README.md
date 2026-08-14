@@ -3,9 +3,12 @@
 React + TypeScript 기반 Custom Observability UI입니다.
 **MVP UI 화면이 모두 구현되어 있습니다** — Cluster Overview(#14),
 Namespace / Workload / Pod Drill-down(#15), Logs Explorer와 상관분석(#16),
-Pod Topology, Alerts(#17). 남은 것은 실제 API 연결입니다.
+Pod Topology, Alerts(#17).
 
-API가 아직 없으므로 **MSW mock 위에서 단독 실행**됩니다. (이슈 #13 완료 기준)
+개발 서버는 기본적으로 **MSW mock을 사용**합니다. 기존 53개 회귀 E2E는 명시적인
+`--mode e2e` 번들을 사용하고, `make test-web-integration`은 기본 production
+mock-off 번들과 실제 Go BFF fixture를 함께 검증합니다. 이 fixture 검증은 production
+인증 전달과 실데이터 연결이 완료되었다는 의미는 아닙니다.
 
 ---
 
@@ -20,7 +23,9 @@ make dev            # http://localhost:5173
 npm run dev --workspace @k8s-dashboard/web
 ```
 
-실제 API가 준비되면 `VITE_USE_MOCK=false`로 끕니다. 계약(`@k8s-dashboard/contracts`)은 그대로 씁니다.
+개발 중 mock은 `VITE_USE_MOCK=false`로 명시해 끌 수 있습니다. Production은 기본
+mock-off이며 명시적인 `VITE_USE_MOCK=true`에서만 mock을 켭니다. 두 경로 모두
+같은 계약(`@k8s-dashboard/contracts`)을 사용합니다.
 
 ## 상태 시나리오
 
@@ -177,7 +182,7 @@ src/
 - `make web-unit`: Vitest + Testing Library/jsdom 대표 unit/component 테스트
 - `make contract-test`: 공통 OpenAPI/JSON Schema/TypeScript parity와 dashboard schema 테스트
 - `make test-web`: 기존 전체 Playwright E2E. 초기 대시보드 요청은 `/scope` + `/overview` 2건 이하이며 취소 전파도 검증
-- `make build-web-production && make web-performance`: `VITE_USE_MOCK=false` production asset의
+- `make build-web-production && make web-performance`: 기본 mock-off production asset의
   raw/gzip 결정적 합계 예산(실측 baseline의 약 15% headroom). wall-clock은 gate로 쓰지 않음
 - `make dependency-audit`: Vite 7.3.6의 high advisory를 제거하고, 브라우저에서 사용하지 않는
   React Router 기능의 moderate advisory 3건만 package/version/range/fix 기준으로 기한부 허용

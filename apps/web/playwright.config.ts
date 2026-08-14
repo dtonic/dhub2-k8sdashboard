@@ -6,8 +6,8 @@ import { defineConfig, devices } from "@playwright/test";
  * 빌드된 산출물을 `vite preview`로 띄워 테스트합니다. dev 서버가 아니라 빌드 결과를
  * 검증해야 프로덕션 번들에서만 나는 문제(사이드이펙트 트리셰이킹, MSW 워커 경로 등)를 잡습니다.
  *
- * mock API 위에서 돌기 때문에 클러스터 없이 CI에서 실행됩니다.
- * 실제 API가 붙으면 `VITE_USE_MOCK=false`로 별도 스위트를 추가합니다.
+ * 기존 53개 회귀 테스트는 `--mode e2e`로 MSW를 명시적으로 켭니다.
+ * 실제 Go BFF fixture 검증은 `make test-web-integration`의 별도 스위트가 담당합니다.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -34,7 +34,7 @@ export default defineConfig({
     : {
         /* readiness가 127.0.0.1을 폴링하므로 바인딩도 127.0.0.1로 고정합니다.
          * 기본 host(localhost)는 환경에 따라 ::1(IPv6)에만 바인딩되어 180초 타임아웃이 났습니다. */
-        command: "npm run build && npx vite preview --host 127.0.0.1 --port 4173 --strictPort",
+        command: "npm run build -- --mode e2e && npx vite preview --host 127.0.0.1 --port 4173 --strictPort",
         url: "http://127.0.0.1:4173",
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,

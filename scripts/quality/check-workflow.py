@@ -59,9 +59,23 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
     service_images = re.findall(r"(?m)^\s{8}image:\s*(\S+)", text)
     if service_images != [REDIS]:
         errors.append("Redis service image is not pinned to the approved manifest digest")
+    # Web job(통합 E2E fixture)과 API job이 같은 고정 패치를 정확히 한 번씩 씁니다.
     go_versions = re.findall(r'(?m)^\s+go-version:\s*["\']?([^"\'\s]+)', text)
-    if go_versions != [GO_VERSION]:
+    if go_versions != [GO_VERSION, GO_VERSION]:
         errors.append("setup-go version is not fixed to the approved patch")
+    if text.count("run: make test-web-integration") != 1:
+        errors.append("integration E2E workflow step is missing or duplicated")
+    integration_target = re.search(r"(?ms)^test-web-integration:.*?(?=^\S|\Z)", makefile)
+    integration_text = integration_target.group(0) if integration_target else ""
+    for required in (
+        "cd apps/api && go test -tags e2efixture -count=1 ./internal/e2efixture/",
+        "npm run build --workspace @k8s-dashboard/web",
+        "npm run test:integration --workspace @k8s-dashboard/web",
+    ):
+        if required not in integration_text:
+            errors.append("integration E2E target drifted")
+    if "VITE_USE_MOCK=" in integration_text or "--mode e2e" in integration_text:
+        errors.append("integration E2E must build the default production bundle")
     go_work_text = GO_WORK.read_text(encoding="utf-8") if go_work_source is None else go_work_source
     go_mod_text = API_GO_MOD.read_text(encoding="utf-8") if go_mod_source is None else go_mod_source
     api_docker_text = API_DOCKERFILE.read_text(encoding="utf-8") if api_docker_source is None else api_docker_source
@@ -127,6 +141,9 @@ if args.self_test:
         ("unnamed extra job", source + "\n  unnamed-extra:\n    runs-on: ubuntu-latest\n    steps: []\n", makefile_source, security_source),
         ("duplicate web override", source + "\n  web:\n    runs-on: ubuntu-latest\n    steps: []\n", makefile_source, security_source),
         ("Go version drift", source.replace(f'go-version: "{GO_VERSION}"', 'go-version: "1.26.7"', 1), makefile_source, security_source),
+        ("integration step removed", source.replace("run: make test-web-integration", "run: true", 1), makefile_source, security_source),
+        ("integration mock env mutation", source, makefile_source.replace("\tnpm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", "\tVITE_USE_MOCK=true npm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", 1), security_source),
+        ("integration mock mode mutation", source, makefile_source.replace("\tnpm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", "\tnpm run build --workspace @k8s-dashboard/web -- --mode e2e\n\tnpm run test:integration", 1), security_source),
         ("Node version drift", source.replace(f"node-version: {NODE_VERSION}", "node-version: 22.23.1", 1), makefile_source, security_source),
     ]
     for label, mutated_workflow, mutated_makefile, mutated_security in mutations:

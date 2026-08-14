@@ -39,6 +39,12 @@ jobs:
         working-directory: apps/web
       - name: E2E (mock API 위에서 실행 — 클러스터 불필요)
         run: make test-web
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: "1.26.6"
+          cache-dependency-path: apps/api/go.sum
+      - name: 통합 E2E (#22 — 프로덕션 번들 + Go BFF fixture · 클러스터 불필요)
+        run: make test-web-integration
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: failure()
         with:

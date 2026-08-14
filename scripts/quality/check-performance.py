@@ -39,6 +39,15 @@ def validate_bundle_sizes(raw, zipped, limits):
         errors.append(f"web gzip bundle {zipped} > {limits['maxGzipBytes']}")
     return errors
 
+def validate_mock_absence(asset_bytes, worker_exists):
+    errors = []
+    if worker_exists:
+        errors.append("production bundle contains mockServiceWorker.js")
+    markers = (b"mockServiceWorker", b"Mocking enabled", b"setupWorker")
+    if any(marker in body for body in asset_bytes for marker in markers):
+        errors.append("production assets contain MSW runtime")
+    return errors
+
 def validate_bundle(root, limits):
     files = [path for path in (root / "apps" / "web" / "dist" / "assets").rglob("*") if path.is_file() and not path.name.endswith(".map")]
     if not files:
@@ -46,7 +55,12 @@ def validate_bundle(root, limits):
     raw = sum(path.stat().st_size for path in files)
     zipped = sum(len(gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)) for path in files)
     print(f"web bundle: raw={raw} bytes, gzip={zipped} bytes, files={len(files)}")
-    return validate_bundle_sizes(raw, zipped, limits)
+    errors = validate_bundle_sizes(raw, zipped, limits)
+    errors.extend(validate_mock_absence(
+        [path.read_bytes() for path in files],
+        (root / "apps" / "web" / "dist" / "mockServiceWorker.js").exists(),
+    ))
+    return errors
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--self-test", action="store_true")
@@ -74,10 +88,16 @@ if args.self_test:
         raise SystemExit("raw bundle overbudget mutation was masked")
     if len(gzip_failure) != 1 or "gzip" not in gzip_failure[0]:
         raise SystemExit("gzip bundle overbudget mutation was masked")
+    if len(validate_mock_absence([b"setupWorker runtime"], False)) != 1:
+        raise SystemExit("MSW runtime mutation was masked")
+    if len(validate_mock_absence([], True)) != 1:
+        raise SystemExit("MSW worker mutation was masked")
     print("negative mutation passed: allocation overbudget was rejected")
     print("negative mutation passed: byte overbudget was rejected")
     print("negative mutation passed: raw bundle overbudget was rejected")
     print("negative mutation passed: gzip bundle overbudget was rejected")
+    print("negative mutation passed: MSW runtime was rejected")
+    print("negative mutation passed: MSW worker was rejected")
     raise SystemExit(0)
 
 errors = []

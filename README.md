@@ -584,6 +584,8 @@ GreptimeDB/Quickwit/Alertmanager 없이 뜹니다. CI는 로컬과 **같은 명�
 
 필수 CI context와 Main 보호 적용/검증/rollback 절차는
 [`docs/quality-gates.md`](./docs/quality-gates.md)에 고정합니다.
+릴리스 판정은 [`docs/release-checklist.md`](./docs/release-checklist.md), 장애 조사·복구는
+[`docs/runbooks/dashboard-incident.md`](./docs/runbooks/dashboard-incident.md)를 따릅니다.
 
 ---
 
