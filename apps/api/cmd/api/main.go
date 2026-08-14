@@ -26,6 +26,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/greptime"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/quickwit"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 )
 
@@ -81,7 +82,15 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("informer 캐시 동기화 완료")
 
-	metrics, logs, alerts, topo := sources(logger, cfg, store)
+	// 쿼리 카탈로그 — 오류는 여기서(시작 단계) 멈춥니다. 잘못된 카탈로그로
+	// 뜬 서버는 빈 화면을 정상처럼 보여주게 됩니다. (#9)
+	queries, err := querycatalog.LoadPath(cfg.QueryCatalogDir)
+	if err != nil {
+		return err
+	}
+	logger.Info("쿼리 카탈로그 로드", "refs", len(queries.Refs()), "panels", len(queries.Panels()))
+
+	metrics, logs, alerts, topo := sources(logger, cfg, store, queries)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
@@ -132,7 +141,7 @@ func run(logger *slog.Logger) error {
 // 적으면 USE_DEMO_DATA와 무관하게 실제 어댑터를 씁니다 — 주소를 적은 것이
 // 의도이기 때문입니다. 알림·토폴로지는 아직 실클라이언트가 없습니다(#17 잔여) —
 // 데모가 아니면 연결 실패로 취급해 화면이 degraded를 그리게 합니다.
-func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store) (
+func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, queries querycatalog.Catalog) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
 	var d *demo.Source
@@ -150,7 +159,7 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store) 
 			Password:      cfg.Greptime.Password,
 			Timeout:       cfg.Greptime.Timeout,
 			MaxDataPoints: cfg.Greptime.MaxDataPoints,
-		}, store)
+		}, store, queries)
 		if err != nil {
 			logger.Error("GreptimeDB 설정이 잘못되었습니다 · 메트릭 섹션은 degraded로 내려갑니다", "err", err)
 			metrics = datasource.Unavailable{Reason: "GreptimeDB 설정 오류"}
@@ -167,7 +176,7 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store) 
 	var logs datasource.Logs
 	switch {
 	case cfg.Quickwit.URL != "":
-		q, err := quickwit.New(quickwit.Config{
+		qcfg := quickwit.Config{
 			BaseURL:     cfg.Quickwit.URL,
 			Index:       cfg.Quickwit.Index,
 			Username:    cfg.Quickwit.Username,
@@ -176,7 +185,21 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store) 
 			MaxPageSize: cfg.Quickwit.MaxPageSize,
 			MaxLines:    cfg.Quickwit.MaxLines,
 			Fields:      quickwitFields(cfg.Quickwit.Fields),
-		}, store)
+		}
+		// 로그 조회 한계는 Git의 쿼리 카탈로그가 선언한 값이 환경변수보다 우선입니다.
+		// 한계의 진실은 배포 설정이 아니라 카탈로그 한 곳이어야 합니다. (#9)
+		if l := queries.Logs().Search; l != (querycatalog.Limits{}) {
+			if l.Timeout > 0 {
+				qcfg.Timeout = l.Timeout
+			}
+			if l.MaxPageSize > 0 {
+				qcfg.MaxPageSize = l.MaxPageSize
+			}
+			if l.MaxLines > 0 {
+				qcfg.MaxLines = l.MaxLines
+			}
+		}
+		q, err := quickwit.New(qcfg, store)
 		if err != nil {
 			logger.Error("Quickwit 설정이 잘못되었습니다 · 로그 섹션은 degraded로 내려갑니다", "err", err)
 			logs = datasource.Unavailable{Reason: "Quickwit 설정 오류"}

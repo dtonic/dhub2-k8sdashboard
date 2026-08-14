@@ -41,6 +41,10 @@ type Config struct {
 	// 실제 어댑터를 씁니다 — 주소를 적은 것이 의도이기 때문입니다.
 	UseDemoData bool
 
+	// QueryCatalogDir이 비어 있으면 바이너리에 임베드된 기본 카탈로그를 씁니다.
+	// 지정하면 그 디렉터리의 *.yaml이 기본 카탈로그를 **대체**합니다. (#9)
+	QueryCatalogDir string
+
 	// Greptime은 메트릭 데이터소스(GreptimeDB) 설정입니다. URL이 비어 있으면 미사용입니다.
 	Greptime GreptimeConfig
 	// Quickwit은 로그 데이터소스 설정입니다. URL이 비어 있으면 미사용입니다.
@@ -93,6 +97,7 @@ func Load() Config {
 		AllNS:              all,
 		CacheTTL:           envDuration("CACHE_TTL", 5*time.Second),
 		UseDemoData:        envBool("USE_DEMO_DATA", true),
+		QueryCatalogDir:    env("QUERY_CATALOG_DIR", ""),
 		Greptime: GreptimeConfig{
 			URL:           env("GREPTIME_URL", ""),
 			DB:            env("GREPTIME_DB", "public"),

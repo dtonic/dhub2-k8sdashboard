@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 )
 
 /* ── 픽스처 ─────────────────────────────────────────────────────────────── */
@@ -108,7 +109,11 @@ func newSource(t *testing.T, f *fakeGreptime, mutate ...func(*Config)) *Source {
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	s, err := New(cfg, catalog)
+	qc, err := querycatalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, catalog, qc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,6 +320,26 @@ func TestTransientFailureRecoversAfterRetry(t *testing.T) {
 	}, window(time.Minute, time.Hour), []string{"restarts"})
 	if err != nil {
 		t.Fatalf("재시도로 회복해야 합니다: %v", err)
+	}
+}
+
+// TestUnregisteredPanelIsNotExecuted — 카탈로그에 없는 패널 id는 실행 경로가
+// 없습니다. 질의가 한 건도 나가지 않아야 합니다. (#9 완료 기준)
+func TestUnregisteredPanelIsNotExecuted(t *testing.T) {
+	f := newFakeGreptime(nil)
+	s := newSource(t, f)
+
+	panels, err := s.Trends(context.Background(), datasource.Target{
+		ClusterID: "seoul", Namespace: "payments",
+	}, window(time.Minute, time.Hour), []string{"__evil", "restarts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(panels) != 1 || panels[0].ID != "restarts" {
+		t.Fatalf("등록된 패널만 남아야 합니다: %+v", panels)
+	}
+	if got := f.hits.Load(); got != 1 { // restarts 시리즈 1건뿐
+		t.Fatalf("미등록 패널의 질의가 나갔습니다: %d회", got)
 	}
 }
 

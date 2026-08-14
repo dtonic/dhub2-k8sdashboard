@@ -1,9 +1,9 @@
 // Package greptime은 GreptimeDB 메트릭 어댑터입니다. (#6)
 //
 // GreptimeDB의 Prometheus 호환 HTTP API(/v1/prometheus/api/v1/*)로 조회합니다.
-// 프런트엔드는 PromQL을 알지 못합니다 — 질의는 전부 이 패키지의 **서버 측
-// 쿼리 카탈로그**(queries.go)에서 나오고, Scope(namespace·pod)는 서버가
-// 라벨 매처로 강제 삽입합니다. (README §10)
+// 프런트엔드는 PromQL을 알지 못합니다 — 실행 가능한 질의는 **등록형 쿼리
+// 카탈로그**(internal/querycatalog, #9)에 있는 것뿐이고, Scope(namespace·pod)는
+// 렌더링 시점에 서버가 라벨 매처로 강제 삽입합니다. (README §10)
 //
 // Pod 신원은 informer 캐시(PodCatalog)에서 빌려옵니다. 메트릭 저장소의 라벨은
 // pod **이름**이지만 화면의 신원은 **UID**이므로, UID → 이름 변환은 항상
@@ -24,6 +24,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/upstream"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 )
 
 // Config는 어댑터 구성입니다. 기본값은 데이터소스에 가장 안전한 쪽입니다.
@@ -34,11 +35,11 @@ type Config struct {
 	DB       string
 	Username string
 	Password string
-	// Timeout은 질의 1건의 상한입니다. 0이면 10초입니다.
+	// Timeout은 질의 1건의 상한입니다. 카탈로그의 쿼리별 timeout과 함께 적용되며
+	// 짧은 쪽이 이깁니다. 0이면 10초입니다.
 	Timeout time.Duration
-	// MaxDataPoints는 시리즈당 최대 포인트 수입니다. 범위가 넓어 Step으로
-	// 이 수를 넘으면 **Step을 서버가 넓힙니다.** 브라우저에 대량 포인트를
-	// 그대로 보내지 않기 위한 마지막 방어선입니다. (README §11)
+	// MaxDataPoints는 전역 포인트 상한입니다. 카탈로그의 쿼리별 maxDataPoints보다
+	// 작으면 이 값이 이깁니다. 운영자가 카탈로그 수정 없이 전체를 조일 때 씁니다.
 	MaxDataPoints int
 	// MaxConcurrent는 화면 1회 그리기에서 GreptimeDB로 나가는 동시 질의 상한입니다.
 	MaxConcurrent int
@@ -51,9 +52,6 @@ func (c Config) withDefaults() Config {
 	if c.Timeout <= 0 {
 		c.Timeout = 10 * time.Second
 	}
-	if c.MaxDataPoints <= 0 {
-		c.MaxDataPoints = 1000
-	}
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = 4
 	}
@@ -65,10 +63,12 @@ type Source struct {
 	cfg     Config
 	client  *upstream.Client
 	catalog datasource.PodCatalog
+	queries querycatalog.Catalog
 }
 
-// New는 어댑터를 만듭니다. catalog는 Pod UID → 이름 변환에 필요합니다.
-func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
+// New는 어댑터를 만듭니다. catalog는 Pod UID → 이름 변환에,
+// queries는 실행 가능한 질의의 유일한 원천으로 쓰입니다.
+func New(cfg Config, catalog datasource.PodCatalog, queries querycatalog.Catalog) (*Source, error) {
 	cfg = cfg.withDefaults()
 	client, err := upstream.New(upstream.Config{
 		BaseURL:  cfg.BaseURL,
@@ -81,46 +81,57 @@ func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Source{cfg: cfg, client: client, catalog: catalog}, nil
+	return &Source{cfg: cfg, client: client, catalog: catalog, queries: queries}, nil
 }
 
 /* ── Trends ─────────────────────────────────────────────────────────────── */
 
 // Trends는 화면에 그릴 패널 묶음을 돌려줍니다.
 //
+// 패널 id가 카탈로그에 없으면 **실행되지 않고 조용히 빠집니다** — 등록되지 않은
+// queryRef의 실행 경로는 없습니다. (#9 완료 기준)
 // 시리즈마다 range query 1건이 나가지만, 동시성은 MaxConcurrent로 묶습니다.
-// 화면 하나가 데이터소스를 두들기는 총량이 예측 가능해야 합니다. (ADR 0002)
 func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.Window, panels []string) ([]contract.TrendPanel, error) {
 	if len(panels) == 0 {
-		panels = defaultPanelOrder
+		for _, p := range s.queries.Panels() {
+			panels = append(panels, p.ID)
+		}
 	}
 
-	sel, found := s.scopeSelector(t)
-	step := s.effectiveStep(w)
+	sc, found := s.scope(t)
+	span := w.To.Sub(w.From)
 
 	out := make([]contract.TrendPanel, 0, len(panels))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(s.cfg.MaxConcurrent)
 
 	for _, id := range panels {
-		def, ok := panelDefs[id]
+		def, ok := s.queries.Panel(id)
 		if !ok {
 			continue
 		}
 		p := contract.TrendPanel{
-			ID:          id,
-			Title:       def.title,
-			StepSeconds: int(step.Seconds()),
-			Series:      make([]contract.TrendSeries, len(def.series)),
+			ID:     def.ID,
+			Title:  def.Title,
+			Series: make([]contract.TrendSeries, len(def.Series)),
 		}
 		out = append(out, p)
 		idx := len(out) - 1
 
-		for si, sd := range def.series {
+		for si, sd := range def.Series {
+			q, ok := s.queries.Query(sd.QueryRef)
+			if !ok {
+				// 로드 검증이 이미 거르지만, 여기서도 실행하지 않습니다.
+				continue
+			}
+			step := s.effectiveStep(q, w.Step, span)
+			if sec := int(step.Seconds()); sec > out[idx].StepSeconds {
+				out[idx].StepSeconds = sec
+			}
 			out[idx].Series[si] = contract.TrendSeries{
-				Key:    sd.key,
-				Label:  sd.label,
-				Unit:   sd.unit,
+				Key:    sd.Key,
+				Label:  sd.Label,
+				Unit:   q.Unit,
 				Points: []contract.TrendPoint{},
 			}
 			// 대상 Pod가 카탈로그에 없으면(재시작 직후 등) 질의 없이 빈 시리즈를 둡니다.
@@ -128,9 +139,18 @@ func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.W
 			if !found {
 				continue
 			}
-			si, sd := si, sd
+			if q.Limits.MaxRange > 0 && span > q.Limits.MaxRange {
+				return nil, fmt.Errorf("query %s: 최대 조회 기간을 넘습니다", q.Ref)
+			}
+			expr, err := q.Render(sc, step, nil)
+			if err != nil {
+				return nil, err
+			}
+			si, q, step := si, q, step
 			g.Go(func() error {
-				pts, err := s.rangeQuery(gctx, sd.expr(sel, step), w.From, w.To, step)
+				qctx, cancel := context.WithTimeout(gctx, q.Limits.Timeout)
+				defer cancel()
+				pts, err := s.rangeQuery(qctx, expr, w.From, w.To, step)
 				if err != nil {
 					return err
 				}
@@ -145,52 +165,51 @@ func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.W
 	return out, nil
 }
 
-// effectiveStep은 서버가 강제한 Step을 MaxDataPoints에 맞춰 넓힙니다.
-// Step은 좁히지 않습니다 — 좁히면 포인트 수 계약이 깨집니다.
-func (s *Source) effectiveStep(w datasource.Window) time.Duration {
-	step := w.Step
-	if step <= 0 {
-		step = time.Minute
+// effectiveStep은 카탈로그가 선언한 한계에 전역 상한(cfg.MaxDataPoints)을 겹칩니다.
+func (s *Source) effectiveStep(q querycatalog.Query, step, span time.Duration) time.Duration {
+	eff := q.EffectiveStep(step, span)
+	if s.cfg.MaxDataPoints > 0 && span > 0 && int(span/eff) > s.cfg.MaxDataPoints {
+		widened := span / time.Duration(s.cfg.MaxDataPoints)
+		if rem := widened % eff; rem != 0 {
+			widened += eff - rem
+		}
+		eff = widened
 	}
-	span := w.To.Sub(w.From)
-	if span <= 0 {
-		return step
-	}
-	if int(span/step) <= s.cfg.MaxDataPoints {
-		return step
-	}
-	// 올림한 뒤 원래 Step의 배수로 맞춥니다. 차트 눈금이 어긋나지 않습니다.
-	widened := time.Duration(math.Ceil(float64(span) / float64(s.cfg.MaxDataPoints)))
-	if rem := widened % step; rem != 0 {
-		widened += step - rem
-	}
-	return widened
+	return eff
 }
 
 /* ── Usage ──────────────────────────────────────────────────────────────── */
 
-// usageRateWindow는 현재 사용량 계산의 rate 구간입니다.
-const usageRateWindow = 2 * time.Minute
-
 // Usage는 Pod UID → 현재 사용량 스냅숏입니다.
 //
-// 메트릭 라벨(namespace, pod 이름)을 카탈로그의 UID로 되돌립니다.
-// 카탈로그에 없는 Pod(이미 사라진 Pod의 잔여 시계열)는 버립니다 —
-// UID 없이 이름만으로 신원을 만들지 않습니다. (README §5)
+// 질의는 카탈로그의 metrics.usage.* 정의를 씁니다(clusterWide 명시).
+// 메트릭 라벨(namespace, pod 이름)을 카탈로그의 UID로 되돌리고,
+// 카탈로그에 없는 Pod(이미 사라진 Pod의 잔여 시계열)는 버립니다. (README §5)
 func (s *Source) Usage(ctx context.Context, clusterID string) (map[string]contract.ContainerUsage, error) {
 	uidOf := map[string]string{}
 	for _, p := range s.catalog.CatalogPods("", 0) {
 		uidOf[p.Namespace+"/"+p.Name] = p.UID
 	}
 
-	cpu, err := s.instantQuery(ctx, fmt.Sprintf(
-		`1000 * sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[%s]))`,
-		promDuration(usageRateWindow)))
+	run := func(ref string) (map[string]float64, error) {
+		q, ok := s.queries.Query(ref)
+		if !ok {
+			return nil, fmt.Errorf("카탈로그에 %s 정의가 없습니다", ref)
+		}
+		expr, err := q.Render(querycatalog.Scope{}, time.Minute, nil)
+		if err != nil {
+			return nil, err
+		}
+		qctx, cancel := context.WithTimeout(ctx, q.Limits.Timeout)
+		defer cancel()
+		return s.instantQuery(qctx, expr)
+	}
+
+	cpu, err := run("metrics.usage.cpu_milli")
 	if err != nil {
 		return nil, err
 	}
-	mem, err := s.instantQuery(ctx,
-		`sum by (namespace, pod) (container_memory_working_set_bytes{container!=""}) / 1048576`)
+	mem, err := run("metrics.usage.memory_mib")
 	if err != nil {
 		return nil, err
 	}
@@ -335,13 +354,4 @@ func parseSample(v any) (float64, bool) {
 		return s, true
 	}
 	return 0, false
-}
-
-// promDuration은 PromQL 구간 표기를 만듭니다. 초 단위면 충분합니다.
-func promDuration(d time.Duration) string {
-	sec := int(d.Seconds())
-	if sec < 1 {
-		sec = 1
-	}
-	return strconv.Itoa(sec) + "s"
 }
