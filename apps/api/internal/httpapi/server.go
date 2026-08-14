@@ -101,12 +101,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	started := s.deps.Now()
 	sc, err := s.deps.Resolver.Resolve(r)
 	if err != nil {
+		// 인증 실패(401)와 권한 부족(403)은 다른 상태입니다. 여기는 401만 나갑니다 —
+		// 유효한 토큰의 권한 부족은 빈 Scope로 통과해 아래에서 403이 됩니다. (#10)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-dashboard"`)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "인증이 필요합니다.")
+		s.audit(r, scope.Scope{}, http.StatusUnauthorized, started)
 		return
 	}
-	s.mux.ServeHTTP(w, r.WithContext(scope.With(r.Context(), sc)))
+
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.mux.ServeHTTP(rec, r.WithContext(scope.With(r.Context(), sc)))
+	s.audit(r, sc, rec.status, started)
+}
+
+// statusRecorder는 감사 로그에 결과 상태를 남기기 위해 상태 코드를 붙잡습니다.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 /* ── 공통 처리 ──────────────────────────────────────────────────────────── */
