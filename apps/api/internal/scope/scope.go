@@ -13,6 +13,10 @@ import (
 
 // Scope는 한 요청에 적용되는 접근 범위입니다.
 type Scope struct {
+	// Subject는 감사 로그에 남길 사용자 표기입니다. 인증이 없는 정적 Scope에서는
+	// 비어 있습니다. 캐시 키에는 넣지 않습니다 — 같은 Scope의 사용자끼리는
+	// 응답을 공유하는 것이 singleflight의 목적입니다.
+	Subject string
 	// Clusters는 접근 가능한 클러스터입니다.
 	Clusters []Cluster
 }
