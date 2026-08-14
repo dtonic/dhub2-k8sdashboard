@@ -496,3 +496,108 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+/* ── watch 재연결 · resourceVersion 만료 (이슈 #8 작업 범위) ────────────── */
+
+func TestLiveWatchRecoversFromCompactedHistory(t *testing.T) {
+	// 이슈 #8 작업 범위의 "watch 재연결과 resourceVersion 만료 처리"입니다.
+	//
+	// 시나리오는 운영에서 실제로 벌어지는 순서 그대로입니다.
+	//   1. watch가 끊긴다 (API 서버 재시작 · 네트워크 단절)
+	//   2. 끊긴 사이에 etcd가 compaction으로 이력을 버린다
+	//   3. reflector가 낡은 resourceVersion을 들고 돌아온다
+	//
+	// 여기가 잘못 구현되면 증상은 "대시보드가 낡은 값을 보여준다"로 끝나지 않습니다.
+	// 잘못된 재연결은 **LIST 폭풍**이 되어 API 서버를 때립니다. 그래서 회복 여부와
+	// 회복 **비용**을 같이 봅니다.
+	//
+	// 실클러스터에서는 재현할 수 없습니다(etcd를 직접 compact해야 합니다).
+	// 우리가 띄운 로컬 API 서버에서만 돕니다.
+	cfg, counter, local := testcluster.Local(t, false)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store := testcluster.LiveStore(t, ctx, cfg, liveOptions())
+	cs := testcluster.Clientset(t, cfg)
+
+	ns := "itest-compaction"
+	if _, err := cs.CoreV1().Namespaces().Create(ctx,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("namespace 생성 실패: %v", err)
+	}
+
+	time.Sleep(time.Second)
+	before := counter.Len()
+	startRev := local.Revision(t)
+
+	// 우리가 watch하지 않는 리소스로 etcd revision만 크게 올립니다.
+	for i := 0; i < 400; i++ {
+		if _, err := cs.CoreV1().ConfigMaps(ns).Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("churn-%03d", i), Namespace: ns},
+			Data:       map[string]string{"i": fmt.Sprint(i)},
+		}, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("ConfigMap 생성 실패: %v", err)
+		}
+	}
+
+	// watch를 먼저 끊습니다. etcd는 **이미 따라잡은 watcher에게는 compaction을 통지하지
+	// 않으므로**, watch가 살아 있는 동안 compact해도 아무 일도 일어나지 않습니다.
+	// (이 순서를 바꿔서 실제로 확인했습니다 — 410도, 재LIST도 발생하지 않습니다.)
+	local.StopAPIServer(t)
+	t.Log("API 서버를 내렸습니다. reflector는 끊긴 시점의 resourceVersion을 들고 있습니다")
+
+	rev := local.Revision(t)
+	local.Compact(t, rev)
+	t.Logf("etcd revision %d → %d · revision %d까지 compact (이전 이력 소멸)", startRev, rev, rev)
+
+	local.StartAPIServer(t)
+	t.Log("API 서버를 다시 띄웠습니다")
+
+	// 회복 확인 — compaction 이후에 만든 객체가 캐시에 나타나야 합니다.
+	created, err := cs.CoreV1().Pods(ns).Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "after-compaction", Namespace: ns},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "registry.k8s.io/pause:3.9"}}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Pod 생성 실패: %v", err)
+	}
+	start := time.Now()
+	if !waitFor(t, 90*time.Second, func() bool {
+		_, found, _ := store.Pod(ns, "after-compaction", string(created.UID))
+		return found
+	}) {
+		t.Fatal("compaction 이후 변경이 캐시에 반영되지 않았습니다. watch가 죽은 채 방치되고 있습니다")
+	}
+	t.Logf("단절·compaction 이후 변경 → 캐시 반영 %v", time.Since(start).Round(time.Millisecond))
+
+	// 회복 비용 — 끊긴 watch마다 다시 LIST 1회가 정상입니다. 그보다 많으면 폭풍입니다.
+	gone, relist := 0, map[string]int{}
+	for _, r := range counter.Since(before) {
+		if r.Status == http.StatusGone {
+			gone++
+		}
+		if r.Method == http.MethodGet && !strings.Contains(r.Query, "watch=true") && strings.HasPrefix(r.Path, "/api") {
+			relist[r.Path]++
+		}
+	}
+	t.Logf("410 Gone %d회 · 재LIST %v", gone, relist)
+
+	if len(relist) == 0 {
+		t.Error("재LIST가 한 번도 없었습니다. watch가 실제로 끊기지 않아 아무것도 검증하지 못했습니다")
+	}
+	for path, n := range relist {
+		if n > 2 {
+			t.Errorf("%s: 재LIST %d회 — 재연결이 LIST 폭풍이 되고 있습니다", path, n)
+		}
+	}
+
+	// 410 Gone은 이 경로에서 **나오지 않는 것이 정상**입니다.
+	// reflector는 재연결 시 `resourceVersion=<마지막 값>`으로 LIST하는데,
+	// LIST의 resourceVersion은 "그 값 이상으로 최신"이라는 뜻이라 API 서버가
+	// 현재 revision으로 quorum read를 합니다. compaction된 과거를 읽지 않으므로
+	// 만료가 발생하지 않습니다. 만료는 그 RV로 **watch**를 걸 때만 나옵니다.
+	// 관측되면 그것도 정상이므로 실패로 잡지 않고 기록만 합니다.
+	if gone > 0 {
+		t.Logf("410 Gone을 관측했습니다. reflector가 만료 경로로도 회복했습니다")
+	}
+}

@@ -19,14 +19,18 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,8 +126,10 @@ func Live(t *testing.T) (*rest.Config, *Counter) {
 		}
 		t.Logf("대상: kubeconfig %s (%s)", path, cfg.Host)
 	case os.Getenv("KUBEBUILDER_ASSETS") != "":
-		cfg = startAPIServer(t)
+		var local *LocalCluster
+		cfg, local = startAPIServer(t, localOptions{WatchCache: true})
 		t.Logf("대상: 로컬 kube-apiserver (%s)", cfg.Host)
+		_ = local
 	default:
 		t.Skip("실클러스터 대상이 없습니다. ITEST_KUBECONFIG 또는 KUBEBUILDER_ASSETS를 설정하세요.")
 	}
@@ -191,9 +197,112 @@ func Clientset(t *testing.T, cfg *rest.Config) kubernetes.Interface {
 
 /* ── 로컬 kube-apiserver 기동 ───────────────────────────────────────────── */
 
+// LocalCluster는 우리가 직접 띄운 클러스터의 손잡이입니다.
+// etcd를 직접 조작해야 하는 테스트(compaction 등)에서만 씁니다.
+type LocalCluster struct {
+	// EtcdEndpoint는 etcd의 JSON 게이트웨이 주소입니다. 예: http://127.0.0.1:2379
+	EtcdEndpoint string
+
+	// 아래는 API 서버만 따로 껐다 켜기 위한 것입니다.
+	// etcd는 계속 살아 있어야 그동안 compaction을 할 수 있습니다.
+	apiPath string
+	apiArgs []string
+	apiLog  string
+	cfg     *rest.Config
+
+	mu  sync.Mutex
+	cmd *exec.Cmd
+}
+
+// StopAPIServer는 API 서버만 내립니다. etcd는 그대로 둡니다.
+//
+// 이 상태에서 informer의 watch는 끊기고, reflector는 **끊긴 시점의
+// resourceVersion을 들고** 재연결을 기다립니다.
+func (l *LocalCluster) StopAPIServer(t *testing.T) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cmd == nil {
+		return
+	}
+	_ = l.cmd.Process.Kill()
+	_, _ = l.cmd.Process.Wait()
+	l.cmd = nil
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", hostPort(l.cfg.Host), 200*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = c.Close()
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("API 서버가 내려가지 않았습니다")
+}
+
+// StartAPIServer는 같은 포트·같은 etcd로 API 서버를 다시 띄웁니다.
+func (l *LocalCluster) StartAPIServer(t *testing.T) {
+	t.Helper()
+	l.mu.Lock()
+	cmd := exec.Command(l.apiPath, l.apiArgs...)
+	log, err := os.OpenFile(l.apiLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		l.mu.Unlock()
+		t.Fatalf("로그 파일 열기 실패: %v", err)
+	}
+	cmd.Stdout, cmd.Stderr = log, log
+	if err := cmd.Start(); err != nil {
+		l.mu.Unlock()
+		t.Fatalf("kube-apiserver 재기동 실패: %v", err)
+	}
+	l.cmd = cmd
+	l.mu.Unlock()
+
+	t.Cleanup(func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.cmd != nil {
+			_ = l.cmd.Process.Kill()
+			_, _ = l.cmd.Process.Wait()
+			l.cmd = nil
+		}
+	})
+	waitHealthy(t, l.cfg, l.apiLog)
+}
+
+func hostPort(host string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+}
+
+type localOptions struct {
+	// WatchCache가 false면 API 서버가 etcd watch를 그대로 중계합니다.
+	// etcd compaction이 클라이언트에 410 Gone으로 전달되는지 보려면 꺼야 합니다.
+	WatchCache bool
+}
+
+// Local은 로컬 kube-apiserver를 옵션까지 지정해서 띄웁니다.
+// KUBEBUILDER_ASSETS가 없으면 테스트를 건너뜁니다 — 실클러스터에서는
+// watch cache를 끌 수도, etcd를 compact할 수도 없기 때문입니다.
+func Local(t *testing.T, watchCache bool) (*rest.Config, *Counter, *LocalCluster) {
+	t.Helper()
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		t.Skip("로컬 API 서버가 필요한 테스트입니다. KUBEBUILDER_ASSETS를 설정하세요.")
+	}
+	cfg, local := startAPIServer(t, localOptions{WatchCache: watchCache})
+	applyProductionClientOptions(cfg)
+
+	counter := &Counter{}
+	cfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return countingTransport{inner: rt, c: counter}
+	})
+	t.Logf("대상: 로컬 kube-apiserver (%s) · watch-cache=%v · etcd %s", cfg.Host, watchCache, local.EtcdEndpoint)
+	return cfg, counter, local
+}
+
 // startAPIServer는 etcd와 kube-apiserver를 직접 띄웁니다.
 // controller-runtime/envtest를 의존성으로 들이지 않으려고 최소한만 직접 합니다.
-func startAPIServer(t *testing.T) *rest.Config {
+func startAPIServer(t *testing.T, opts localOptions) (*rest.Config, *LocalCluster) {
 	t.Helper()
 	assets := os.Getenv("KUBEBUILDER_ASSETS")
 	dir := t.TempDir()
@@ -209,24 +318,30 @@ func startAPIServer(t *testing.T) *rest.Config {
 	)
 	startProcess(t, etcd, filepath.Join(dir, "etcd.log"))
 
-	api := exec.Command(filepath.Join(assets, "kube-apiserver"),
+	args := []string{
 		"--advertise-address=127.0.0.1",
 		"--bind-address=127.0.0.1",
 		fmt.Sprintf("--secure-port=%d", apiPort),
 		fmt.Sprintf("--etcd-servers=http://127.0.0.1:%d", etcdPort),
-		"--client-ca-file="+pki.caCert,
-		"--tls-cert-file="+pki.serverCert,
-		"--tls-private-key-file="+pki.serverKey,
-		"--service-account-key-file="+pki.saPub,
-		"--service-account-signing-key-file="+pki.saKey,
+		"--client-ca-file=" + pki.caCert,
+		"--tls-cert-file=" + pki.serverCert,
+		"--tls-private-key-file=" + pki.serverKey,
+		"--service-account-key-file=" + pki.saPub,
+		"--service-account-signing-key-file=" + pki.saKey,
 		fmt.Sprintf("--service-account-issuer=https://127.0.0.1:%d", apiPort),
 		"--api-audiences=itest",
 		// RBAC을 켜야 최소 권한 검증이 의미를 갖습니다.
 		"--authorization-mode=RBAC",
 		"--disable-admission-plugins=ServiceAccount",
 		"--service-cluster-ip-range=10.0.0.0/24",
-	)
-	startProcess(t, api, filepath.Join(dir, "apiserver.log"))
+	}
+	if !opts.WatchCache {
+		args = append(args, "--watch-cache=false")
+	}
+	apiPath := filepath.Join(assets, "kube-apiserver")
+	apiLog := filepath.Join(dir, "apiserver.log")
+	api := exec.Command(apiPath, args...)
+	startProcess(t, api, apiLog)
 
 	cfg := &rest.Config{
 		Host: fmt.Sprintf("https://127.0.0.1:%d", apiPort),
@@ -236,8 +351,59 @@ func startAPIServer(t *testing.T) *rest.Config {
 			KeyFile:  pki.adminKey,
 		},
 	}
-	waitHealthy(t, cfg, filepath.Join(dir, "apiserver.log"))
-	return cfg
+	waitHealthy(t, cfg, apiLog)
+	return cfg, &LocalCluster{
+		EtcdEndpoint: fmt.Sprintf("http://127.0.0.1:%d", etcdPort),
+		apiPath:      apiPath,
+		apiArgs:      args,
+		apiLog:       apiLog,
+		cfg:          cfg,
+		cmd:          api,
+	}
+}
+
+/* ── etcd 직접 조작 ─────────────────────────────────────────────────────── */
+
+// Revision은 etcd의 현재 revision입니다. etcdctl 없이 JSON 게이트웨이를 씁니다.
+func (l *LocalCluster) Revision(t *testing.T) int64 {
+	t.Helper()
+	var out struct {
+		Header struct {
+			Revision string `json:"revision"`
+		} `json:"header"`
+	}
+	l.post(t, "/v3/maintenance/status", "{}", &out)
+	rev, err := strconv.ParseInt(out.Header.Revision, 10, 64)
+	if err != nil {
+		t.Fatalf("etcd revision을 읽지 못했습니다: %v", err)
+	}
+	return rev
+}
+
+// Compact는 지정한 revision까지의 이력을 버립니다.
+// 그보다 뒤에 있는 watcher는 이 시점부터 이어받을 수 없어 410 Gone을 받습니다.
+func (l *LocalCluster) Compact(t *testing.T, revision int64) {
+	t.Helper()
+	body := fmt.Sprintf(`{"revision": %d, "physical": true}`, revision)
+	l.post(t, "/v3/kv/compaction", body, nil)
+}
+
+func (l *LocalCluster) post(t *testing.T, path, body string, out any) {
+	t.Helper()
+	resp, err := http.Post(l.EtcdEndpoint+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("etcd %s 실패: %v", path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("etcd %s → %d: %s", path, resp.StatusCode, raw)
+	}
+	if out != nil {
+		if err := json.Unmarshal(raw, out); err != nil {
+			t.Fatalf("etcd %s 응답 파싱 실패: %v (%s)", path, err, raw)
+		}
+	}
 }
 
 func startProcess(t *testing.T, cmd *exec.Cmd, logPath string) {

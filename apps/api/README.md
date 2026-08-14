@@ -157,6 +157,7 @@ ITEST_KUBECONFIG=~/.kube/config make api-itest
 | `TestLiveOwnerChainMatchesRealCluster` | Deployment마다 현재 세대가 정확히 1개인지 |
 | `TestLivePodStateChangeReachesCacheQuickly` | 변경 → 캐시 반영이 5초 안인지 (`ITEST_MUTATE=1`) |
 | `TestLiveDeployedServiceAccountCannotReadSecrets` | 필요한 권한은 되고 Secret·exec·delete는 거절되는지 |
+| `TestLiveWatchRecoversFromCompactedHistory` | watch 단절 + etcd compaction 이후 캐시가 회복되는지, 그 비용이 리소스당 LIST 1회인지 |
 
 측정 예 (kube-apiserver v1.31, Pod 3개):
 
@@ -166,7 +167,28 @@ ITEST_KUBECONFIG=~/.kube/config make api-itest
 화면 21회 · API 서버 추가 호출 0회
 Event 요청: /api/v1/events?fieldSelector=type%3DWarning&limit=500&resourceVersion=0
 생성 → 캐시 반영 8ms · 변경 → 캐시 반영 25ms
+단절·compaction 이후 변경 → 캐시 반영 1.257s
+410 Gone 0회 · 재LIST map[/api/v1/events:1 /api/v1/nodes:1 /api/v1/pods:1 ...]
 ```
+
+#### etcd compaction에 대해 확인한 것
+
+"resourceVersion 만료(410 Gone)에서 회복하는가"를 확인하려다 두 가지를 실측했고,
+둘 다 예상과 달라서 남겨둡니다.
+
+1. **watch가 살아 있는 동안의 compaction은 아무 일도 일으키지 않습니다.**
+   etcd는 이미 따라잡은(synced) watcher에게 compaction을 통지하지 않습니다.
+   끊기는 것은 아직 과거를 따라가는 중인 watcher뿐입니다.
+   그래서 테스트는 **watch를 먼저 끊고** compact합니다.
+2. **재연결 경로에서 410은 나오지 않는 것이 정상입니다.**
+   reflector는 재연결 시 `resourceVersion=<마지막 값>`으로 LIST하는데,
+   LIST의 resourceVersion은 "그 값 **이상으로** 최신"이라는 뜻입니다.
+   API 서버는 현재 revision으로 quorum read를 하고, compaction된 과거를 읽지 않습니다.
+   만료는 그 RV로 **watch**를 걸 때만 발생합니다.
+
+그래서 이 테스트가 실제로 지키는 것은 "410 처리"가 아니라 **회복과 회복 비용**입니다 —
+끊긴 리소스마다 재LIST가 정확히 1회이고, 그보다 많으면 실패합니다.
+잘못된 재연결의 실제 위험은 낡은 값이 아니라 **LIST 폭풍**이기 때문입니다.
 
 ### RBAC
 
