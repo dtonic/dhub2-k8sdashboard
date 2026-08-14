@@ -16,8 +16,7 @@ import (
 type Config struct {
 	// IssuerURL은 OIDC 발급자입니다. 예: https://login.microsoftonline.com/<tenant>/v2.0
 	IssuerURL string
-	// Audience는 이 API의 client id입니다. 비우면 aud 검사를 건너뜁니다 —
-	// 개발 편의용이며 운영에서는 반드시 설정합니다.
+	// Audience는 이 API의 client id입니다. 빈 값은 안전하지 않으므로 거절합니다.
 	Audience string
 	// RolesClaim은 역할이 실린 클레임 이름입니다. 기본 "roles"입니다.
 	RolesClaim string
@@ -50,6 +49,12 @@ func NewResolver(ctx context.Context, cfg Config, logger *slog.Logger) (*Resolve
 	if cfg.IssuerURL == "" {
 		return nil, fmt.Errorf("OIDC issuer가 비어 있습니다")
 	}
+	if cfg.Audience == "" {
+		return nil, fmt.Errorf("OIDC audience가 비어 있습니다")
+	}
+	if err := validateIssuerURL(cfg.IssuerURL); err != nil {
+		return nil, err
+	}
 	if cfg.RolesClaim == "" {
 		cfg.RolesClaim = "roles"
 	}
@@ -69,7 +74,15 @@ func NewResolver(ctx context.Context, cfg Config, logger *slog.Logger) (*Resolve
 		logger = slog.Default()
 	}
 
-	client := &http.Client{Timeout: cfg.HTTPTimeout}
+	client := &http.Client{
+		Timeout: cfg.HTTPTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("provider redirect가 너무 많습니다")
+			}
+			return validateProviderURL(req.URL, cfg.IssuerURL)
+		},
+	}
 	jwksURI, err := discover(ctx, client, cfg.IssuerURL)
 	if err != nil {
 		return nil, err

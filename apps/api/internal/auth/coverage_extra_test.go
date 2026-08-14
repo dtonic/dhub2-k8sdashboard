@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -154,17 +156,88 @@ func TestJWKPublicKeyParsing(t *testing.T) {
 	}
 
 	for name, bad := range map[string]jwk{
-		"암호화용 키":   {Kty: "RSA", Use: "enc", N: "AQAB", E: "AQAB"},
-		"모르는 kty":  {Kty: "oct"},
-		"모르는 곡선":   {Kty: "EC", Crv: "P-521", X: good.X, Y: good.Y},
-		"깨진 RSA n": {Kty: "RSA", N: "!!!", E: "AQAB"},
-		"깨진 RSA e": {Kty: "RSA", N: "AQAB", E: "!!!"},
-		"깨진 EC x":  {Kty: "EC", Crv: "P-256", X: "!!!", Y: good.Y},
-		"깨진 EC y":  {Kty: "EC", Crv: "P-256", X: good.X, Y: "!!!"},
+		"암호화용 키":     {Kty: "RSA", Use: "enc", N: "AQAB", E: "AQAB"},
+		"모르는 kty":    {Kty: "oct"},
+		"모르는 곡선":     {Kty: "EC", Crv: "P-521", X: good.X, Y: good.Y},
+		"깨진 RSA n":   {Kty: "RSA", N: "!!!", E: "AQAB"},
+		"깨진 RSA e":   {Kty: "RSA", N: "AQAB", E: "!!!"},
+		"깨진 EC x":    {Kty: "EC", Crv: "P-256", X: "!!!", Y: good.Y},
+		"깨진 EC y":    {Kty: "EC", Crv: "P-256", X: good.X, Y: "!!!"},
+		"곡선 밖 EC":    {Kty: "EC", Crv: "P-256", Alg: "ES256", X: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Y: base64.RawURLEncoding.EncodeToString(make([]byte, 32))},
+		"EC alg 불일치": {Kty: "EC", Crv: "P-256", Alg: "RS256", X: good.X, Y: good.Y},
 	} {
 		if _, err := bad.publicKey(); err == nil {
 			t.Fatalf("%s가 통과했습니다", name)
 		}
+	}
+
+	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	n := base64.RawURLEncoding.EncodeToString(rsaKey.N.Bytes())
+	for name, bad := range map[string]jwk{
+		"RSA alg 불일치":       {Kty: "RSA", Alg: "ES256", N: n, E: "AQAB"},
+		"짧은 modulus":        {Kty: "RSA", Alg: "RS256", N: base64.RawURLEncoding.EncodeToString([]byte{1}), E: "AQAB"},
+		"짝수 exponent":       {Kty: "RSA", Alg: "RS256", N: n, E: "BA"},
+		"overflow exponent": {Kty: "RSA", Alg: "RS256", N: n, E: base64.RawURLEncoding.EncodeToString(append([]byte{1}, make([]byte, 15)...))},
+	} {
+		if _, err := bad.publicKey(); err == nil {
+			t.Fatalf("%s가 통과했습니다", name)
+		}
+	}
+}
+
+func TestProviderTransportPolicy(t *testing.T) {
+	parse := func(raw string) *url.URL { u, _ := url.Parse(raw); return u }
+	for name, tc := range map[string]struct {
+		target string
+		issuer string
+		ok     bool
+	}{
+		"production same host":    {"https://idp.example/jwks", "https://idp.example", true},
+		"cross-host HTTPS CDN":    {"https://cdn.example/jwks", "https://idp.example", true},
+		"HTTPS downgrade":         {"http://idp.example/jwks", "https://idp.example", false},
+		"loopback HTTP":           {"http://127.0.0.1:8081/jwks", "http://127.0.0.1:8080", true},
+		"loopback to remote HTTP": {"http://remote.example/jwks", "http://127.0.0.1:8080", false},
+		"relative jwks":           {"/jwks", "https://idp.example", false},
+	} {
+		err := validateProviderURL(parse(tc.target), tc.issuer)
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: err=%v", name, err)
+		}
+	}
+	if err := validateIssuerURL("http://idp.example"); err == nil {
+		t.Fatal("remote HTTP issuer가 통과했습니다")
+	}
+}
+
+func TestResolverRejectsRemoteHTTPDiscoveryRedirectBeforeFollow(t *testing.T) {
+	redirects := 0
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirects++
+		w.Header().Set("Location", "http://192.0.2.1:1/never")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(issuer.Close)
+
+	_, err := NewResolver(context.Background(), Config{IssuerURL: issuer.URL, Audience: "app"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("remote HTTP discovery redirect가 CheckRedirect에서 거절되지 않았습니다: %v", err)
+	}
+	if redirects != 1 {
+		t.Fatalf("discovery redirect 처리 횟수: got %d want 1", redirects)
+	}
+}
+
+func TestStartMockIDPRejectsNonLoopbackBeforeListen(t *testing.T) {
+	if _, err := StartMockIDP("0.0.0.0:0", "", nil); err == nil {
+		t.Fatal("non-loopback mock bind가 통과했습니다")
+	}
+	idp, err := StartMockIDP("", "", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idp.Close() })
+	if idp.audience != DefaultMockAudience {
+		t.Fatalf("mock 기본 audience: %q", idp.audience)
 	}
 }
 
@@ -178,7 +251,7 @@ func TestResolverStartupFailsFast(t *testing.T) {
 	// 404 discovery
 	notFound := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(notFound.Close)
-	if _, err := NewResolver(context.Background(), Config{IssuerURL: notFound.URL, ClusterID: "c"}, logger); err == nil {
+	if _, err := NewResolver(context.Background(), Config{IssuerURL: notFound.URL, Audience: "app", ClusterID: "c"}, logger); err == nil {
 		t.Fatal("404 discovery가 통과했습니다")
 	}
 
@@ -187,7 +260,7 @@ func TestResolverStartupFailsFast(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]string{"issuer": "https://someone-else", "jwks_uri": "http://x/jwks"}) //nolint:errcheck
 	}))
 	t.Cleanup(liar.Close)
-	if _, err := NewResolver(context.Background(), Config{IssuerURL: liar.URL, ClusterID: "c"}, logger); err == nil {
+	if _, err := NewResolver(context.Background(), Config{IssuerURL: liar.URL, Audience: "app", ClusterID: "c"}, logger); err == nil {
 		t.Fatal("issuer 불일치 문서가 통과했습니다")
 	}
 
@@ -196,7 +269,7 @@ func TestResolverStartupFailsFast(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]string{"issuer": "http://" + r.Host}) //nolint:errcheck
 	}))
 	t.Cleanup(noJWKS.Close)
-	if _, err := NewResolver(context.Background(), Config{IssuerURL: noJWKS.URL, ClusterID: "c"}, logger); err == nil {
+	if _, err := NewResolver(context.Background(), Config{IssuerURL: noJWKS.URL, Audience: "app", ClusterID: "c"}, logger); err == nil {
 		t.Fatal("jwks_uri 없는 문서가 통과했습니다")
 	}
 
@@ -248,7 +321,7 @@ func TestParseAudienceForms(t *testing.T) {
 	}
 }
 
-// TestPrincipalName — 감사 로그 표기 우선순위: username → email → sub.
+// TestPrincipalName — 표시 이름 우선순위: username → email → sub.
 func TestPrincipalName(t *testing.T) {
 	if (Principal{Username: "u", Email: "e", Subject: "s"}).Name() != "u" {
 		t.Fatal("username 우선이어야 합니다")

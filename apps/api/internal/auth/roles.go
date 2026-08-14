@@ -43,7 +43,7 @@ type Principal struct {
 	CanEdit bool
 }
 
-// Name은 감사 로그에 남길 사용자 표기입니다. 식별 우선순위: username → email → sub.
+// Name은 UI 등에 쓸 표시 이름입니다. 보안·감사 식별자는 Scope의 sub를 사용합니다.
 func (p Principal) Name() string {
 	switch {
 	case p.Username != "":
@@ -71,15 +71,19 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 	nsSet := map[string]bool{}
 
 	for _, role := range claims.Roles {
-		name, arg, _ := strings.Cut(role, ":")
+		name, arg, hasArg := strings.Cut(role, ":")
 		switch name {
 		case RolePlatformAdmin:
-			all = true
+			if !hasArg {
+				all = true
+			}
 		case RoleDashboardEditor:
-			p.CanEdit = true
+			if !hasArg {
+				p.CanEdit = true
+			}
 		case RoleClusterViewer:
 			// 인자가 없으면 이 클러스터, 있으면 id가 일치할 때만 적용합니다.
-			if arg == "" || arg == clusterID {
+			if !hasArg || (arg != "" && arg == clusterID) {
 				all = true
 			}
 		case RoleNamespaceViewer:
@@ -106,5 +110,6 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 		}
 		sort.Strings(c.Namespaces)
 	}
-	return p, scope.Scope{Subject: p.Name(), Clusters: []scope.Cluster{c}}
+	// 보안 주체와 감사 식별자는 변경 가능한 표시용 클레임이 아니라 OIDC sub입니다.
+	return p, scope.Scope{Subject: p.Subject, Clusters: []scope.Cluster{c}}
 }

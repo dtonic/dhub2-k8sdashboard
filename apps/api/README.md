@@ -46,8 +46,8 @@ KUBECONFIG=~/.kube/config make dev-api
 
 필수 설정은 기동 직후 `Config.Validate()`가 검사하고, 오류가 있으면 Kubernetes
 클라이언트·informer를 만들기 전에 전부 모아 보고하고 멈춥니다 — 알 수 없는
-`AUTH_MODE`, 유효한 listen 주소가 아닌 `ADDR`, 절대 http(s) URL이 아닌
-`OIDC_ISSUER`(`AUTH_MODE=oidc`일 때), loopback이 아닌 `AUTH_MOCK_ADDR`
+`AUTH_MODE`, 유효한 listen 주소가 아닌 `ADDR`, 절대 HTTPS URL이 아니거나
+`OIDC_AUDIENCE`가 비어 있는 OIDC 설정(`AUTH_MODE=oidc`일 때), loopback이 아닌 `AUTH_MOCK_ADDR`
 (`AUTH_MODE=mock`일 때), 비거나 0 이하인 `CLUSTER_ID`·`K8S_QPS`·`K8S_BURST`·`K8S_RESYNC`·
 `CACHE_TTL`·`READ_TIMEOUT`·`WRITE_TIMEOUT`이 대상입니다. 형식이 틀린 선택적
 튜닝 env는 지금처럼 기본값으로 물러나고, 데이터소스 주소 오류는 기동을 막지
@@ -69,8 +69,8 @@ KUBECONFIG=~/.kube/config make dev-api
 | 환경변수 | 기본값 | 설명 |
 |---|---|---|
 | `AUTH_MODE` | `none` | `none`(정적 Scope · 개발/데모) · `oidc`(운영) · `mock`(로컬 IdP · **운영 금지**) |
-| `OIDC_ISSUER` | (비움) | 발급자 URL. 예: `https://login.microsoftonline.com/<tenant>/v2.0` |
-| `OIDC_AUDIENCE` | (비움) | 이 API의 client id. 비우면 aud 검사 생략 — 운영에서는 반드시 설정합니다 |
+| `OIDC_ISSUER` | (비움) | 발급자 HTTPS URL. 예: `https://login.microsoftonline.com/<tenant>/v2.0`. HTTP는 직접 실행한 loopback mock/test에서만 허용 |
+| `OIDC_AUDIENCE` | (비움) | 이 API의 client id. `AUTH_MODE=oidc`에서는 필수이며 빈 값이면 기동 실패. mock은 비우면 `k8s-dashboard-local` 사용 |
 | `OIDC_ROLES_CLAIM` | `roles` | 역할이 실린 클레임 이름 |
 | `OIDC_LEEWAY` | `60s` | 시계 오차 허용 |
 | `OIDC_JWKS_MIN_REFRESH` | `5m` | 모르는 kid로 인한 JWKS 재조회 하한 |
@@ -337,15 +337,24 @@ Quickwit `k8s-dashboard-itest` 인덱스뿐이며 끝나면 지웁니다.
 검증은 외부 라이브러리 없이 표준 crypto로 합니다(RS256·ES256 allowlist —
 `alg:none`·HS256 혼동 공격이 구조적으로 막힙니다). 핸들러는 여전히
 `scope.Resolver` 뒤만 보므로 인증 방식이 바뀌어도 화면 코드는 같습니다.
+운영 issuer와 discovery/JWKS redirect는 HTTPS만 허용하고, cross-host HTTPS JWKS/CDN은
+허용합니다. 직접 실행한 HTTP provider는 issuer와 JWKS가 모두 loopback일 때만 허용합니다.
+JWT는 16KiB로 제한하며, JWK의 alg·RSA 2048비트/지수·P-256 curve point를 검증합니다.
+
+OIDC Core의 안정적인 subject identifier인 비어 있지 않은 `sub`를 보안 주체와 감사
+식별자로 사용합니다. 이 interactive dashboard는 `sub`가 있는 human/delegated principal만
+fail-closed로 지원합니다. `preferred_username`과 `email`은 변경 가능한 표시 값이므로
+`sub`를 대신하지 못합니다. `sub`가 없는 provider variant와 app-only/service-principal
+token은 현재 지원하지 않으며 401로 거절합니다.
 
 **역할 → Scope** — 토큰의 역할 클레임(기본 `roles`)의 문자열로 계산합니다.
 
 | 역할 | 효과 |
 |---|---|
-| `platform.admin` | 모든 클러스터 · 모든 namespace |
+| `platform.admin` | 모든 클러스터 · 모든 namespace (exact match만 허용) |
 | `cluster.viewer` / `cluster.viewer:<clusterID>` | 해당(또는 이) 클러스터 전체 |
 | `namespace.viewer:<ns>` / `namespace.viewer:<clusterID>/<ns>` | 특정 namespace |
-| `dashboard.editor` | (예약) 편집 플래그 — MVP 화면은 조회 전용이라 Scope에 영향 없음 |
+| `dashboard.editor` | (예약) 편집 플래그 — MVP 화면은 조회 전용이라 Scope에 영향 없음 (exact match만 허용) |
 
 모르는 역할은 무시합니다(다른 앱의 역할이 섞여도 로그인은 됩니다).
 역할이 하나도 없으면 **빈 Scope로 인증 성공** — 이후 화면 요청이 403입니다.
@@ -360,7 +369,8 @@ Quickwit `k8s-dashboard-itest` 인덱스뿐이며 끝나면 지웁니다.
 실행된 queryRef 집합을 식별합니다.
 
 **감사 로그 마스킹 정책** — 절대 남지 않는 것: Authorization 헤더·토큰 원문
-(읽지 않습니다), 이름에 token/secret/password/key/auth가 든 파라미터의 값.
+(읽지 않습니다), 이름에 token/secret/password/key/auth가 든 파라미터와 `q`·`cursor`의 값.
+가려진 값은 `[REDACTED]`로 기록합니다.
 로그 **본문**의 민감정보는 `datasource/mask`(서버 마스킹, ADR 0003) 담당입니다.
 
 **로컬 개발 (mock IdP)** — 검증 경로는 운영과 같고 발급자만 로컬입니다.

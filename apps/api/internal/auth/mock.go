@@ -25,6 +25,8 @@ import (
 	"time"
 )
 
+const DefaultMockAudience = "k8s-dashboard-local"
+
 // MockIDP는 개발용 발급자입니다.
 type MockIDP struct {
 	Issuer string
@@ -40,6 +42,17 @@ type MockIDP struct {
 func StartMockIDP(addr, audience string, now func() time.Time) (*MockIDP, error) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("mock IdP 주소가 올바르지 않습니다: %w", err)
+	}
+	ip := net.ParseIP(host)
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return nil, fmt.Errorf("mock IdP는 loopback에만 바인드할 수 있습니다: %q", addr)
+	}
+	if audience == "" {
+		audience = DefaultMockAudience
 	}
 	if now == nil {
 		now = time.Now

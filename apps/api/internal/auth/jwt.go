@@ -35,6 +35,8 @@ import (
 // 않습니다 — 공격자에게 어느 단계에서 걸렸는지 알려줄 이유가 없습니다.
 var ErrInvalidToken = errors.New("토큰을 검증할 수 없습니다")
 
+const maxJWTBytes = 16 << 10
+
 // Claims는 검증이 끝난 토큰에서 꺼낸 값입니다.
 type Claims struct {
 	Issuer   string
@@ -69,6 +71,12 @@ type jwsHeader struct {
 // verifyJWT는 서명과 시각·발급자·대상 클레임을 검증합니다.
 // keyOf는 (kid, alg)에 맞는 공개키를 돌려줍니다.
 func verifyJWT(token string, keyOf func(kid string) (any, bool), issuer, audience, rolesClaim string, leeway time.Duration, now time.Time) (Claims, error) {
+	if len(token) == 0 || len(token) > maxJWTBytes {
+		return Claims{}, fmt.Errorf("%w: 크기", ErrInvalidToken)
+	}
+	if audience == "" {
+		return Claims{}, fmt.Errorf("%w: 대상 설정 없음", ErrInvalidToken)
+	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return Claims{}, fmt.Errorf("%w: 형식", ErrInvalidToken)
@@ -147,8 +155,11 @@ func verifyJWT(token string, keyOf func(kid string) (any, bool), issuer, audienc
 	if c.Issuer != issuer {
 		return Claims{}, fmt.Errorf("%w: 발급자 불일치", ErrInvalidToken)
 	}
-	if audience != "" && !contains(c.Audience, audience) {
+	if !contains(c.Audience, audience) {
 		return Claims{}, fmt.Errorf("%w: 대상 불일치", ErrInvalidToken)
+	}
+	if c.Subject == "" {
+		return Claims{}, fmt.Errorf("%w: subject 없음", ErrInvalidToken)
 	}
 	if c.ExpiresAt.IsZero() || now.After(c.ExpiresAt.Add(leeway)) {
 		return Claims{}, fmt.Errorf("%w: 만료", ErrInvalidToken)

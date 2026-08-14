@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/testcluster"
@@ -20,12 +22,17 @@ import (
 // authFixture는 mock IdP + 실제 OIDC Resolver로 서버를 세웁니다.
 // 인증 경로 전체(토큰 검증 → 역할 → Scope → 핸들러의 강제)가 실코드입니다.
 type authFixture struct {
-	srv *httpapi.Server
-	idp *auth.MockIDP
-	log *bytes.Buffer
+	srv   *httpapi.Server
+	idp   *auth.MockIDP
+	log   *bytes.Buffer
+	cache *cache.TTL
 }
 
 func newAuthFixture(t *testing.T) authFixture {
+	return newAuthFixtureWithTTL(t, time.Nanosecond)
+}
+
+func newAuthFixtureWithTTL(t *testing.T, ttl time.Duration) authFixture {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -52,14 +59,45 @@ func newAuthFixture(t *testing.T) authFixture {
 
 	store, _ := testcluster.NewStore(t, ctx)
 	d := demo.New(store)
+	responseCache := cache.NewTTL(ttl)
 	srv := httpapi.NewServer(httpapi.Deps{
 		Store: store, Metrics: d, Logs: d, Alerts: d, Topology: d,
 		Resolver: resolver,
-		Cache:    cache.NewTTL(time.Nanosecond),
+		Cache:    responseCache,
 		Logger:   logger,
 		Now:      func() time.Time { return testcluster.Now },
 	})
-	return authFixture{srv: srv, idp: idp, log: logBuf}
+	return authFixture{srv: srv, idp: idp, log: logBuf, cache: responseCache}
+}
+
+// TestOIDCScopesIsolateSameURLCache는 실제 서명 토큰→OIDC resolver→Scope→캐시
+// 전체 경로에서 같은 URL을 서로 다른 권한 사용자가 공유하지 않음을 증명합니다.
+func TestOIDCScopesIsolateSameURLCache(t *testing.T) {
+	f := newAuthFixtureWithTTL(t, time.Minute)
+	// 같은 sub를 사용해 Subject가 아니라 all/namespace 권한 구성이 key를 나눔을 증명합니다.
+	admin, _ := f.idp.Token("kim", []string{"platform.admin"}, time.Hour)
+	viewer, _ := f.idp.Token("kim", []string{"namespace.viewer:payments"}, time.Hour)
+
+	decode := func(token string) contract.ClusterOverviewResponse {
+		rec := f.get(t, base+"/overview?range=1h", token)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("overview: got %d: %s", rec.Code, rec.Body.String())
+		}
+		var out contract.ClusterOverviewResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	wide := decode(admin)
+	narrow := decode(viewer)
+	if wide.Nodes.Status == narrow.Nodes.Status {
+		t.Fatalf("서로 다른 실제 OIDC Scope가 같은 응답을 받았습니다: %s", wide.Nodes.Status)
+	}
+	if f.cache.Len() != 2 {
+		t.Fatalf("같은 URL의 Scope별 cache entry: got %d want 2", f.cache.Len())
+	}
 }
 
 func (f authFixture) get(t *testing.T, path, token string) *httptest.ResponseRecorder {
@@ -156,11 +194,17 @@ func TestSensitiveQueryParamsAreMaskedInAudit(t *testing.T) {
 	f := newAuthFixture(t)
 	admin, _ := f.idp.Token("admin", []string{"platform.admin"}, time.Hour)
 
-	f.get(t, base+"/overview?range=1h&access_token=super-secret-value", admin)
+	f.get(t, base+"/logs?range=1h&access_token=super-secret-value&q=raw-search-term&cursor=opaque-scroll-capability", admin)
 
 	logs := f.log.String()
 	if strings.Contains(logs, "super-secret-value") {
 		t.Fatalf("민감 파라미터 값이 감사 로그에 남았습니다:\n%s", logs)
+	}
+	if strings.Contains(logs, "raw-search-term") || strings.Contains(logs, "opaque-scroll-capability") {
+		t.Fatalf("검색어 또는 cursor가 감사 로그에 남았습니다:\n%s", logs)
+	}
+	if strings.Count(logs, "[REDACTED]") < 3 {
+		t.Fatalf("민감 값이 [REDACTED]로 표시되지 않았습니다:\n%s", logs)
 	}
 	if !strings.Contains(logs, "access_token=") {
 		t.Fatal("파라미터 이름은 남아야 합니다 (무엇이 가려졌는지 보여야 합니다)")

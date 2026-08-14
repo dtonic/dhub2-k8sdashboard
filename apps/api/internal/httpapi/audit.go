@@ -29,7 +29,7 @@ import (
 var auditSkip = map[string]bool{"/healthz": true, "/readyz": true, "/version": true}
 
 // sensitiveParam은 값을 가려야 하는 파라미터 이름입니다.
-var sensitiveParam = regexp.MustCompile(`(?i)(token|secret|password|passwd|api[_-]?key|auth)`)
+var sensitiveParam = regexp.MustCompile(`(?i)(token|secret|password|passwd|api[_-]?key|auth)|^(?i:q|cursor)$`)
 
 func (s *Server) audit(r *http.Request, sc scope.Scope, status int, started time.Time) {
 	if auditSkip[r.URL.Path] {
@@ -77,7 +77,7 @@ func sanitizeQuery(q url.Values) string {
 		b.WriteString(k)
 		b.WriteByte('=')
 		if sensitiveParam.MatchString(k) {
-			b.WriteString("＊＊＊")
+			b.WriteString("[REDACTED]")
 			continue
 		}
 		b.WriteString(strings.Join(q[k], ","))

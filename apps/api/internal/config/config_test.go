@@ -48,6 +48,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	t.Setenv("QUICKWIT_FIELDS", "message=body.message, level = severity ,broken, =x, k=")
 	t.Setenv("AUTH_MODE", "oidc")
 	t.Setenv("OIDC_ISSUER", "https://idp.example.com")
+	t.Setenv("OIDC_AUDIENCE", "dashboard-api")
 
 	cfg := Load()
 	if cfg.Addr != ":9999" || cfg.ClusterID != "seoul" {
@@ -104,6 +105,7 @@ func TestValidateAcceptsDefaults(t *testing.T) {
 	cfg := Load()
 	cfg.Auth.Mode = "oidc"
 	cfg.Auth.Issuer = "https://idp.example.com/realms/ops"
+	cfg.Auth.Audience = "dashboard-api"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("유효한 oidc 설정이 거절되었습니다: %v", err)
 	}
@@ -126,6 +128,15 @@ func TestValidateRejectsInvalidRequiredConfig(t *testing.T) {
 			c.Auth.Mode = "oidc"
 			c.Auth.Issuer = "ftp://idp.example.com"
 		}, "OIDC_ISSUER"},
+		"HTTP issuer": {func(c *Config) {
+			c.Auth.Mode = "oidc"
+			c.Auth.Issuer = "http://idp.example.com"
+			c.Auth.Audience = "dashboard-api"
+		}, "OIDC_ISSUER"},
+		"audience 없는 oidc": {func(c *Config) {
+			c.Auth.Mode = "oidc"
+			c.Auth.Issuer = "https://idp.example.com"
+		}, "OIDC_AUDIENCE"},
 		"빈 ADDR":         {func(c *Config) { c.Addr = "" }, "ADDR"},
 		"잘못된 ADDR":       {func(c *Config) { c.Addr = "not-an-address" }, "ADDR"},
 		"범위 밖 ADDR port": {func(c *Config) { c.Addr = "localhost:65536" }, "ADDR"},

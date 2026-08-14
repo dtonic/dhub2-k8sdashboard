@@ -202,9 +202,12 @@ func (c Config) Validate() error {
 		}
 	case "oidc":
 		u, err := url.Parse(c.Auth.Issuer)
-		if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if err != nil || !u.IsAbs() || u.Scheme != "https" || u.Host == "" {
 			errs = append(errs, fmt.Errorf(
-				"AUTH_MODE=oidc에는 절대 http(s) OIDC_ISSUER가 필요합니다: %q", c.Auth.Issuer))
+				"AUTH_MODE=oidc에는 절대 HTTPS OIDC_ISSUER가 필요합니다: %q", c.Auth.Issuer))
+		}
+		if c.Auth.Audience == "" {
+			errs = append(errs, errors.New("AUTH_MODE=oidc에는 OIDC_AUDIENCE가 필요합니다"))
 		}
 	default:
 		errs = append(errs, fmt.Errorf("알 수 없는 AUTH_MODE %q (none|oidc|mock)", c.Auth.Mode))

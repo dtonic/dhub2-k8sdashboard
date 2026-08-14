@@ -173,6 +173,36 @@ func TestExpiryIssuerAudienceAreEnforced(t *testing.T) {
 	}
 }
 
+// TestIntendedAudienceAndSubjectAreRequired는 RFC 8725의 intended-audience와
+// OIDC Core의 pairwise/public subject 식별자를 fail-closed로 검증합니다.
+func TestIntendedAudienceAndSubjectAreRequired(t *testing.T) {
+	idp, r := newIDPAndResolver(t, "k8s-dashboard")
+	for name, claims := range map[string]map[string]any{
+		"aud 없음": {"iss": idp.Issuer, "sub": "kim", "exp": testNow.Add(time.Hour).Unix()},
+		"sub 없음": {"iss": idp.Issuer, "aud": "k8s-dashboard", "exp": testNow.Add(time.Hour).Unix(), "preferred_username": "kim", "email": "kim@example.com"},
+	} {
+		token, _ := idp.SignedToken(claims)
+		if _, err := r.Resolve(request(token)); !errors.Is(err, ErrInvalidToken) {
+			t.Fatalf("%s 토큰이 통과했습니다", name)
+		}
+	}
+
+	if _, err := NewResolver(context.Background(), Config{IssuerURL: idp.Issuer}, nil); err == nil || !strings.Contains(err.Error(), "audience") {
+		t.Fatalf("빈 resolver audience가 거절되지 않았습니다: %v", err)
+	}
+}
+
+func TestOversizedJWTIsRejectedBeforeKeyLookup(t *testing.T) {
+	called := false
+	_, err := verifyJWT(strings.Repeat("a", maxJWTBytes+1), func(string) (any, bool) {
+		called = true
+		return nil, false
+	}, "https://idp", "app", "roles", time.Minute, testNow)
+	if !errors.Is(err, ErrInvalidToken) || called {
+		t.Fatalf("oversized JWT가 key 조회 전에 거절되지 않았습니다: err=%v called=%v", err, called)
+	}
+}
+
 // TestUnknownKidTriggersOneRefresh — 키 회전 시나리오입니다. 모르는 kid를 만나면
 // JWKS를 다시 받아오되, 하한(minRefresh) 안에서는 다시 조회하지 않습니다.
 func TestUnknownKidTriggersOneRefresh(t *testing.T) {
@@ -223,6 +253,9 @@ func TestRoleMapping(t *testing.T) {
 	if _, _, all := scopeOf(t, "cluster.viewer:seoul"); !all {
 		t.Fatal("cluster.viewer:seoul은 전체여야 합니다")
 	}
+	if _, ns, all := scopeOf(t, "cluster.viewer:"); all || len(ns) != 0 {
+		t.Fatal("빈 explicit cluster 인자가 권한을 부여했습니다")
+	}
 	if _, ns, all := scopeOf(t, "cluster.viewer:tokyo"); all || len(ns) != 0 {
 		t.Fatal("다른 클러스터의 viewer는 아무것도 열지 않아야 합니다")
 	}
@@ -237,6 +270,9 @@ func TestRoleMapping(t *testing.T) {
 	}
 	if p, _, all := scopeOf(t, "dashboard.editor"); !p.CanEdit || all {
 		t.Fatal("dashboard.editor는 편집 플래그만 세워야 합니다")
+	}
+	if p, ns, all := scopeOf(t, "platform.admin:anything", "dashboard.editor:anything"); all || p.CanEdit || len(ns) != 0 {
+		t.Fatal("인자를 받지 않는 예약 역할의 suffix가 권한을 부여했습니다")
 	}
 	// 모르는 역할(다른 앱의 역할)은 무시됩니다 — 로그인은 되지만 Scope는 넓어지지 않습니다.
 	if _, ns, all := scopeOf(t, "other-app.something", "unknown:x/y"); all || len(ns) != 0 {
@@ -255,6 +291,13 @@ func TestNoRolesMeansEmptyButAuthenticatedScope(t *testing.T) {
 	}
 	if c, _ := sc.Cluster("seoul"); c.Accessible() {
 		t.Fatal("역할이 없는데 접근 가능한 것이 있습니다")
+	}
+}
+
+func TestMutableDisplayClaimsDoNotReplaceSecuritySubject(t *testing.T) {
+	_, sc := ScopeFor(Claims{Subject: "stable-sub", Username: "mutable-name", Email: "mutable@example.com"}, "seoul", "")
+	if sc.Subject != "stable-sub" {
+		t.Fatalf("보안 주체가 mutable display claim으로 대체됐습니다: %q", sc.Subject)
 	}
 }
 

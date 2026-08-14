@@ -15,7 +15,10 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +41,8 @@ type keyStore struct {
 
 // discover는 issuer의 /.well-known/openid-configuration에서 jwks_uri를 찾습니다.
 func discover(ctx context.Context, client *http.Client, issuer string) (string, error) {
-	url := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	discoveryURL := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -65,7 +68,54 @@ func discover(ctx context.Context, client *http.Client, issuer string) (string, 
 	if doc.JWKSURI == "" {
 		return "", fmt.Errorf("jwks_uri가 없습니다")
 	}
+	jwksURL, err := url.Parse(doc.JWKSURI)
+	if err != nil || !jwksURL.IsAbs() {
+		return "", fmt.Errorf("jwks_uri는 절대 HTTP(S) URL이어야 합니다")
+	}
+	if err := validateProviderURL(jwksURL, issuer); err != nil {
+		return "", fmt.Errorf("안전하지 않은 jwks_uri: %w", err)
+	}
 	return doc.JWKSURI, nil
+}
+
+func validateIssuerURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("OIDC issuer는 절대 HTTP(S) URL이어야 합니다")
+	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("HTTP OIDC issuer는 loopback에서만 허용됩니다")
+	}
+	return nil
+}
+
+// validateProviderURL은 discovery/JWKS와 redirect 목적지의 transport 경계를 강제합니다.
+func validateProviderURL(target *url.URL, issuer string) error {
+	if target == nil || !target.IsAbs() || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
+		return fmt.Errorf("provider URL은 절대 HTTP(S) URL이어야 합니다")
+	}
+	issuerURL, err := url.Parse(issuer)
+	if err != nil {
+		return err
+	}
+	if issuerURL.Scheme == "https" {
+		if target.Scheme != "https" {
+			return fmt.Errorf("HTTPS issuer의 HTTP downgrade는 허용되지 않습니다")
+		}
+		return nil // cross-host HTTPS JWKS/CDN은 정상 OIDC 배포 형태입니다.
+	}
+	if issuerURL.Scheme != "http" || !isLoopbackHost(issuerURL.Hostname()) || !isLoopbackHost(target.Hostname()) {
+		return fmt.Errorf("HTTP provider는 loopback issuer와 loopback endpoint만 허용됩니다")
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // get은 kid의 공개키를 돌려줍니다. 캐시에 없으면 갱신 하한 안에서 한 번 갱신합니다.
@@ -132,6 +182,7 @@ type jwk struct {
 	Kty string `json:"kty"`
 	Kid string `json:"kid"`
 	Use string `json:"use"`
+	Alg string `json:"alg"`
 	N   string `json:"n"`
 	E   string `json:"e"`
 	Crv string `json:"crv"`
@@ -145,6 +196,9 @@ func (k jwk) publicKey() (any, error) {
 	}
 	switch k.Kty {
 	case "RSA":
+		if k.Alg != "" && k.Alg != "RS256" {
+			return nil, fmt.Errorf("RSA 키의 alg가 RS256이 아닙니다")
+		}
 		n, err := base64.RawURLEncoding.DecodeString(k.N)
 		if err != nil {
 			return nil, err
@@ -153,11 +207,23 @@ func (k jwk) publicKey() (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &rsa.PublicKey{
-			N: new(big.Int).SetBytes(n),
-			E: int(new(big.Int).SetBytes(e).Int64()),
-		}, nil
+		modulus := new(big.Int).SetBytes(n)
+		exponent := new(big.Int).SetBytes(e)
+		if modulus.BitLen() < 2048 {
+			return nil, fmt.Errorf("RSA modulus는 2048비트 이상이어야 합니다")
+		}
+		if !exponent.IsInt64() || exponent.Sign() <= 0 || exponent.Bit(0) == 0 || exponent.Cmp(big.NewInt(3)) < 0 {
+			return nil, fmt.Errorf("RSA exponent가 올바르지 않습니다")
+		}
+		e64 := exponent.Int64()
+		if strconv.IntSize == 32 && e64 > int64(^uint(0)>>1) {
+			return nil, fmt.Errorf("RSA exponent가 int 범위를 넘습니다")
+		}
+		return &rsa.PublicKey{N: modulus, E: int(e64)}, nil
 	case "EC":
+		if k.Alg != "" && k.Alg != "ES256" {
+			return nil, fmt.Errorf("EC 키의 alg가 ES256이 아닙니다")
+		}
 		if k.Crv != "P-256" {
 			return nil, fmt.Errorf("지원하지 않는 곡선 %q", k.Crv)
 		}
@@ -169,11 +235,15 @@ func (k jwk) publicKey() (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ecdsa.PublicKey{
+		pub := &ecdsa.PublicKey{
 			Curve: elliptic.P256(),
 			X:     new(big.Int).SetBytes(x),
 			Y:     new(big.Int).SetBytes(y),
-		}, nil
+		}
+		if len(x) > 32 || len(y) > 32 || !pub.Curve.IsOnCurve(pub.X, pub.Y) {
+			return nil, fmt.Errorf("EC point가 P-256 곡선 위에 있지 않습니다")
+		}
+		return pub, nil
 	}
 	return nil, fmt.Errorf("지원하지 않는 kty %q", k.Kty)
 }

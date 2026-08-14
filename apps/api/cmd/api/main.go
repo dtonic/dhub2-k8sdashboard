@@ -184,13 +184,17 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 		return r, nil
 
 	case "mock":
-		idp, err := auth.StartMockIDP(cfg.Auth.MockAddr, cfg.Auth.Audience, nil)
+		audience := cfg.Auth.Audience
+		if audience == "" {
+			audience = auth.DefaultMockAudience
+		}
+		idp, err := auth.StartMockIDP(cfg.Auth.MockAddr, audience, nil)
 		if err != nil {
 			return nil, err
 		}
 		r, err := auth.NewResolver(ctx, auth.Config{
 			IssuerURL:   idp.Issuer,
-			Audience:    cfg.Auth.Audience,
+			Audience:    audience,
 			ClusterID:   cfg.ClusterID,
 			ClusterName: cfg.ClusterName,
 		}, logger)
