@@ -531,8 +531,8 @@ Custom Range의 최대 폭은 30일입니다.
 
 ### 사전 요구사항
 
-- Node.js >= 20
-- Go >= 1.24
+- Node.js >= 22.23.2 (CI와 Web image builder는 22.23.2 고정)
+- Go >= 1.26.6
 - Make
 
 ### 환경변수

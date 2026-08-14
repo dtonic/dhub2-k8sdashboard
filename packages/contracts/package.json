@@ -8,6 +8,6 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test"
   }
 }

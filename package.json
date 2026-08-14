@@ -14,5 +14,5 @@
     "test": "npm run test --workspaces --if-present",
     "check": "npm run check --workspaces --if-present"
   },
-  "engines": { "node": ">=20.19" }
+  "engines": { "node": ">=22.23.2" }
 }

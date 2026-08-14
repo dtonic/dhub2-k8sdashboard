@@ -4,7 +4,11 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 TMP_ROOT=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 TMP=$(mktemp -d "$TMP_ROOT/dashboard-security.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+  rm -rf "$TMP"
+  docker image rm observability-dashboard-web-builder:ci >/dev/null 2>&1 || true
+}
+trap cleanup EXIT HUP INT TERM
 SOURCE="$TMP/source"
 TRIVY_CACHE="$TMP/trivy-cache"
 mkdir -p "$SOURCE" "$TRIVY_CACHE"
@@ -100,5 +104,7 @@ echo "negative mutation passed: privileged IaC was rejected"
 
 docker save --output "$TMP/web-image.tar" observability-dashboard-web:ci
 docker save --output "$TMP/api-image.tar" observability-dashboard-api:ci
+docker save --output "$TMP/web-builder-image.tar" observability-dashboard-web-builder:ci
+docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/web-builder-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress
 docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/web-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress
 docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" image --cache-dir /tmp/trivy-cache --input /scan/api-image.tar --severity HIGH,CRITICAL --exit-code 1 --no-progress

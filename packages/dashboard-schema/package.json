@@ -9,7 +9,7 @@
   "scripts": {
     "generate": "node scripts/generate-embedded.mjs",
     "check": "npm run generate && tsc --noEmit -p tsconfig.json",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test"
   },
   "devDependencies": {
     "ajv": "8.18.0",

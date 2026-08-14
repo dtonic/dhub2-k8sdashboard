@@ -7,7 +7,11 @@ install:            ## 의존성 설치
 	npm install
 
 install-ci:         ## Lockfile-exact clean install for CI
-	npm ci
+	npm install --global npm@12.0.2
+	test "$$(npm --version)" = "12.0.2"
+	( cd "$$(npm root --global)/npm" && npm pkg delete devDependencies && npm install --ignore-scripts --omit=dev --no-save brace-expansion@5.0.9 ip-address@10.3.1 )
+	node scripts/quality/check-npm-toolchain.mjs
+	npm ci --ignore-scripts
 
 dev: dev-web        ## 기본 개발 서버 (현재는 web만)
 
@@ -96,6 +100,7 @@ deploy-check:       ## Helm lint/render, Kubernetes schema, repository policy
 	sh deploy/scripts/check-deploy.sh
 
 deploy-images:      ## Build release images locally without pushing
+	docker build --target build --file Dockerfile.web --tag observability-dashboard-web-builder:ci .
 	docker build --file Dockerfile.web --tag observability-dashboard-web:ci .
 	docker build --file Dockerfile.api --tag observability-dashboard-api:ci --build-arg VERSION=ci --build-arg COMMIT=$${GITHUB_SHA:-local} --build-arg BUILD_DATE=1970-01-01T00:00:00Z .
 
