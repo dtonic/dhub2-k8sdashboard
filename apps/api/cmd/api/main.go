@@ -27,6 +27,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/greptime"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/quickwit"
@@ -68,11 +69,20 @@ func run(logger *slog.Logger) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("설정 오류: %w", err)
 	}
+	var configuredAlerts *alertmanager.Source
+	if cfg.Alertmanager.Enabled {
+		var err error
+		configuredAlerts, err = alertmanager.NewUnbound(cfg.Alertmanager)
+		if err != nil {
+			return fmt.Errorf("Alertmanager 초기화 실패: %w", err)
+		}
+		defer configuredAlerts.Close()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if cfg.ClusterState.Mode == "central" {
-		return runCentral(ctx, logger, cfg)
+		return runCentral(ctx, logger, cfg, configuredAlerts)
 	}
 
 	restCfg, err := clusterstate.RestConfig(clusterstate.ClientOptions{
@@ -161,23 +171,31 @@ func run(logger *slog.Logger) error {
 
 	platformMetrics := observability.New()
 	platformMetrics.ConfigureLogging(logger, cfg.QuerySlowThreshold)
-	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, store, queries, platformMetrics)
+	if configuredAlerts != nil {
+		if err := configuredAlerts.BindCatalog(store); err != nil {
+			return err
+		}
+		configuredAlerts.SetObserver(platformMetrics)
+	}
+	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, store, queries, platformMetrics, configuredAlerts)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
 	go refreshUsage(ctx, logger, store, metrics, cfg.ClusterID)
 
-	// 알림 변경은 push 원천이 없어 datasource.Alerts 스냅숏 diff로 만듭니다. (#12)
-	// Alertmanager 실클라이언트(#17 잔여)가 생겨도 이 배선은 그대로입니다.
+	// 알림 변경은 read-only Alertmanager 스냅숏 diff로 만듭니다. (#12)
 	// 소스가 Unavailable이어도 백오프로 물러날 뿐 스핀하지 않습니다.
-	alertPoller := stream.NewAlertPoller(stream.AlertPollerConfig{
-		ClusterID:         cfg.ClusterID,
-		Interval:          cfg.AlertPollInterval,
-		MaxBackoff:        cfg.AlertPollMaxBackoff,
-		MaxAlerts:         cfg.AlertSnapshotMax,
-		TrustedNamespaces: store.StreamEntityNamespaces,
-	}, alerts, hub, logger)
-	go alertPoller.Run(ctx)
+	if cfg.Alertmanager.Enabled || cfg.UseDemoData {
+		alertPoller := stream.NewAlertPoller(stream.AlertPollerConfig{
+			ClusterID:         cfg.ClusterID,
+			Interval:          cfg.AlertPollInterval,
+			MaxBackoff:        cfg.AlertPollMaxBackoff,
+			MaxAlerts:         cfg.AlertSnapshotMax,
+			TrustedNamespaces: store.StreamEntityNamespaces,
+		}, alerts, hub, logger)
+		stopAlertPoller := startDirectAlertPoller(ctx, alertPoller, logger)
+		defer stopAlertPoller()
+	}
 
 	protectionMetrics := queryprotect.NewMetrics()
 	responseCache := cache.New(cache.Config{DefaultTTL: cfg.CacheTTL, MaxEntries: cfg.CacheMaxEntries, MaxValueBytes: cfg.CacheMaxValueBytes, MaxLocalBytes: cfg.CacheMaxLocalBytes, RedisAddr: cfg.RedisAddr, RedisOpTimeout: cfg.RedisOpTimeout, RedisCooldown: cfg.RedisCooldown, LockTTL: cfg.QueryTimeout + time.Second, LockWait: cfg.QueryTimeout, Observer: protectionMetrics})
@@ -241,6 +259,23 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
+	}
+}
+
+func startDirectAlertPoller(parent context.Context, poller *stream.AlertPoller, logger *slog.Logger) func() {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		poller.Run(ctx)
+	}()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			logger.Error("Alertmanager direct poller shutdown timed out")
+		}
 	}
 }
 
@@ -376,15 +411,15 @@ func (r *managedMockResolver) Close() error {
 //
 // 우선순위는 **실주소 > 데모 > Unavailable**입니다. GREPTIME_URL·QUICKWIT_URL을
 // 적으면 USE_DEMO_DATA와 무관하게 실제 어댑터를 씁니다 — 주소를 적은 것이
-// 의도이기 때문입니다. 알림·토폴로지는 아직 실클라이언트가 없습니다(#17 잔여) —
-// 데모가 아니면 연결 실패로 취급해 화면이 degraded를 그리게 합니다.
+// 의도이기 때문입니다. 운영 Alertmanager는 시작 단계에서 검증한 source를
+// sourcesObserved에 주입합니다. 토폴로지는 데모가 아니면 Unavailable입니다.
 func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, queries querycatalog.Catalog) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
-	return sourcesObserved(logger, cfg, store, queries, nil)
+	return sourcesObserved(logger, cfg, store, queries, nil, nil)
 }
 
-func sourcesObserved(logger *slog.Logger, cfg config.Config, catalog datasource.PodCatalog, queries querycatalog.Catalog, observer upstream.Observer) (
+func sourcesObserved(logger *slog.Logger, cfg config.Config, catalog datasource.PodCatalog, queries querycatalog.Catalog, observer upstream.Observer, configuredAlerts datasource.Alerts) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
 	var d *demo.Source
@@ -463,10 +498,16 @@ func sourcesObserved(logger *slog.Logger, cfg config.Config, catalog datasource.
 		logs = datasource.Unavailable{Reason: "로그 데이터소스가 설정되지 않았습니다"}
 	}
 
-	var alerts datasource.Alerts = datasource.Unavailable{Reason: "알림 데이터소스가 아직 연결되지 않았습니다"}
+	var alerts datasource.Alerts = datasource.Unavailable{Reason: "알림 데이터소스가 설정되지 않았습니다"}
 	var topo datasource.Topology = datasource.Unavailable{Reason: "토폴로지 데이터소스가 아직 연결되지 않았습니다"}
-	if d != nil {
+	if configuredAlerts != nil {
+		alerts = configuredAlerts
+		logger.Info("알림 데이터소스: Alertmanager")
+	} else if d != nil {
 		alerts, topo = d, d
+	}
+	if d != nil {
+		topo = d
 	}
 	return metrics, logs, alerts, topo
 }

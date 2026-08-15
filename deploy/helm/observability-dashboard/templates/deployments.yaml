@@ -97,7 +97,15 @@ spec:
       automountServiceAccountToken: false
       {{- end }}
       terminationGracePeriodSeconds: 30
+      {{- if .Values.alerts.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+      {{- else }}
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      {{- end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -163,18 +171,45 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.api.existingSecret.keys.oidcClientSecret }}, optional: true}}
             {{- end }}
           {{- end }}
+          {{- if .Values.alerts.enabled }}
+          {{- if and (ne .Values.clusterState.mode "central") (empty .Values.api.existingSecret.name) }}
+          env:
+          {{- end }}
+            - {name: ALERTMANAGER_ENABLED, value: "true"}
+            - {name: ALERTMANAGER_URL, value: {{ .Values.alerts.url | quote }}}
+            - {name: ALERTMANAGER_PUBLIC_URL, value: {{ .Values.alerts.publicURL | quote }}}
+            - {name: ALERTMANAGER_SERVER_NAME, value: {{ .Values.alerts.serverName | quote }}}
+            - {name: ALERTMANAGER_CLUSTER_LABEL, value: {{ .Values.alerts.clusterLabel | quote }}}
+            - {name: ALERTMANAGER_NAMESPACE_LABEL, value: {{ .Values.alerts.namespaceLabel | quote }}}
+            - {name: ALERTMANAGER_TIMEOUT, value: {{ .Values.alerts.timeout | quote }}}
+            - {name: ALERTMANAGER_MAX_BODY_BYTES, value: {{ printf "%d" (int64 .Values.alerts.maxBodyBytes) | quote }}}
+            - {name: ALERTMANAGER_MAX_ALERTS, value: {{ printf "%d" (int .Values.alerts.maxAlerts) | quote }}}
+            - {name: ALERTMANAGER_MAX_CONCURRENT, value: {{ printf "%d" (int .Values.alerts.maxConcurrent) | quote }}}
+            - {name: ALERTMANAGER_TOKEN_FILE, value: /var/run/alertmanager/token}
+            - {name: ALERTMANAGER_CA_FILE, value: /var/run/alertmanager/ca.crt}
+            {{- if .Values.alerts.existingSecret.clientCertKey }}
+            - {name: ALERTMANAGER_CLIENT_CERT_FILE, value: /var/run/alertmanager/client.crt}
+            - {name: ALERTMANAGER_CLIENT_KEY_FILE, value: /var/run/alertmanager/client.key}
+            {{- end }}
+          {{- end }}
           lifecycle: {preStop: {sleep: {seconds: 5}}}
           startupProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-          {{- if eq .Values.clusterState.mode "central" }}
+          {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled }}
           volumeMounts:
+            {{- if eq .Values.clusterState.mode "central" }}
             - {name: cluster-state-tls, mountPath: /var/run/cluster-state-tls, readOnly: true}
+            {{- end }}
+            {{- if .Values.alerts.enabled }}
+            - {name: alertmanager, mountPath: /var/run/alertmanager, readOnly: true}
+            {{- end }}
           {{- end }}
-      {{- if eq .Values.clusterState.mode "central" }}
+      {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled }}
       volumes:
+        {{- if eq .Values.clusterState.mode "central" }}
         - name: cluster-state-tls
           secret:
             secretName: {{ .Values.clusterState.tls.apiExistingSecret }}
@@ -182,4 +217,18 @@ spec:
               - {key: {{ .Values.clusterState.tls.certKey }}, path: tls.crt}
               - {key: {{ .Values.clusterState.tls.privateKeyKey }}, path: tls.key}
               - {key: {{ .Values.clusterState.tls.caKey }}, path: ca.crt}
+        {{- end }}
+        {{- if .Values.alerts.enabled }}
+        - name: alertmanager
+          secret:
+            secretName: {{ .Values.alerts.existingSecret.name }}
+            defaultMode: 0440
+            items:
+              - {key: {{ .Values.alerts.existingSecret.tokenKey }}, path: token}
+              - {key: {{ .Values.alerts.existingSecret.caKey }}, path: ca.crt}
+              {{- if .Values.alerts.existingSecret.clientCertKey }}
+              - {key: {{ .Values.alerts.existingSecret.clientCertKey }}, path: client.crt}
+              - {key: {{ .Values.alerts.existingSecret.clientKeyKey }}, path: client.key}
+              {{- end }}
+        {{- end }}
       {{- end }}

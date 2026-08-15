@@ -45,6 +45,8 @@ jobs:
           cache-dependency-path: apps/api/go.sum
       - name: 통합 E2E (#22 — 프로덕션 번들 + Go BFF fixture · 클러스터 불필요)
         run: make test-web-integration
+      - name: Pinned Alertmanager production session/browser integration
+        run: make api-alertmanager-itest
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: failure()
         with:

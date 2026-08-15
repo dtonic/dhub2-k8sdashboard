@@ -451,3 +451,37 @@ func TestScopeFromConfig(t *testing.T) {
 		t.Fatalf("클러스터 이름: %+v", c)
 	}
 }
+
+func TestLoadThenValidateRejectsStrictAlertmanagerEnvironment(t *testing.T) {
+	t.Setenv("ALERTMANAGER_ENABLED", "not-a-bool")
+	if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "ALERTMANAGER_ENABLED") {
+		t.Fatalf("strict Alertmanager bool was accepted: %v", err)
+	}
+
+	for _, tc := range []struct{ key, value string }{
+		{"ALERTMANAGER_TIMEOUT", "not-a-duration"},
+		{"ALERTMANAGER_TIMEOUT", "99ms"},
+		{"ALERTMANAGER_TIMEOUT", "30s1ns"},
+		{"ALERTMANAGER_MAX_BODY_BYTES", "not-an-int"},
+		{"ALERTMANAGER_MAX_BODY_BYTES", "65535"},
+		{"ALERTMANAGER_MAX_BODY_BYTES", "16777217"},
+		{"ALERTMANAGER_MAX_BODY_BYTES", "999999999999999999999999"},
+		{"ALERTMANAGER_MAX_ALERTS", "0"},
+		{"ALERTMANAGER_MAX_CONCURRENT", "33"},
+		{"ALERTMANAGER_CLUSTER_LABEL", "bad-label"},
+		{"ALERTMANAGER_NAMESPACE_LABEL", "bad-label"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			t.Setenv("ALERTMANAGER_ENABLED", "true")
+			t.Setenv("ALERTMANAGER_URL", "https://alerts.example/prefix")
+			t.Setenv("ALERTMANAGER_PUBLIC_URL", "https://alerts.example/ui")
+			t.Setenv("ALERTMANAGER_TOKEN_FILE", "/missing/token")
+			t.Setenv("ALERTMANAGER_CA_FILE", "/missing/ca")
+			t.Setenv("ALERTMANAGER_SERVER_NAME", "alerts.example")
+			t.Setenv(tc.key, tc.value)
+			if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("%s=%q was not rejected precisely: %v", tc.key, tc.value, err)
+			}
+		})
+	}
+}

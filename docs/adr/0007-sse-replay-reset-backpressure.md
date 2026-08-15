@@ -37,7 +37,7 @@ EntityRef·resourceVersion만 싣고, Kubernetes 원본 객체·Alert annotation
    요청 주체는 전역·주체별 연결 상한(`STREAM_MAX_CONNECTIONS`·`STREAM_MAX_PER_SUBJECT`)에만
    쓰입니다. SSE는 #11 질의 보호(12s budget·rate·cache)의 대상이 아닙니다 — 연결은 질의가
    아니기 때문이고, 대신 위 상한과 write 유휴 데드라인(`STREAM_WRITE_IDLE`)이 자원을 지킵니다.
-5. **Alert 소스는 유계 스냅숏 diff.** Alertmanager 실클라이언트(#17 잔여)가 없으므로 기존
+5. **Alert 소스는 유계 스냅숏 diff.** 운영 Alertmanager와 demo가 공통
    `datasource.Alerts` 추상화를 `ALERT_POLL_INTERVAL` 주기로 조회해 스냅숏(상한
    `ALERT_SNAPSHOT_MAX`) 차이만 발행합니다. 최초 스냅숏은 발행하지 않고, 실패는 지수 backoff
    (`ALERT_POLL_MAX_BACKOFF`)로 물러납니다. 이 폴링은 데이터소스 방향이며 Kubernetes API
@@ -61,12 +61,13 @@ reset"으로 단순하고 검증 가능합니다.
 
 **감수하는 것** — 재생은 프로세스 로컬입니다. 재시작·replica 이동 시 구독자 전원이 reset을
 받아 HTTP 재조회가 몰립니다(캐시 #11이 흡수). 링 크기보다 오래 끊긴 클라이언트도 reset입니다.
-Alert 변경은 폴링 주기만큼 늦습니다. Alertmanager 실클라이언트 전까지 운영 배포에서 Alert
-스트림의 실소스는 없습니다 — 데모(USE_DEMO_DATA) 또는 조용한 degraded입니다.
+Alert 변경은 폴링 주기만큼 늦습니다. 운영 Alertmanager는 명시적으로 활성화한 경우에만
+실소스가 되며, 비활성화 상태에서는 데모(USE_DEMO_DATA) 또는 조용한 degraded입니다.
 
 ## 후속 작업
 
-- [ ] Alertmanager 실클라이언트(#17 잔여)를 `datasource.Alerts`로 연결해 Alert 스트림 실소스 확보
+- [x] Alertmanager 현재 알림을 `datasource.Alerts`로 연결해 Alert 스트림 실소스 확보
+      (Resolved 운영 이력은 ADR 0012의 P2 후속)
 - [ ] Multi-replica 배포가 확정되면 sticky session 또는 공유 이벤트 로그 재검토 (Post-MVP)
 - [ ] 제품 UI의 authenticated fetch-stream·reset 재조회 배선 (별도 Web-API 실연결 후속;
       #12 백엔드 프로토콜·재접속 의미는 실제 HTTP SSE 테스트로 검증됨)

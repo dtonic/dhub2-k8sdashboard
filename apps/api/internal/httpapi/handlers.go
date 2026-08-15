@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -447,11 +448,22 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 			Window: dsWindow(win),
 		})
 		out.Firing = dsSection(res.Firing, err, contract.SourceAlertmanager, "Alertmanager")
-		out.Resolved = dsSection(res.Resolved, err, contract.SourceAlertmanager, "Alertmanager")
-		out.Counts = dsSection(alertCounts(res), err, contract.SourceAlertmanager, "Alertmanager")
+		historyErr := err
+		if historyErr == nil {
+			historyErr = res.HistoryErr
+		}
+		out.Resolved = alertHistorySection(res.Resolved, historyErr)
+		out.Counts = alertHistorySection(alertCounts(res), historyErr)
 		out.GroupingRule = res.GroupingRule
 		return out, nil
 	})
+}
+
+func alertHistorySection[T any](value T, err error) contract.Section[T] {
+	if errors.Is(err, datasource.ErrAlertHistoryNotConfigured) {
+		return contract.Degraded[T](contract.SourceAlertmanager, "history_not_configured", nil)
+	}
+	return dsSection(value, err, contract.SourceAlertmanager, "Alertmanager")
 }
 
 func alertCounts(res datasource.AlertResult) map[string]contract.AlertCount {

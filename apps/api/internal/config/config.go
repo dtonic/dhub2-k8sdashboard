@@ -21,6 +21,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 )
@@ -94,7 +95,8 @@ type Config struct {
 	// Greptime은 메트릭 데이터소스(GreptimeDB) 설정입니다. URL이 비어 있으면 미사용입니다.
 	Greptime GreptimeConfig
 	// Quickwit은 로그 데이터소스 설정입니다. URL이 비어 있으면 미사용입니다.
-	Quickwit QuickwitConfig
+	Quickwit     QuickwitConfig
+	Alertmanager alertmanager.Config
 
 	// AllowedOrigin은 개발 중 Vite 오리진을 허용할 때 씁니다. 비어 있으면 CORS 헤더를 붙이지 않습니다.
 	AllowedOrigin string
@@ -179,6 +181,7 @@ type QuickwitConfig struct {
 func Load() Config {
 	nsList, all := scope.ParseNamespaces(env("SCOPE_NAMESPACES", "*"))
 	sessionEnabled, sessionEnabledInvalid := strictEnvBool("AUTH_SESSION_ENABLED", false)
+	alertmanagerEnabled, alertmanagerEnabledInvalid := strictEnvBool("ALERTMANAGER_ENABLED", false)
 	return Config{
 		Addr:                     env("ADDR", ":8080"),
 		Kubeconfig:               env("KUBECONFIG", ""),
@@ -266,6 +269,15 @@ func Load() Config {
 			MaxLines:    envInt("QUICKWIT_MAX_LINES", 5000),
 			Fields:      envPairs("QUICKWIT_FIELDS"),
 		},
+		Alertmanager: alertmanager.Config{
+			Enabled: alertmanagerEnabled, EnabledInvalid: alertmanagerEnabledInvalid,
+			BaseURL: env("ALERTMANAGER_URL", ""), PublicURL: env("ALERTMANAGER_PUBLIC_URL", ""),
+			TokenFile: env("ALERTMANAGER_TOKEN_FILE", ""), CAFile: env("ALERTMANAGER_CA_FILE", ""),
+			ClientCertFile: env("ALERTMANAGER_CLIENT_CERT_FILE", ""), ClientKeyFile: env("ALERTMANAGER_CLIENT_KEY_FILE", ""),
+			ServerName: env("ALERTMANAGER_SERVER_NAME", ""), ClusterLabel: env("ALERTMANAGER_CLUSTER_LABEL", "k8s_cluster_name"), NamespaceLabel: env("ALERTMANAGER_NAMESPACE_LABEL", "namespace"),
+			Timeout: strictEnvDuration("ALERTMANAGER_TIMEOUT", 5*time.Second), MaxBodyBytes: int64(strictEnvInt("ALERTMANAGER_MAX_BODY_BYTES", 4<<20)),
+			MaxAlerts: strictEnvInt("ALERTMANAGER_MAX_ALERTS", 2000), MaxConcurrent: strictEnvInt("ALERTMANAGER_MAX_CONCURRENT", 4),
+		},
 		AllowedOrigin: env("ALLOWED_ORIGIN", ""),
 		ReadTimeout:   envDuration("READ_TIMEOUT", 15*time.Second),
 		WriteTimeout:  envDuration("WRITE_TIMEOUT", 30*time.Second),
@@ -279,6 +291,9 @@ func Load() Config {
 // 형식이 틀린 선택적 튜닝 env는 Load()가 기본값으로 대체합니다.
 func (c Config) Validate() error {
 	var errs []error
+	if err := alertmanager.Validate(c.Alertmanager); err != nil {
+		errs = append(errs, err)
+	}
 	if c.Auth.SessionEnabledInvalid {
 		errs = append(errs, errors.New("AUTH_SESSION_ENABLED must be a boolean"))
 	}

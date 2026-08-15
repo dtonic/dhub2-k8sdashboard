@@ -72,10 +72,11 @@ const (
 	UpstreamOther Upstream = iota
 	UpstreamGreptime
 	UpstreamQuickwit
+	UpstreamAlertmanager
 )
 
 func (u Upstream) String() string {
-	names := [...]string{"other", "greptime", "quickwit"}
+	names := [...]string{"other", "greptime", "quickwit", "alertmanager"}
 	if int(u) < 0 || int(u) >= len(names) {
 		return names[0]
 	}
@@ -152,7 +153,7 @@ func New(cfg Config) (*Client, error) {
 		cfg.Now = time.Now
 	}
 	upstream := cfg.Upstream
-	if upstream > UpstreamQuickwit {
+	if upstream > UpstreamAlertmanager {
 		upstream = UpstreamOther
 	}
 	c := &Client{

@@ -17,6 +17,10 @@ import { PageError, PageHeader, useDrillControls, useInvalidate } from "@/featur
 
 const SEV_TO_STATUS = { critical: "critical", warning: "warning", info: "progressing" } as const;
 
+export function alertSectionCount(section: { status: string; data?: unknown[] } | undefined) {
+  return section?.status === "ok" ? num(section.data?.length ?? 0) : "—";
+}
+
 /**
  * Alerts — 이슈 #17
  * --------------------------------------------------------------------------
@@ -113,11 +117,11 @@ export function AlertsView() {
                 <span className="chips" role="tablist" aria-label="알림 상태">
                   <button type="button" className="chip" role="tab" aria-selected={tab === "firing"} aria-pressed={tab === "firing"} onClick={() => setTab("firing")}>
                     진행 중
-                    <span className="chip__count num">{num(q.data?.firing.data?.length ?? 0)}</span>
+                    <span className="chip__count num">{alertSectionCount(q.data?.firing)}</span>
                   </button>
                   <button type="button" className="chip" role="tab" aria-selected={tab === "resolved"} aria-pressed={tab === "resolved"} onClick={() => setTab("resolved")}>
                     해소됨
-                    <span className="chip__count num">{num(q.data?.resolved.data?.length ?? 0)}</span>
+                    <span className="chip__count num">{alertSectionCount(q.data?.resolved)}</span>
                   </button>
                 </span>
               }
@@ -276,6 +280,15 @@ function AlertDetail({
           {alert.entity ? (
             <>
               <Link to={refPath(alert.entity, search)}>관련 대상 상세 →</Link>
+              {alert.entity.workloadName && alert.entity.workloadKind && (
+                <Link
+                  to={withSearch(`/workloads/${alert.entity.workloadKind}/${encodeURIComponent(alert.entity.workloadName)}`, search, {
+                    ns: alert.entity.namespace ?? "",
+                  })}
+                >
+                  관련 Workload 상세 →
+                </Link>
+              )}
               <Link to={logsPath(alert.entity, search)}>관련 로그 →</Link>
             </>
           ) : (
@@ -284,9 +297,9 @@ function AlertDetail({
             </span>
           )}
           {alert.sourceUrl && (
-            <span className="muted" style={{ font: "var(--type-meta)" }}>
-              원본: <span className="ds-ident">{alert.sourceUrl}</span>
-            </span>
+            <a href={alert.sourceUrl} target="_blank" rel="noopener noreferrer">
+              Alertmanager 원본 열기 ↗
+            </a>
           )}
         </div>
 

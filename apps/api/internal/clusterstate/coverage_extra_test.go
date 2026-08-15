@@ -309,6 +309,10 @@ func TestCatalogPodsBorrowsIdentity(t *testing.T) {
 	if len(one) != 1 || one[0].Namespace != "payments" {
 		t.Fatalf("limit·namespace 필터: %+v", one)
 	}
+	three := store.CatalogPods(testcluster.ClusterID, "", 3)
+	if len(all) < 4 || len(three) != 3 {
+		t.Fatalf("real Store limit truncation all=%d limited=%d", len(all), len(three))
+	}
 }
 
 func TestDirectCatalogAndProviderPreserveServerOwnedClusterIdentity(t *testing.T) {

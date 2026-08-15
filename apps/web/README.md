@@ -155,6 +155,8 @@ src/
   운영자는 화면을 믿지 않습니다.
 - label의 namespace/workload를 Unified Entity Model로 매핑해 상세·로그 deep link를 겁니다.
   매핑에 실패하면 "매핑 없음"을 표시하고 원본 시스템으로 안내합니다.
+- Alertmanager API v2는 현재 firing/suppressed만 제공합니다. history adapter가 없는 운영에서는
+  Active는 정상 동작하고 Resolved와 resolved 포함 counts만 `history_not_configured`로 degraded됩니다.
 
 ### Mock 규칙
 

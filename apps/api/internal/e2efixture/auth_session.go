@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -32,6 +33,8 @@ import (
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
@@ -48,6 +51,8 @@ type AuthSessionConfig struct {
 	PublicOrigin  string
 	CertFile      string
 	KeyFile       string
+	BackendAddr   string
+	Alertmanager  alertmanager.Config
 }
 
 type AuthSessionFixture struct {
@@ -61,6 +66,7 @@ type AuthSessionFixture struct {
 	replica       [2]atomic.Uint64
 	hub           *stream.Hub
 	streamMetrics *stream.Metrics
+	alerts        *alertmanager.Source
 	closeOnce     sync.Once
 }
 
@@ -89,6 +95,9 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 		return nil, err
 	}
 	f := &AuthSessionFixture{idp: idp, Issuer: idp.URL()}
+	if cfg.PublicOrigin != "" {
+		idp.authorizationURL = strings.TrimRight(cfg.PublicOrigin, "/") + "/e2e/idp/authorize"
+	}
 	if cfg.CertFile != "" || cfg.KeyFile != "" {
 		if cfg.CertFile == "" || cfg.KeyFile == "" {
 			return nil, errors.New("both fixture certificate paths are required")
@@ -114,6 +123,10 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || operationalPath[r.URL.Path] {
 			apiProxies[rr.Add(1)%uint64(len(apiProxies))].ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/e2e/idp/authorize" && r.Method == http.MethodGet {
+			idp.handleAuthorize(w, r)
 			return
 		}
 		if r.URL.Path == "/e2e/evidence" {
@@ -175,6 +188,18 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 		_, _ = io.WriteString(w, enabled)
 	})
 	f.server = httptest.NewUnstartedServer(proxy)
+	if cfg.BackendAddr != "" {
+		host, port, splitErr := net.SplitHostPort(cfg.BackendAddr)
+		ip := net.ParseIP(host)
+		if splitErr != nil || ip == nil || !ip.IsPrivate() || port != "0" {
+			return nil, errors.New("auth fixture backend must use an explicit private IP and port 0")
+		}
+		listener, listenErr := net.Listen("tcp", cfg.BackendAddr)
+		if listenErr != nil {
+			return nil, listenErr
+		}
+		f.server.Listener = listener
+	}
 	f.server.StartTLS()
 	f.URL = f.server.URL
 	publicOrigin := cfg.PublicOrigin
@@ -195,6 +220,14 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 		return nil, err
 	}
 	source := NewSource(store, scenarios)
+	var alerts datasource.Alerts = source
+	if cfg.Alertmanager.Enabled {
+		f.alerts, err = alertmanager.New(cfg.Alertmanager, store)
+		if err != nil {
+			return nil, err
+		}
+		alerts = f.alerts
+	}
 	streamMetrics := stream.NewMetrics()
 	hub, err := stream.New(stream.Config{ClusterIDs: []string{testcluster.ClusterID}}, streamMetrics)
 	if err != nil {
@@ -218,7 +251,7 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 			return nil, resolveErr
 		}
 		f.resolver[i] = resolver
-		api := httpapi.NewServer(httpapi.Deps{Store: store, Metrics: source, Logs: source, Alerts: source,
+		api := httpapi.NewServer(httpapi.Deps{Store: store, Metrics: source, Logs: source, Alerts: alerts,
 			Topology: source, Resolver: resolver, Logger: logger, Now: time.Now,
 			Stream: hub, StreamMetrics: streamMetrics,
 			Version: contract.VersionInfo{Version: "auth-e2e", Commit: "none", BuildDate: time.Now().UTC().Format(time.RFC3339)}})
@@ -253,6 +286,9 @@ func (f *AuthSessionFixture) Close() {
 				server.Close()
 			}
 		}
+		if f.alerts != nil {
+			_ = f.alerts.Close()
+		}
 		for _, resolver := range f.resolver {
 			if resolver != nil {
 				_ = resolver.Close()
@@ -275,6 +311,7 @@ type codeIDP struct {
 	codes                       map[string]authCode
 	refresh                     map[string]bool
 	callback                    string
+	authorizationURL            string
 	authorize, token, refreshed atomic.Uint64
 	nextTokenTTL                atomic.Int64
 	nextRefreshDelay            atomic.Int64
@@ -315,7 +352,11 @@ func (m *codeIDP) writeTLSFiles(certFile, keyFile string) error {
 func (m *codeIDP) Close() { m.server.Close() }
 func (m *codeIDP) discovery(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"issuer": m.URL(), "jwks_uri": m.URL() + "/jwks", "authorization_endpoint": m.URL() + "/authorize", "token_endpoint": m.URL() + "/token"})
+	authorizationURL := m.authorizationURL
+	if authorizationURL == "" {
+		authorizationURL = m.URL() + "/authorize"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"issuer": m.URL(), "jwks_uri": m.URL() + "/jwks", "authorization_endpoint": authorizationURL, "token_endpoint": m.URL() + "/token"})
 }
 func (m *codeIDP) jwks(w http.ResponseWriter, _ *http.Request) {
 	pub := &m.key.PublicKey

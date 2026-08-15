@@ -354,7 +354,7 @@ k8s-dashboard/
 - Pod Topology 및 방향별 요청 집계
 - Logs Explorer
 - Metric/Log/Event/Alert Drill-down
-- Grafana Alerting 또는 Alertmanager 조회 연동 *(UI 구현됨 — Adapter는 백엔드 과제)*
+- Alertmanager 현재 알림 조회 연동 *(구현됨; Resolved 운영 이력 adapter는 P2 후속, ADR 0012)*
 - Dashboard DSL 기반 읽기 전용 대시보드 *(구현 — schemaVersion 1, bounded loader, 6종 폐쇄형 registry, generic route)*
 - Helm/Kustomize 배포
 - CI, 보안 검증, E2E 테스트

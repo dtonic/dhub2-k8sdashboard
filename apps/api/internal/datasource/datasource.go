@@ -17,6 +17,7 @@ import (
 
 // ErrUnavailable은 데이터소스에 붙지 못했을 때입니다.
 var ErrUnavailable = errors.New("데이터소스에 연결할 수 없습니다")
+var ErrAlertHistoryNotConfigured = errors.New("history_not_configured")
 
 // Window는 어댑터에 넘기는 확정된 조회 구간입니다.
 type Window struct {
@@ -109,6 +110,8 @@ type AlertQuery struct {
 type AlertResult struct {
 	Firing   []contract.AlertInstance
 	Resolved []contract.AlertInstance
+	// HistoryErr는 현재 Alertmanager 가용성과 독립적인 이력 섹션 오류입니다.
+	HistoryErr error
 	// GroupingRule은 무엇을 기준으로 묶었는지입니다. 화면에 그대로 노출합니다.
 	GroupingRule string
 }

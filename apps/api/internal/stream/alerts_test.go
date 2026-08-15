@@ -5,12 +5,20 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 )
+
+type staticAlerts struct{ result datasource.AlertResult }
+
+func (s staticAlerts) List(context.Context, datasource.AlertQuery) (datasource.AlertResult, error) {
+	return s.result, nil
+}
 
 // scriptedAlerts는 호출마다 정해진 결과를 돌려주는 가짜 알림 소스입니다.
 type scriptedAlerts struct {
@@ -39,6 +47,120 @@ func fixed(firing, resolved []contract.AlertInstance) func() (datasource.AlertRe
 	return func() (datasource.AlertResult, error) {
 		return datasource.AlertResult{Firing: firing, Resolved: resolved}, nil
 	}
+}
+
+func TestAlertPollerIgnoresIndependentHistoryError(t *testing.T) {
+	a := contract.AlertInstance{ID: "current", Status: "firing"}
+	src := &scriptedAlerts{results: []func() (datasource.AlertResult, error){func() (datasource.AlertResult, error) {
+		return datasource.AlertResult{Firing: []contract.AlertInstance{a}, HistoryErr: datasource.ErrAlertHistoryNotConfigured}, nil
+	}}}
+	p, _, _ := newAlertFixture(t, src, 10)
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("current snapshot must not fail with unavailable history: %v", err)
+	}
+}
+
+func TestAlertPollOnceReadsTrustedNamespacesExactlyOnce(t *testing.T) {
+	a := alert("a1", "payments")
+	src := &scriptedAlerts{results: []func() (datasource.AlertResult, error){fixed([]contract.AlertInstance{a}, nil)}}
+	calls := 0
+	p := NewAlertPoller(AlertPollerConfig{ClusterID: testCluster, MaxAlerts: 10, TrustedNamespaces: func() map[string]string {
+		calls++
+		return map[string]string{"pod:pod-a1": "payments"}
+	}}, src, newTestHub(t, Config{}, nil), slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	if err := p.PollOnce(context.Background()); err != nil || calls != 1 {
+		t.Fatalf("PollOnce trusted namespace calls=%d err=%v", calls, err)
+	}
+}
+
+func BenchmarkAlertPollOnce2000With100kTrustedCatalog(b *testing.B) {
+	alerts := make([]contract.AlertInstance, 2000)
+	for i := range alerts {
+		id := strconv.Itoa(i)
+		alerts[i] = contract.AlertInstance{ID: "a-" + id, Status: "firing", Entity: &contract.EntityRef{ClusterID: testCluster, Namespace: "ns", PodUID: "pod-" + id}}
+	}
+	p := NewAlertPoller(AlertPollerConfig{ClusterID: testCluster, MaxAlerts: 2000, TrustedNamespaces: func() map[string]string {
+		trusted := make(map[string]string, 100000)
+		for i := 0; i < 100000; i++ {
+			trusted["pod-"+strconv.Itoa(i)] = "ns"
+		}
+		return trusted
+	}}, staticAlerts{result: datasource.AlertResult{Firing: alerts}}, nil, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := p.PollOnce(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+type pollPerformanceSample struct {
+	Latency      time.Duration
+	TotalAlloc   uint64
+	CatalogCalls int
+}
+
+func validatePollPerformance(got, limit pollPerformanceSample) error {
+	if got.Latency > limit.Latency {
+		return errors.New("latency budget")
+	}
+	if got.TotalAlloc > limit.TotalAlloc {
+		return errors.New("allocation budget")
+	}
+	if got.CatalogCalls > limit.CatalogCalls {
+		return errors.New("catalog call budget")
+	}
+	return nil
+}
+
+func TestAlertPollOncePerformanceBudgetsAndIndependentMutations(t *testing.T) {
+	limit := pollPerformanceSample{Latency: 100 * time.Millisecond, TotalAlloc: 32 << 20, CatalogCalls: 1}
+	valid := pollPerformanceSample{Latency: time.Millisecond, TotalAlloc: 1, CatalogCalls: 1}
+	for name, mutate := range map[string]func(*pollPerformanceSample){
+		"latency":      func(s *pollPerformanceSample) { s.Latency = limit.Latency + 1 },
+		"allocation":   func(s *pollPerformanceSample) { s.TotalAlloc = limit.TotalAlloc + 1 },
+		"catalog-call": func(s *pollPerformanceSample) { s.CatalogCalls = limit.CatalogCalls + 1 },
+	} {
+		t.Run(name+" mutation", func(t *testing.T) {
+			x := valid
+			mutate(&x)
+			if validatePollPerformance(x, limit) == nil {
+				t.Fatal("independent +1 mutation accepted")
+			}
+		})
+	}
+	alerts := make([]contract.AlertInstance, 2000)
+	for i := range alerts {
+		id := strconv.Itoa(i)
+		alerts[i] = contract.AlertInstance{ID: "a-" + id, Status: "firing", Entity: &contract.EntityRef{ClusterID: testCluster, Namespace: "ns", PodUID: "pod-" + id}}
+	}
+	calls := 0
+	p := NewAlertPoller(AlertPollerConfig{ClusterID: testCluster, MaxAlerts: 2000, TrustedNamespaces: func() map[string]string {
+		calls++
+		trusted := make(map[string]string, 100000)
+		for i := 0; i < 100000; i++ {
+			trusted["pod-"+strconv.Itoa(i)] = "ns"
+		}
+		return trusted
+	}}, staticAlerts{result: datasource.AlertResult{Firing: alerts}}, nil, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	started := time.Now()
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(started)
+	runtime.ReadMemStats(&after)
+	got := pollPerformanceSample{Latency: elapsed, TotalAlloc: after.TotalAlloc - before.TotalAlloc, CatalogCalls: calls}
+	if raceEnabled {
+		got.Latency = 0
+	}
+	if err := validatePollPerformance(got, limit); err != nil {
+		t.Fatalf("PollOnce performance=%+v: %v", got, err)
+	}
+	t.Logf("PollOnce performance latency=%s alloc=%d calls=%d", got.Latency, got.TotalAlloc, got.CatalogCalls)
 }
 
 func newAlertFixture(t *testing.T, src datasource.Alerts, maxAlerts int) (*AlertPoller, *Subscription, *Hub) {

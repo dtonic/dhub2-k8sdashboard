@@ -22,7 +22,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- range $octets }}{{- if or (not (regexMatch "^[0-9]{1,3}$" .)) (gt (atoi .) 255) }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}{{- end -}}
 {{- if eq . "0.0.0.0/0" }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}
 {{- end -}}
+{{- define "dashboard.validAlertIPv4CIDR" -}}
+{{- $parts := splitList "/" . -}}
+{{- if ne (len $parts) 2 }}{{ fail "alerts egress IPv4 CIDR is invalid" }}{{ end -}}
+{{- $ipv4 := "^(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}$" -}}
+{{- if or (not (regexMatch $ipv4 (index $parts 0))) (not (regexMatch "^(?:[1-9]|[12][0-9]|3[0-2])$" (index $parts 1))) }}{{ fail "alerts egress IPv4 CIDR is invalid" }}{{ end -}}
+{{- if eq . "0.0.0.0/0" }}{{ fail "alerts egress IPv4 CIDR is invalid" }}{{ end -}}
+{{- end -}}
 {{- define "dashboard.validate" -}}
+{{- range $name, $_ := .Values.api.config -}}{{- if hasPrefix "ALERTMANAGER_" $name }}{{ fail "api.config must not define reserved ALERTMANAGER_ environment keys" }}{{ end -}}{{- end -}}
 {{- $central := eq .Values.clusterState.mode "central" -}}
 {{- if not (has .Values.clusterState.mode (list "direct" "central")) }}{{ fail "clusterState.mode must be direct or central" }}{{ end -}}
 {{- if $central -}}
@@ -96,6 +104,42 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- range .Values.networkPolicy.external -}}
 {{- if hasKey $purposes .purpose }}{{ fail (printf "duplicate external network purpose: %s" .purpose) }}{{ end -}}
 {{- $_ := set $purposes .purpose true -}}
+{{- end -}}
+{{- $alertEgress := list -}}
+{{- range .Values.networkPolicy.external -}}{{- if eq .purpose "alertmanager" }}{{- $alertEgress = append $alertEgress . -}}{{- end -}}{{- end -}}
+{{- if .Values.alerts.enabled -}}
+{{- if ne .Values.networkPolicy.enabled true }}{{ fail "enabled alerts require NetworkPolicy" }}{{ end -}}
+{{- $urlPattern := "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:/[A-Za-z0-9_-][A-Za-z0-9._~-]*)*$" -}}
+{{- if or (gt (len .Values.alerts.url) 512) (gt (len .Values.alerts.publicURL) 512) (not (regexMatch $urlPattern .Values.alerts.url)) (not (regexMatch $urlPattern .Values.alerts.publicURL)) }}{{ fail "alerts URLs must be bounded HTTPS URLs without userinfo, query, fragment, or dot paths" }}{{ end -}}
+{{- $authority := first (splitList "/" (trimPrefix "https://" .Values.alerts.url)) -}}
+{{- $authorityParts := splitList ":" $authority -}}
+{{- if gt (len $authorityParts) 2 }}{{ fail "alerts URL host and port are invalid" }}{{ end -}}
+{{- $urlPort := 443 -}}{{- if eq (len $authorityParts) 2 }}{{- $urlPort = atoi (index $authorityParts 1) -}}{{- end -}}
+{{- if or (lt $urlPort 1) (gt $urlPort 65535) }}{{ fail "alerts URL port is outside safe bounds" }}{{ end -}}
+{{- $dnsName := "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$" -}}
+{{- $urlHost := first $authorityParts -}}
+{{- if regexMatch "^[0-9.]+$" $urlHost }}{{- include "dashboard.validAlertIPv4CIDR" (printf "%s/32" $urlHost) -}}{{- else if or (gt (len $urlHost) 253) (not (regexMatch $dnsName $urlHost)) }}{{ fail "alerts URL hostname is invalid" }}{{ end -}}
+{{- $publicAuthority := first (splitList "/" (trimPrefix "https://" .Values.alerts.publicURL)) -}}{{- $publicParts := splitList ":" $publicAuthority -}}
+{{- if gt (len $publicParts) 2 }}{{ fail "alerts public URL host and port are invalid" }}{{ end -}}
+{{- $publicPort := 443 -}}{{- if eq (len $publicParts) 2 }}{{- $publicPort = atoi (index $publicParts 1) -}}{{- end -}}
+{{- if or (lt $publicPort 1) (gt $publicPort 65535) }}{{ fail "alerts public URL port is outside safe bounds" }}{{ end -}}
+{{- $publicHost := first $publicParts -}}{{- if regexMatch "^[0-9.]+$" $publicHost }}{{- include "dashboard.validAlertIPv4CIDR" (printf "%s/32" $publicHost) -}}{{- else if or (gt (len $publicHost) 253) (not (regexMatch $dnsName $publicHost)) }}{{ fail "alerts public URL hostname is invalid" }}{{ end -}}
+{{- if empty .Values.alerts.serverName }}{{ fail "alerts TLS serverName is invalid" }}{{ end -}}
+{{- if regexMatch "^[0-9.]+$" .Values.alerts.serverName }}{{- include "dashboard.validAlertIPv4CIDR" (printf "%s/32" .Values.alerts.serverName) -}}{{- else if or (gt (len .Values.alerts.serverName) 253) (not (regexMatch $dnsName .Values.alerts.serverName)) }}{{ fail "alerts TLS serverName is invalid" }}{{ end -}}
+{{- if or (gt (len .Values.alerts.clusterLabel) 128) (gt (len .Values.alerts.namespaceLabel) 128) (not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" .Values.alerts.clusterLabel)) (not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" .Values.alerts.namespaceLabel)) (eq .Values.alerts.clusterLabel .Values.alerts.namespaceLabel) }}{{ fail "alerts cluster and namespace labels must be valid and distinct" }}{{ end -}}
+{{- if not (regexMatch "^(?:[1-9][0-9]{2}ms|[1-9]s|[12][0-9]s|30s)$" (toString .Values.alerts.timeout)) }}{{ fail "alerts timeout is outside 100ms..30s" }}{{ end -}}
+{{- if or (lt (int64 .Values.alerts.maxBodyBytes) 65536) (gt (int64 .Values.alerts.maxBodyBytes) 16777216) (lt (int .Values.alerts.maxAlerts) 1) (gt (int .Values.alerts.maxAlerts) 10000) (lt (int .Values.alerts.maxConcurrent) 1) (gt (int .Values.alerts.maxConcurrent) 32) }}{{ fail "alerts limits are outside safe bounds" }}{{ end -}}
+{{- $secret := .Values.alerts.existingSecret -}}
+{{- if or (empty $secret.name) (empty $secret.tokenKey) (empty $secret.caKey) (eq $secret.tokenKey $secret.caKey) }}{{ fail "alerts existing Secret and distinct token/CA keys are required" }}{{ end -}}
+{{- $secretName := "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$" -}}
+{{- if or (gt (len $secret.name) 253) (gt (len $secret.tokenKey) 253) (gt (len $secret.caKey) 253) (gt (len $secret.clientCertKey) 253) (gt (len $secret.clientKeyKey) 253) (not (regexMatch $secretName $secret.name)) (not (regexMatch "^[-._A-Za-z0-9]+$" $secret.tokenKey)) (not (regexMatch "^[-._A-Za-z0-9]+$" $secret.caKey)) }}{{ fail "alerts Secret name or keys are invalid" }}{{ end -}}
+{{- if ne (empty $secret.clientCertKey) (empty $secret.clientKeyKey) }}{{ fail "alerts client certificate and key must be configured together" }}{{ end -}}
+{{- if and (not (empty $secret.clientCertKey)) (or (not (regexMatch "^[-._A-Za-z0-9]+$" $secret.clientCertKey)) (not (regexMatch "^[-._A-Za-z0-9]+$" $secret.clientKeyKey))) }}{{ fail "alerts client certificate Secret keys are invalid" }}{{ end -}}
+{{- if and (not (empty $secret.clientCertKey)) (or (eq $secret.clientCertKey $secret.clientKeyKey) (eq $secret.clientCertKey $secret.tokenKey) (eq $secret.clientCertKey $secret.caKey) (eq $secret.clientKeyKey $secret.tokenKey) (eq $secret.clientKeyKey $secret.caKey)) }}{{ fail "alerts Secret keys must be unique" }}{{ end -}}
+{{- if ne (len $alertEgress) 1 }}{{ fail "enabled alerts require exactly one alertmanager egress destination" }}{{ end -}}
+{{- $egress := first $alertEgress -}}{{- include "dashboard.validAlertIPv4CIDR" $egress.cidr -}}
+{{- if or (ne (default "TCP" $egress.protocol) "TCP") (ne (int $egress.port) $urlPort) }}{{ fail "alerts URL port must match its TCP NetworkPolicy egress port" }}{{ end -}}
+{{- else if gt (len $alertEgress) 0 -}}{{ fail "alertmanager egress requires alerts.enabled=true" }}
 {{- end -}}
 {{- $mode := .Values.telemetry.mode -}}
 {{- if and (ne $mode "disabled") (empty .Values.telemetry.clusterName) }}{{ fail "enabled telemetry requires clusterName" }}{{ end -}}

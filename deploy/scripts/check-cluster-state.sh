@@ -14,11 +14,15 @@ for env in dev stage prod; do
   cmp "$TMP/$env.yaml" "$TMP/$env-direct.yaml"
 done
 helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" > "$TMP/central.yaml"
+helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" \
+  --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml > "$TMP/central-alertmanager.yaml"
 helm template agent "$AGENT" --values "$AGENT/values-example.yaml" > "$TMP/agent.yaml"
 helm template agent "$AGENT" --values "$AGENT/values-example.yaml" --set 'registry.cidrs[0]=128.0.0.0/1' --set 'kubernetesApiCidrs[0]=192.0.2.1/32' >/dev/null
 helm template agent "$AGENT" --values "$AGENT/values-example.yaml" --set limits.maxChunkResources=1000 >/dev/null
 docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.31.0 < "$TMP/central.yaml"
+docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.31.0 < "$TMP/central-alertmanager.yaml"
 docker run --rm -i "$KUBECONFORM" -strict -summary -kubernetes-version 1.31.0 < "$TMP/agent.yaml"
+python3 "$ROOT/deploy/scripts/check-alertmanager.py" "$TMP/central-alertmanager.yaml" --baseline "$TMP/central.yaml" --self-test
 python3 - "$TMP/central.yaml" "$TMP/agent.yaml" <<'PY'
 import sys,yaml
 c=[x for x in yaml.safe_load_all(open(sys.argv[1])) if x]; a=[x for x in yaml.safe_load_all(open(sys.argv[2])) if x]
@@ -42,6 +46,8 @@ for pod in (api,reg,agent):
  assert ct['securityContext']['readOnlyRootFilesystem'] and ct['securityContext']['capabilities']['drop']==['ALL'] and ct.get('resources')
 PY
 expect_main_fail() { if helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" "$@" >/dev/null 2>&1; then echo "central mutation passed: $*" >&2; exit 1; fi; }
+expect_alert_fail() { if helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml "$@" >/dev/null 2>&1; then echo "Alertmanager mutation passed: $*" >&2; exit 1; fi; }
+expect_alert_helper_fail() { if helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml --skip-schema-validation "$@" >/dev/null 2>&1; then echo "Alertmanager helper mutation passed: $*" >&2; exit 1; fi; }
 expect_agent_fail() { if helm template agent "$AGENT" --values "$AGENT/values-example.yaml" "$@" >/dev/null 2>&1; then echo "agent mutation passed: $*" >&2; exit 1; fi; }
 expect_main_fail --set clusterState.tls.apiExistingSecret=
 expect_main_fail --set clusterState.tls.registryExistingSecret=cluster-state-api-mtls
@@ -78,6 +84,76 @@ helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN
 helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --set clusterState.limits.maxMessageBytes=4194304 --set clusterState.limits.ingressByteBurst=4194304 >/dev/null
 helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --set clusterState.limits.maxResources=1000 --set clusterState.limits.maxChunkResources=1000 --set clusterState.limits.maxMessageBytes=4194304 --set clusterState.limits.maxStateBytes=4194304 --set clusterState.limits.maxTotalStateBytes=4194304 --set clusterState.registry.resources.limits.memory=8Mi >/dev/null
 expect_main_fail --set clusterState.registry.resources.limits.memory=512Mi
+expect_main_fail --set api.config.ALERTMANAGER_ENABLED=true
+expect_alert_fail --set alerts.url=http://alerts.example.test:9443/am
+expect_alert_fail --set api.config.ALERTMANAGER_TOKEN_FILE=/tmp/raw
+expect_alert_fail --set alerts.url=https://user@alerts.example.test:9443/am
+expect_alert_fail --set alerts.url=https://alerts.example.test:9443/am?x=y
+expect_alert_fail --set alerts.url=https://alerts.example.test:9443/../api
+expect_alert_fail --set alerts.url=https://bad_host:9443/am
+expect_alert_fail --set alerts.url=https://alerts.example.test:0/am
+expect_alert_fail --set alerts.url=https://alerts.example.test:65536/am
+expect_alert_fail --set alerts.publicURL=https://999.2.3.4/am
+expect_alert_fail --set alerts.publicURL=https://alerts.example.test:65536/am
+expect_alert_fail --set alerts.serverName=bad_name
+expect_alert_fail --set alerts.clusterLabel=bad-label
+expect_alert_fail --set alerts.namespaceLabel=k8s_cluster_name
+expect_alert_fail --set alerts.timeout=99ms
+expect_alert_fail --set alerts.timeout=31s
+expect_alert_fail --set alerts.maxBodyBytes=65535
+expect_alert_fail --set alerts.maxBodyBytes=16777217
+expect_alert_fail --set alerts.maxAlerts=0
+expect_alert_fail --set alerts.maxAlerts=10001
+expect_alert_fail --set alerts.maxConcurrent=0
+expect_alert_fail --set alerts.maxConcurrent=33
+expect_alert_fail --set alerts.existingSecret.name=
+expect_alert_fail --set alerts.existingSecret.name=a..b
+expect_alert_fail --set alerts.existingSecret.name=a.-b
+expect_alert_fail --set alerts.existingSecret.name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test
+expect_alert_fail --set alerts.existingSecret.name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+expect_alert_fail --set alerts.existingSecret.caKey=bearer-token
+expect_alert_fail --set alerts.existingSecret.clientKeyKey=
+expect_alert_fail --set-json 'networkPolicy.external=[]'
+expect_alert_fail --set networkPolicy.external[0].purpose=oidc
+expect_alert_fail --set networkPolicy.external[0].port=443
+expect_alert_fail --set networkPolicy.external[0].protocol=UDP
+expect_alert_fail --set networkPolicy.external[0].cidr=0.0.0.0/0
+expect_alert_fail --set networkPolicy.external[0].cidr=256.0.0.1/32
+expect_alert_fail --set networkPolicy.external[0].cidr=192.0.002.10/32
+expect_alert_fail --set networkPolicy.external[0].cidr=192.0.2.10/01
+expect_alert_fail --set networkPolicy.external[0].cidr=192.0.2.10/032
+expect_alert_fail --set alerts.url=https://192.0.002.10:9443/am
+expect_alert_fail --set alerts.serverName=192.0.002.10
+expect_alert_fail --set networkPolicy.external[1].purpose=alertmanager --set networkPolicy.external[1].cidr=192.0.2.11/32 --set networkPolicy.external[1].port=9443
+expect_alert_fail --set networkPolicy.enabled=false
+expect_alert_helper_fail --set networkPolicy.enabled=false
+expect_alert_helper_fail --set api.config.ALERTMANAGER_ENABLED=true
+expect_alert_helper_fail --set alerts.url=https://alerts.example.test:65536/am
+expect_alert_helper_fail --set alerts.publicURL=https://alerts.example.test:65536/am
+expect_alert_helper_fail --set alerts.clusterLabel=bad-label
+expect_alert_helper_fail --set alerts.namespaceLabel=k8s_cluster_name
+expect_alert_helper_fail --set alerts.timeout=31s
+expect_alert_helper_fail --set alerts.maxBodyBytes=16777217
+expect_alert_helper_fail --set alerts.maxAlerts=10001
+expect_alert_helper_fail --set alerts.maxConcurrent=33
+expect_alert_helper_fail --set alerts.existingSecret.name=a..b
+expect_alert_helper_fail --set alerts.existingSecret.name=a.-b
+expect_alert_helper_fail --set alerts.existingSecret.name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test
+expect_alert_helper_fail --set alerts.existingSecret.name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+expect_alert_helper_fail --set alerts.existingSecret.clientCertKey=bad/key
+expect_alert_helper_fail --set alerts.existingSecret.clientKeyKey=
+expect_alert_helper_fail --set networkPolicy.external[0].cidr=192.0.002.10/32
+expect_alert_helper_fail --set networkPolicy.external[0].cidr=192.0.2.10/01
+expect_alert_helper_fail --set networkPolicy.external[0].cidr=192.0.2.10/032
+expect_alert_helper_fail --set alerts.url=https://192.0.002.10:9443/am
+expect_alert_helper_fail --set alerts.serverName=192.0.002.10
+expect_alert_helper_fail --set networkPolicy.external[0].port=443
+expect_alert_helper_fail --set networkPolicy.external[0].protocol=UDP
+expect_alert_helper_fail --set networkPolicy.external[1].purpose=alertmanager --set networkPolicy.external[1].cidr=192.0.2.11/32 --set networkPolicy.external[1].port=9443
+helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml \
+  --set alerts.timeout=100ms --set alerts.maxBodyBytes=65536 --set alerts.maxAlerts=1 --set alerts.maxConcurrent=1 >/dev/null
+helm template dashboard "$MAIN" --values "$MAIN/values-dev.yaml" --values "$MAIN/values-central-example.yaml" --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml \
+  --set alerts.timeout=30s --set alerts.maxBodyBytes=16777216 --set alerts.maxAlerts=10000 --set alerts.maxConcurrent=32 >/dev/null
 expect_main_fail --set api.config.AUTH_MODE=mock
 expect_agent_fail --set tls.existingSecret=
 expect_agent_fail --set image.digest=latest

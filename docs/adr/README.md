@@ -17,6 +17,7 @@
 | [0009](./0009-dashboard-drafts-postgresql-and-git-export.md) | Dashboard draft PostgreSQL 저장과 승인본 Git export | Proposed | 2026-08-15 |
 | [0010](./0010-multi-cluster-state-agent-registry.md) | 멀티 클러스터 상태 Agent와 중앙 Registry | Proposed | 2026-08-15 |
 | [0011](./0011-server-side-oidc-browser-session.md) | 서버 측 OIDC 브라우저 세션 | Proposed | 2026-08-15 |
+| [0012](./0012-alertmanager-current-alerts-and-history-boundary.md) | Alertmanager 현재 알림과 해소 이력의 경계를 분리한다 | Proposed | 2026-08-15 |
 
 ## 상태 값
 

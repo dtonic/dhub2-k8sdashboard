@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/testcluster"
 )
 
@@ -34,6 +36,33 @@ func defaultCatalog(t *testing.T) querycatalog.Catalog {
 		t.Fatal(err)
 	}
 	return qc
+}
+
+type cancelCountingAlerts struct{ calls atomic.Int32 }
+
+func (a *cancelCountingAlerts) List(ctx context.Context, _ datasource.AlertQuery) (datasource.AlertResult, error) {
+	a.calls.Add(1)
+	<-ctx.Done()
+	return datasource.AlertResult{}, ctx.Err()
+}
+
+func TestDirectAlertPollerJoinsBeforeReturnAndStopsCalls(t *testing.T) {
+	source := &cancelCountingAlerts{}
+	poller := stream.NewAlertPoller(stream.AlertPollerConfig{ClusterID: "a", Interval: time.Second, MaxAlerts: 10}, source, nil, discardLogger())
+	stop := startDirectAlertPoller(context.Background(), poller, discardLogger())
+	deadline := time.Now().Add(time.Second)
+	for source.calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	started := time.Now()
+	stop()
+	if source.calls.Load() != 1 || time.Since(started) > time.Second {
+		t.Fatalf("direct poller calls=%d stop=%s", source.calls.Load(), time.Since(started))
+	}
+	time.Sleep(20 * time.Millisecond)
+	if source.calls.Load() != 1 {
+		t.Fatalf("direct poller called source after stop: %d", source.calls.Load())
+	}
 }
 
 // TestRunStopsOnInvalidConfigBeforeKubernetes — 잘못된 필수 설정은 Kubernetes
@@ -76,6 +105,21 @@ func TestRunStopsOnInvalidConfigBeforeKubernetes(t *testing.T) {
 	t.Setenv("DASHBOARD_CURSOR_KEY", "")
 	if err := run(discardLogger()); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
 		t.Fatalf("builder without database did not fail before Kubernetes setup: %v", err)
+	}
+}
+
+func TestRunRejectsEnabledAlertmanagerBeforeKubernetesOrListener(t *testing.T) {
+	t.Setenv("AUTH_MODE", "none")
+	t.Setenv("ADDR", "127.0.0.1:0")
+	t.Setenv("ALERTMANAGER_ENABLED", "true")
+	t.Setenv("ALERTMANAGER_URL", "https://alerts.example/prefix")
+	t.Setenv("ALERTMANAGER_PUBLIC_URL", "https://alerts.example/ui")
+	t.Setenv("ALERTMANAGER_TOKEN_FILE", "/definitely-missing/alertmanager-token")
+	t.Setenv("ALERTMANAGER_CA_FILE", "/definitely-missing/alertmanager-ca")
+	t.Setenv("ALERTMANAGER_SERVER_NAME", "alerts.example")
+	err := run(discardLogger())
+	if err == nil || !strings.Contains(err.Error(), "Alertmanager token file") {
+		t.Fatalf("Alertmanager preflight did not fail first: %v", err)
 	}
 }
 
@@ -186,7 +230,7 @@ func TestSourcesSelectionMatrix(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%T", m), "demo") || strings.Contains(fmt.Sprintf("%T", l), "demo") {
 		t.Fatalf("실주소인데 데모 어댑터가 선택되었습니다: %T %T", m, l)
 	}
-	// 알림·토폴로지는 실클라이언트가 없으므로(#17 잔여) 데모가 남습니다.
+	// 이 helper 호출은 준비된 Alertmanager source를 주입하지 않으므로 알림·토폴로지는 데모가 남습니다.
 	if _, ok := a.(datasource.Unavailable); ok {
 		t.Fatal("데모 모드의 알림이 Unavailable입니다")
 	}

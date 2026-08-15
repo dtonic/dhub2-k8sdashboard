@@ -149,6 +149,24 @@ func TestScopedListsExcludeOtherNamespaces(t *testing.T) {
 	}
 }
 
+type currentOnlyAlerts struct{}
+
+func (currentOnlyAlerts) List(context.Context, datasource.AlertQuery) (datasource.AlertResult, error) {
+	return datasource.AlertResult{Firing: []contract.AlertInstance{{ID: "current", Name: "PodDown", Severity: "critical", Status: "firing", Source: "alertmanager", GroupKey: "PodDown / payments / checkout", GroupSize: 1}}, HistoryErr: datasource.ErrAlertHistoryNotConfigured, GroupingRule: "test"}, nil
+}
+
+func TestAlertsRouteKeepsCurrentWhenHistoryIsNotConfigured(t *testing.T) {
+	f := newFixture(t, func(d *httpapi.Deps) { d.Alerts = currentOnlyAlerts{} })
+	var res contract.AlertListResponse
+	rec := f.get(t, base+"/alerts?range=1h&ns=payments", &res)
+	if rec.Code != http.StatusOK || res.Firing.Status != contract.StatusOK || res.Firing.Data == nil || len(*res.Firing.Data) != 1 {
+		t.Fatalf("current route=%d firing=%+v", rec.Code, res.Firing)
+	}
+	if res.Resolved.Status != contract.StatusDegraded || res.Resolved.Reason != "history_not_configured" || res.Counts.Status != contract.StatusDegraded || res.Counts.Reason != "history_not_configured" {
+		t.Fatalf("resolved=%+v counts=%+v", res.Resolved, res.Counts)
+	}
+}
+
 func TestNodeHealthNeedsClusterWideScope(t *testing.T) {
 	// namespace로 제한된 사용자에게 노드 수를 0으로 보여주면 사실이 아닌 값이 됩니다.
 	scoped := newFixture(t)

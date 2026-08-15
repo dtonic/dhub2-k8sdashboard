@@ -64,6 +64,12 @@ KUBECONFIG=~/.kube/config make dev-api
 | `STREAM_HEARTBEAT` / `STREAM_WRITE_IDLE` | `15s` / `60s` | heartbeat comment 주기와 write 유휴 데드라인. heartbeat < idle이어야 하며, 살아 있는 스트림은 write마다 데드라인을 연장해 `WRITE_TIMEOUT`에 죽지 않습니다 |
 | `ALERT_POLL_INTERVAL` / `ALERT_POLL_MAX_BACKOFF` | `30s` / `5m` | 알림 스냅숏 diff 폴링 주기와 실패 시 최대 backoff. Kubernetes API가 아니라 알림 데이터소스 방향입니다 |
 | `ALERT_SNAPSHOT_MAX` | `2000` | 알림 스냅숏 상한. 초과 poll은 false add/delete를 막기 위해 diff 전체를 보류하고 이전 complete snapshot을 유지합니다 |
+| `ALERTMANAGER_ENABLED` | `false` | 실 Alertmanager API v2 읽기 전용 adapter opt-in |
+| `ALERTMANAGER_URL` / `ALERTMANAGER_PUBLIC_URL` | (비움) | API 경로 prefix와 사용자 source link용 별도 HTTPS URL. userinfo/query/fragment/redirect는 허용하지 않습니다 |
+| `ALERTMANAGER_TOKEN_FILE` / `ALERTMANAGER_CA_FILE` | (비움) | Bearer token(최대 8 KiB)과 private CA(최대 1 MiB) 절대 경로. 값 자체를 env에 넣지 않습니다 |
+| `ALERTMANAGER_CLIENT_CERT_FILE` / `ALERTMANAGER_CLIENT_KEY_FILE` | (비움) | 선택적 mTLS 파일 절대 경로(각 최대 1 MiB). 둘을 함께 설정해야 합니다 |
+| `ALERTMANAGER_SERVER_NAME` / `ALERTMANAGER_CLUSTER_LABEL` / `ALERTMANAGER_NAMESPACE_LABEL` | (비움) / `k8s_cluster_name` / `namespace` | TLS 서버 신원과 서버가 강제하는 cluster·namespace label |
+| `ALERTMANAGER_TIMEOUT` / `ALERTMANAGER_MAX_BODY_BYTES` / `ALERTMANAGER_MAX_ALERTS` / `ALERTMANAGER_MAX_CONCURRENT` | `5s` / `4194304` / `2000` / `4` | retry 포함 전체 deadline과 응답·알림·공유 동시성 상한 |
 | `USE_DEMO_DATA` | `true` | GreptimeDB/Quickwit/Alertmanager 없이 결정적 값으로 실행. **실주소가 설정된 데이터소스는 이 값과 무관하게 실제 어댑터를 씁니다** |
 | `ALLOWED_ORIGIN` | (비움) | 개발 중 Vite 오리진 허용 |
 
@@ -487,8 +493,10 @@ ITEST_KUBECONFIG=~/.kube/config \
 
 ## 아직 없는 것
 
-- Alertmanager/Grafana Alerting 실제 클라이언트 (#17 잔여). 알림·토폴로지는
-  데모 또는 degraded입니다. 메트릭·로그는 `GREPTIME_URL`·`QUICKWIT_URL`을 설정하면
+- Alertmanager 현재 알림 adapter는 구현되었습니다. 다만 API v2 현재 스냅숏은 해소 이력이
+  아니므로 Resolved와 resolved 포함 counts는 `history_not_configured`로 독립 degraded입니다.
+  운영 Resolved 이력은 Loki 또는 `GRAFANA_ALERTS` history adapter P2 후속입니다(ADR 0012).
+  토폴로지는 데모 또는 degraded입니다. 메트릭·로그는 `GREPTIME_URL`·`QUICKWIT_URL`을 설정하면
   실제 어댑터로 동작합니다 (#6·#7 구현됨 — 실인스턴스 검증은
   `GREPTIME_ITEST_URL`/`QUICKWIT_ITEST_URL`로 `make api-itest`가 수행합니다).
 - SubjectAccessReview 연동 Scope. OIDC 역할 기반 Scope는 #10으로 구현되었고
@@ -498,7 +506,6 @@ ITEST_KUBECONFIG=~/.kube/config \
   same-origin HttpOnly cookie proxy가 필요합니다.
   `GET /api/v1/clusters/{clusterId}/events/stream`, `internal/stream` 허브
   (재생 링 · Last-Event-ID 복구 · reset 폴백 · Scope 필터 · 연결 상한, ADR 0007).
-  알림 스트림의 **실소스**는 Alertmanager 실클라이언트가 생겨야 합니다 — 지금은
-  데모 소스 또는 조용한 degraded입니다.
+  Alertmanager를 opt-in하면 알림 스트림도 현재 알림 실스냅숏 diff를 사용합니다.
 - 통합 테스트의 CI 연결. 지금은 로컬에서만 돕니다 (#21).
 - 멀티 클러스터. 지금은 프로세스당 클러스터 하나입니다.

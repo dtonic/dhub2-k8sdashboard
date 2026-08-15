@@ -17,7 +17,7 @@ var routes = [...]string{
 	"workload", "pod", "logs", "topology", "edge_series", "alerts", "stream", "dashboard", "unmatched",
 }
 var statusClasses = [...]string{"2xx", "3xx", "4xx", "5xx", "other", "canceled"}
-var upstreams = [...]string{"other", "greptime", "quickwit"}
+var upstreams = [...]string{"other", "greptime", "quickwit", "alertmanager"}
 var outcomes = [...]string{"success", "timeout", "canceled", "bad_query", "unavailable", "circuit_open"}
 var durationBuckets = [...]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30}
 var byteBuckets = [...]float64{256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304}
@@ -40,16 +40,17 @@ func (h *histogram) observe(v float64, sum uint64, bounds []float64) {
 }
 
 type Metrics struct {
-	httpRequests [17][6]atomic.Uint64
-	httpDuration [17]histogram
-	httpBytes    [17]histogram
-	inflight     atomic.Int64
-	upRequests   [3][6]atomic.Uint64
-	upDuration   [3]histogram
-	circuit      [3]atomic.Uint64 // generation<<2 | state
-	informer     atomic.Int64
-	logger       *slog.Logger
-	slowUpstream time.Duration
+	httpRequests          [17][6]atomic.Uint64
+	httpDuration          [17]histogram
+	httpBytes             [17]histogram
+	inflight              atomic.Int64
+	upRequests            [4][6]atomic.Uint64
+	upDuration            [4]histogram
+	circuit               [4]atomic.Uint64 // generation<<2 | state
+	alertSeverityFallback atomic.Uint64
+	informer              atomic.Int64
+	logger                *slog.Logger
+	slowUpstream          time.Duration
 }
 
 func New() *Metrics { return &Metrics{} }
@@ -150,6 +151,8 @@ func (m *Metrics) SetInformerSynced(ok bool) {
 	}
 }
 
+func (m *Metrics) ObserveAlertSeverityFallback() { m.alertSeverityFallback.Add(1) }
+
 func (m *Metrics) WritePrometheus(w io.Writer) error {
 	write := func(f string, a ...any) error { _, err := fmt.Fprintf(w, f, a...); return err }
 	if err := write("# HELP dashboard_http_requests_total Completed HTTP requests.\n# TYPE dashboard_http_requests_total counter\n"); err != nil {
@@ -206,6 +209,9 @@ func (m *Metrics) WritePrometheus(w io.Writer) error {
 		if err := write("dashboard_upstream_circuit_state{upstream=%q} %d\n", up, m.circuit[i].Load()&3); err != nil {
 			return err
 		}
+	}
+	if err := write("# HELP dashboard_alert_severity_fallback_total Alertmanager severities normalized to info.\n# TYPE dashboard_alert_severity_fallback_total counter\ndashboard_alert_severity_fallback_total %d\n", m.alertSeverityFallback.Load()); err != nil {
+		return err
 	}
 	return write("# HELP dashboard_informer_synced Whether informer caches are synced.\n# TYPE dashboard_informer_synced gauge\ndashboard_informer_synced %d\n", m.informer.Load())
 }

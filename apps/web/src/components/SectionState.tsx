@@ -72,13 +72,17 @@ export function ErrorState({ detail, onRetry }: { detail?: string; onRetry?: () 
 }
 
 export function DegradedState({ source, detail }: { source?: string; detail?: string }) {
+  const historyNotConfigured = detail === "history_not_configured";
+  const safeDetail = historyNotConfigured
+    ? "해소 이력 저장소가 구성되지 않아 현재 진행 중인 알림만 표시합니다."
+    : detail;
   return (
     <div className="state state--degraded">
       <span className="state__glyph" aria-hidden="true">
         ▲
       </span>
-      <span className="state__title">{source ? `${source} 응답 없음` : "일부 데이터소스 장애"}</span>
-      <span className="state__detail">{detail ?? "다른 패널은 계속 동작합니다."}</span>
+      <span className="state__title">{historyNotConfigured ? "해소 이력 미구성" : source ? `${source} 응답 없음` : "일부 데이터소스 장애"}</span>
+      <span className="state__detail">{safeDetail ?? "다른 패널은 계속 동작합니다."}</span>
     </div>
   );
 }

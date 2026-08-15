@@ -20,6 +20,11 @@ COLLECTOR_BUILDER = ROOT / "deploy" / "telemetry" / "collector-builder.yaml"
 MOCK_DOCKERFILE = ROOT / "deploy" / "telemetry" / "Dockerfile.mock"
 COLLECTOR_BUILD_CHECK = ROOT / "deploy" / "scripts" / "build-telemetry-collector.sh"
 TELEMETRY_IMAGE_CHECK = ROOT / "deploy" / "scripts" / "check-telemetry-images.sh"
+ALERTMANAGER_CHECK = ROOT / "deploy" / "scripts" / "check-alertmanager-integration.sh"
+ALERTMANAGER_IMAGE = "quay.io/prometheus/alertmanager@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba"
+ALERT_HOST_PROXY = 'python3 "$ROOT/deploy/alertmanager/proxy.py" --upstream "$ADMIN_URL"'
+ALERT_BROWSER_PROXY_MOUNT = '-v "$ROOT/deploy/alertmanager/proxy.py:/proxy.py:ro"'
+ALERT_BROWSER_PROXY_RUN = 'python3 /proxy.py --container-network'
 ACTION_PINS = {
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
     "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
@@ -63,7 +68,7 @@ REQUIRED_JOB_IDS = {"web", "api", "deploy"}
 
 def validate(text, makefile, security_scan, package_source=None, docker_source=None, npm_tool_source=None,
              go_work_source=None, go_mod_source=None, api_docker_source=None, readme_source=None,
-             telemetry_supply_source=None, coverage_source=None):
+             telemetry_supply_source=None, coverage_source=None, alertmanager_source=None):
     errors = []
     if coverage_source is None:
         coverage_source = COVERAGE_CHECK.read_text(encoding="utf-8")
@@ -90,6 +95,31 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         errors.append("service images are not pinned to the approved manifest digests")
     if text.count("run: make api-postgres-itest") != 1:
         errors.append("dashboard PostgreSQL integration step is missing or duplicated")
+    if text.count("run: make api-alertmanager-itest") != 1:
+        errors.append("Alertmanager integration step is missing or duplicated")
+    web_match = re.search(r"(?ms)^  web:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\Z)", text)
+    web_job = web_match.group(0) if web_match else ""
+    ordered_web_markers = (
+        "run: make build-web-production",
+        "run: npx playwright install --with-deps chromium",
+        "uses: actions/setup-go@",
+        "run: make api-alertmanager-itest",
+    )
+    positions = [web_job.find(marker) for marker in ordered_web_markers]
+    if any(position < 0 for position in positions) or positions != sorted(positions) or web_job.count("run: make api-alertmanager-itest") != 1:
+        errors.append("Alertmanager integration must run once in Web after production build, Chromium, and Go setup")
+    alertmanager_target = re.search(r"(?ms)^api-alertmanager-itest:.*?(?=^\S|\Z)", makefile)
+    alertmanager_target_text = alertmanager_target.group(0) if alertmanager_target else ""
+    if alertmanager_target_text.count("sh deploy/scripts/check-alertmanager-integration.sh") != 1:
+        errors.append("Alertmanager integration target is missing or duplicated")
+    if alertmanager_source is None:
+        alertmanager_source = ALERTMANAGER_CHECK.read_text(encoding="utf-8")
+    if alertmanager_source.count(ALERTMANAGER_IMAGE) != 1:
+        errors.append("Alertmanager integration image digest drifted")
+    for required in (ALERT_HOST_PROXY, ALERT_BROWSER_PROXY_MOUNT, ALERT_BROWSER_PROXY_RUN,
+                     "go test -tags integration", "TestActualAlertmanagerPrivateCABearerScopeAndFailures"):
+        if alertmanager_source.count(required) != 1:
+            errors.append("Alertmanager production integration command drifted")
     if text.count(POSTGRES_TEST_URL_LINE) != 2:
         errors.append("dashboard PostgreSQL integration URL drifted")
     coverage_step = "      - run: make api-coverage\n        env:\n          " + POSTGRES_TEST_URL_LINE
@@ -217,12 +247,28 @@ if args.self_test:
         ("duplicate web override", source + "\n  web:\n    runs-on: ubuntu-latest\n    steps: []\n", makefile_source, security_source),
         ("Go version drift", source.replace(f'go-version: "{GO_VERSION}"', 'go-version: "1.26.7"', 1), makefile_source, security_source),
         ("integration step removed", source.replace("run: make test-web-integration", "run: true", 1), makefile_source, security_source),
+        ("Alertmanager integration step removed", source.replace("run: make api-alertmanager-itest", "run: true", 1), makefile_source, security_source),
+        ("Alertmanager integration moved out of Web", source.replace("run: make api-alertmanager-itest", "run: true", 1).replace("run: make api-vet", "run: make api-alertmanager-itest", 1), makefile_source, security_source),
+        ("Alertmanager integration ordered before production prerequisites", source.replace("run: make build-web-production", "__ALERT_ORDER_SWAP__", 1).replace("run: make api-alertmanager-itest", "run: make build-web-production", 1).replace("__ALERT_ORDER_SWAP__", "run: make api-alertmanager-itest", 1), makefile_source, security_source),
+        ("Alertmanager integration target removed", source, makefile_source.replace("sh deploy/scripts/check-alertmanager-integration.sh", "true", 1), security_source),
         ("integration mock env mutation", source, makefile_source.replace("\tnpm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", "\tVITE_USE_MOCK=true npm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", 1), security_source),
         ("integration mock mode mutation", source, makefile_source.replace("\tnpm run build --workspace @k8s-dashboard/web\n\tnpm run test:integration", "\tnpm run build --workspace @k8s-dashboard/web -- --mode e2e\n\tnpm run test:integration", 1), security_source),
         ("Node version drift", source.replace(f"node-version: {NODE_VERSION}", "node-version: 22.23.1", 1), makefile_source, security_source),
     ]
     for label, mutated_workflow, mutated_makefile, mutated_security in mutations:
         if not validate(mutated_workflow, mutated_makefile, mutated_security):
+            raise SystemExit(f"{label} mutation was masked")
+        print(f"negative mutation passed: {label} was rejected")
+    alertmanager_source = ALERTMANAGER_CHECK.read_text(encoding="utf-8")
+    for label, mutated_alertmanager in (
+        ("Alertmanager image digest drift", alertmanager_source.replace(ALERTMANAGER_IMAGE, "quay.io/prometheus/alertmanager:latest", 1)),
+        ("Alertmanager production test drift", alertmanager_source.replace("TestActualAlertmanagerPrivateCABearerScopeAndFailures", "TestMissing", 1)),
+        ("Alertmanager host proxy removed", alertmanager_source.replace(ALERT_HOST_PROXY, "true # host proxy removed", 1)),
+        ("Alertmanager browser proxy mount drift", alertmanager_source.replace(ALERT_BROWSER_PROXY_MOUNT, '-v "$ROOT/deploy/alertmanager/proxy.py:/proxy.py"', 1)),
+        ("Alertmanager browser proxy run removed", alertmanager_source.replace(ALERT_BROWSER_PROXY_RUN, "python3 /proxy.py", 1)),
+        ("Alertmanager browser proxy duplicated", alertmanager_source + "\n# " + ALERT_BROWSER_PROXY_RUN + "\n"),
+    ):
+        if not validate(source, makefile_source, security_source, alertmanager_source=mutated_alertmanager):
             raise SystemExit(f"{label} mutation was masked")
         print(f"negative mutation passed: {label} was rejected")
     coverage_source = COVERAGE_CHECK.read_text(encoding="utf-8")

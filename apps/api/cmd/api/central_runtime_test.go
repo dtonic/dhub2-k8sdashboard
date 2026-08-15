@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
@@ -18,12 +19,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/transport"
@@ -41,6 +44,20 @@ import (
 type countedRegistryService struct {
 	*transport.Service
 	queries atomic.Int32
+}
+
+type pollCountingAlerts struct {
+	total atomic.Int32
+	mu    sync.Mutex
+	by    map[string]int
+}
+
+func (p *pollCountingAlerts) List(_ context.Context, q datasource.AlertQuery) (datasource.AlertResult, error) {
+	p.total.Add(1)
+	p.mu.Lock()
+	p.by[q.Target.ClusterID]++
+	p.mu.Unlock()
+	return datasource.AlertResult{}, nil
 }
 
 func (s *countedRegistryService) Query(ctx context.Context, q *v1.ScreenQuery) (*v1.ScreenReply, error) {
@@ -275,6 +292,68 @@ func TestCentralRuntimeConstructionAndShutdownFailClosed(t *testing.T) {
 	invalidTLS := config.ClusterStateConfig{Clusters: []string{"a"}, MaxResources: 10, RegistryEndpoint: "127.0.0.1:1", RegistryServerName: "registry", TrustDomain: "example.test"}
 	if runtime, err := newCentralRuntime(ctx, invalidTLS, hub); err == nil || runtime != nil {
 		t.Fatalf("invalid TLS runtime=%v err=%v", runtime, err)
+	}
+}
+
+func TestRunCentralRejectsEnabledAlertmanagerWithoutPreparedSource(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Alertmanager.Enabled = true
+	if err := runCentral(context.Background(), discardLogger(), cfg); err == nil {
+		t.Fatal("enabled Alertmanager without a prepared source was accepted")
+	}
+}
+
+func TestCentralAlertPollersDisabledUniqueJitterAndBoundedCancel(t *testing.T) {
+	var disabled pollCountingAlerts
+	stop := startCentralAlertPollers(context.Background(), config.Config{}, nil, &disabled, nil, discardLogger())
+	stop()
+	if disabled.total.Load() != 0 {
+		t.Fatalf("disabled poller calls=%d", disabled.total.Load())
+	}
+
+	clusters := make([]string, 64)
+	for i := range clusters {
+		clusters[i] = fmt.Sprintf("c%02d", i)
+	}
+	catalog, err := clusterstate.NewRemoteCatalog(clusters, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := stream.New(stream.Config{RingSize: 8, SubscriberBuffer: 1, MaxConnections: 2, MaxPerSubject: 1}, stream.NewMetrics())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	alerts := &pollCountingAlerts{by: make(map[string]int)}
+	cfg := config.Config{AlertPollInterval: 200 * time.Millisecond, AlertPollMaxBackoff: time.Second, AlertSnapshotMax: 10}
+	cfg.Alertmanager.Enabled = true
+	cfg.ClusterState.Clusters = append(append([]string(nil), clusters...), clusters[0])
+	stop = startCentralAlertPollers(context.Background(), cfg, catalog, alerts, hub, discardLogger())
+	deadline := time.Now().Add(2 * time.Second)
+	for alerts.total.Load() < 64 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	started := time.Now()
+	stop()
+	if time.Since(started) > time.Second {
+		t.Fatal("central poller cancellation was not bounded")
+	}
+	before := alerts.total.Load()
+	time.Sleep(250 * time.Millisecond)
+	if before != 64 || alerts.total.Load() != before {
+		t.Fatalf("unique/non-spin/post-cancel calls before=%d after=%d", before, alerts.total.Load())
+	}
+	alerts.mu.Lock()
+	defer alerts.mu.Unlock()
+	for _, cluster := range clusters {
+		if alerts.by[cluster] != 1 {
+			t.Fatalf("cluster %s calls=%d", cluster, alerts.by[cluster])
+		}
+	}
+	for i := 0; i < 100; i++ {
+		if d := randomAlertInitialDelay(time.Second); d < 0 || d > time.Second {
+			t.Fatalf("jitter=%s", d)
+		}
 	}
 }
 

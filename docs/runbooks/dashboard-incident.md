@@ -38,6 +38,8 @@ URL이 `ns`·`uid`·시간 범위를 보존하므로, 조사 중인 화면 URL�
   섹션의 출처 라벨로 구분합니다.
 - 백엔드 `/metrics`의 upstream 오류·차단기 지표로 교차 확인합니다
   ([platform-observability.md §데이터소스 장애](platform-observability.md#데이터소스-장애)).
+- Active가 정상인데 Resolved/counts만 `history_not_configured`이면 장애가 아닙니다.
+  Alertmanager API v2는 현재 알림만 제공하며 운영 history adapter가 아직 없는 상태입니다.
 
 ## 대시보드 자체 장애 · 롤백
 
@@ -51,7 +53,7 @@ URL이 `ns`·`uid`·시간 범위를 보존하므로, 조사 중인 화면 URL�
 
 ## 이 Runbook이 보장하지 않는 것
 
-- Alertmanager 실클라이언트 경로(#17 잔여)와 실제 GreptimeDB/Quickwit 장애 재현은
-  자동 검증되지 않았습니다. 통합 E2E의 장애는 픽스처 수준 재현입니다.
+- 실제 GreptimeDB/Quickwit의 파괴 장애 재현은 자동 검증되지 않았습니다. Alertmanager
+  Resolved 운영 이력은 Loki 또는 `GRAFANA_ALERTS` adapter가 생길 때까지 보장하지 않습니다.
 - 알림 화면은 조회 전용입니다. Silence·Routing 조작은 Grafana/Alertmanager에서
   직접 수행합니다.

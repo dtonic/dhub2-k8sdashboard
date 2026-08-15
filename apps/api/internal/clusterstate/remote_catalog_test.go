@@ -11,6 +11,9 @@ import (
 )
 
 func TestRemoteCatalog100kApplyAndQueryBudgets(t *testing.T) {
+	if catalog, err := NewRemoteCatalog([]string{"a"}, 100_001); err == nil || catalog != nil {
+		t.Fatalf("RemoteCatalog admitted 100001 resources: catalog=%v err=%v", catalog, err)
+	}
 	catalog, err := NewRemoteCatalog([]string{"a"}, 100_000)
 	if err != nil {
 		t.Fatal(err)

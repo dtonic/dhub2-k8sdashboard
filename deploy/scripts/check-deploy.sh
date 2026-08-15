@@ -55,6 +55,16 @@ for env in dev stage prod; do
   fi
 done
 
+# Alertmanager remains disabled in every environment baseline. The opt-in
+# render uses only existing-Secret file projections and one bounded egress.
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --values /work/deploy/alertmanager/fixtures/helm-enabled.yaml > "$TMP/alertmanager-enabled.yaml"
+docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/alertmanager-enabled.yaml"
+python3 "$ROOT/scripts/check-deploy.py" "$TMP/alertmanager-enabled.yaml" --environment dev --self-test
+python3 "$ROOT/deploy/scripts/check-alertmanager.py" "$TMP/alertmanager-enabled.yaml" \
+  --baseline "$TMP/validation/dev.yaml" --self-test
+
 # The default is an exact opt-out: explicitly setting disabled must not alter the
 # existing development manifest. Validate mode is backend-write-free; cutover is
 # checked against the complete deterministic fixture.

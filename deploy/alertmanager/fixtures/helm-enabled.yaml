@@ -1,0 +1,17 @@
+alerts:
+  enabled: true
+  url: https://alerts.example.test:9443/am
+  publicURL: https://alerts.example.test/am
+  serverName: alerts.example.test
+  existingSecret:
+    name: alertmanager-client
+    tokenKey: bearer-token
+    caKey: ca.crt
+    clientCertKey: tls.crt
+    clientKeyKey: tls.key
+networkPolicy:
+  external:
+    - purpose: alertmanager
+      cidr: 192.0.2.10/32
+      port: 9443
+      protocol: TCP

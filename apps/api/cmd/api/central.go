@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"sync"
 	"time"
@@ -17,6 +19,8 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
@@ -42,7 +46,25 @@ type centralRuntime struct {
 	once     sync.Once
 }
 
-func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config) error {
+func randomAlertInitialDelay(max time.Duration) time.Duration {
+	if max <= 0 {
+		return 0
+	}
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(max)+1))
+	if err != nil {
+		return max / 2
+	}
+	return time.Duration(n.Int64())
+}
+
+func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config, configuredSources ...*alertmanager.Source) error {
+	var configuredAlerts *alertmanager.Source
+	if len(configuredSources) > 0 {
+		configuredAlerts = configuredSources[0]
+	}
+	if cfg.Alertmanager.Enabled && configuredAlerts == nil {
+		return errors.New("Alertmanager is enabled but not initialized")
+	}
 	queries, err := querycatalog.LoadPath(cfg.QueryCatalogDir)
 	if err != nil {
 		return err
@@ -83,10 +105,21 @@ func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config) err
 	if err != nil {
 		return err
 	}
+	defer runtime.Close()
 
 	platformMetrics := observability.New()
 	platformMetrics.ConfigureLogging(logger, cfg.QuerySlowThreshold)
-	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, runtime.catalog, queries, platformMetrics)
+	if configuredAlerts != nil {
+		if err := configuredAlerts.BindCatalog(runtime.catalog); err != nil {
+			return err
+		}
+		configuredAlerts.SetObserver(platformMetrics)
+	}
+	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, runtime.catalog, queries, platformMetrics, configuredAlerts)
+	if cfg.Alertmanager.Enabled {
+		stopAlertPollers := startCentralAlertPollers(runtime.ctx, cfg, runtime.catalog, alerts, hub, logger)
+		defer stopAlertPollers()
+	}
 	poller := &clusterstate.UsagePoller{Metrics: metrics, Catalog: runtime.catalog, Store: runtime.usage}
 	usageErr := make(chan error, 1)
 	usageDone := make(chan struct{})
@@ -126,6 +159,39 @@ func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config) err
 	})
 	httpServer := &http.Server{Addr: cfg.Addr, Handler: srv, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: cfg.ReadTimeout, WriteTimeout: cfg.WriteTimeout}
 	return serveCentralHTTP(ctx, httpServer, runtime.errCh, usageErr, hub)
+}
+
+func startCentralAlertPollers(parent context.Context, cfg config.Config, catalog *clusterstate.RemoteCatalog, alerts datasource.Alerts, hub *stream.Hub, logger *slog.Logger) func() {
+	if !cfg.Alertmanager.Enabled {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	var wg sync.WaitGroup
+	seen := make(map[string]struct{}, len(cfg.ClusterState.Clusters))
+	for _, clusterID := range cfg.ClusterState.Clusters {
+		if _, exists := seen[clusterID]; exists {
+			continue
+		}
+		seen[clusterID] = struct{}{}
+		clusterID := clusterID
+		poller := stream.NewAlertPoller(stream.AlertPollerConfig{
+			ClusterID: clusterID, Interval: cfg.AlertPollInterval, MaxBackoff: cfg.AlertPollMaxBackoff,
+			MaxAlerts: cfg.AlertSnapshotMax, Jitter: true, InitialDelay: randomAlertInitialDelay,
+			TrustedNamespaces: func() map[string]string { return catalog.StreamEntityNamespaces(clusterID) },
+		}, alerts, hub, logger)
+		wg.Add(1)
+		go func() { defer wg.Done(); poller.Run(ctx) }()
+	}
+	return func() {
+		cancel()
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			logger.Error("Alertmanager poller shutdown timed out")
+		}
+	}
 }
 
 func serveCentralHTTP(ctx context.Context, server *http.Server, watchErr, usageErr <-chan error, hub *stream.Hub) error {

@@ -2,9 +2,8 @@ package stream
 
 // Alert 변경원 — 이슈 #12.
 //
-// Alertmanager 실클라이언트(#17 잔여)가 아직 없으므로, 기존 datasource.Alerts
-// 추상화 위에서 **유계 스냅숏 diff**로 변경만 뽑아냅니다. 어댑터가 실클라이언트로
-// 바뀌어도 이 파일은 그대로입니다.
+// datasource.Alerts 추상화 위에서 **유계 스냅숏 diff**로 변경만 뽑아냅니다.
+// 운영 Alertmanager 어댑터와 demo 소스가 같은 배선을 사용합니다.
 //
 // 규칙:
 //   - 최초 스냅숏은 변경이 아닙니다. 아무것도 내보내지 않습니다.
@@ -46,6 +45,9 @@ type AlertPollerConfig struct {
 	// Window는 List에 넘기는 조회 구간 폭입니다.
 	Window time.Duration
 	Now    func() time.Time
+	// Jitter는 상한을 바꾸지 않고 central cluster poller 시작을 분산합니다.
+	Jitter       bool
+	InitialDelay func(time.Duration) time.Duration
 	// TrustedNamespaces returns a server-owned informer catalog keyed by
 	// "pod:<uid>" or "workload:<uid>". Upstream alert namespaces are ignored.
 	TrustedNamespaces func() map[string]string
@@ -88,9 +90,10 @@ type AlertPoller struct {
 	hub    *Hub
 	logger *slog.Logger
 
-	primed    bool
-	snapshot  map[string]alertState
-	truncated bool
+	primed      bool
+	snapshot    map[string]alertState
+	truncated   bool
+	jitterState uint64
 }
 
 func NewAlertPoller(cfg AlertPollerConfig, src datasource.Alerts, hub *Hub, logger *slog.Logger) *AlertPoller {
@@ -98,11 +101,28 @@ func NewAlertPoller(cfg AlertPollerConfig, src datasource.Alerts, hub *Hub, logg
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AlertPoller{cfg: cfg, src: src, hub: hub, logger: logger, snapshot: map[string]alertState{}}
+	seed := sha256.Sum256([]byte(cfg.ClusterID))
+	return &AlertPoller{cfg: cfg, src: src, hub: hub, logger: logger, snapshot: map[string]alertState{}, jitterState: binary.LittleEndian.Uint64(seed[:8])}
 }
 
 // Run은 ctx가 끝날 때까지 폴링합니다. 실패는 backoff, 성공은 기본 주기로 돌아갑니다.
 func (p *AlertPoller) Run(ctx context.Context) {
+	if p.cfg.InitialDelay != nil {
+		if initial := p.cfg.InitialDelay(p.cfg.Interval / 10); initial > 0 {
+			timer := time.NewTimer(initial)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return
+			case <-timer.C:
+			}
+		}
+	}
 	delay := p.cfg.Interval
 	for {
 		if err := p.PollOnce(ctx); err != nil {
@@ -112,16 +132,33 @@ func (p *AlertPoller) Run(ctx context.Context) {
 		} else {
 			delay = p.cfg.Interval
 		}
-		timer := time.NewTimer(delay)
+		wait := delay
+		if p.cfg.Jitter {
+			wait = p.jitter(delay)
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			return
 		case <-timer.C:
 		}
 	}
+}
+
+func (p *AlertPoller) jitter(delay time.Duration) time.Duration {
+	// cluster별 결정적 xorshift를 [90%,100%]로 제한해 MaxBackoff 상한을 지킵니다.
+	x := p.jitterState
+	x ^= x << 13
+	x ^= x >> 7
+	x ^= x << 17
+	p.jitterState = x
+	return delay - time.Duration(uint64(delay)/10*(x%101)/100)
 }
 
 // PollOnce는 한 번 조회해 이전 스냅숏과 diff합니다. 테스트가 직접 부릅니다.
