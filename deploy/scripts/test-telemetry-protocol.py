@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import gzip
 import hashlib
+import io
 import json
 import math
 import os
@@ -14,6 +16,7 @@ import shlex
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -39,10 +42,23 @@ if not re.fullmatch(r"issue[0-9]+", OWNER):
     raise SystemExit("TELEMETRY_TEST_OWNER must match issue[0-9]+")
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        args, check=check, text=True, encoding="utf-8", errors="replace",
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-    )
+    try:
+        return subprocess.run(
+            args, check=check, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError as error:
+        output = error.stdout or ""
+        tail = "\n".join(output.splitlines()[-40:])
+        tail = re.sub(
+            r"(?im)\b(password|passwd|pwd|secret|token|authorization)([=: ]+)[^\r\n]*",
+            r"\1\2[REDACTED]",
+            tail,
+        )[-4096:]
+        print(f"subprocess failed (exit {error.returncode}); bounded output tail:", file=sys.stderr)
+        if tail:
+            print(tail, file=sys.stderr)
+        raise
 
 
 def fields(data: bytes):
@@ -203,7 +219,20 @@ def collector_cpu_snapshot(name: str, helper_image: str) -> dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence-out", type=Path)
+    parser.add_argument("--run-wrapper-self-test", action="store_true")
     args = parser.parse_args()
+    if args.run_wrapper_self_test:
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured):
+                run(sys.executable, "-c", "import sys; print('RUN_WRAPPER_MARKER'); print('token=must-not-leak'); print('Authorization: Bearer also-must-not-leak'); sys.exit(7)")
+        except subprocess.CalledProcessError as error:
+            diagnostic = captured.getvalue()
+            if error.returncode != 7 or "RUN_WRAPPER_MARKER" not in diagnostic or diagnostic.count("[REDACTED]") != 2 or "must-not-leak" in diagnostic or len(diagnostic) > 4600:
+                raise AssertionError("run wrapper self-test failed") from error
+            print("run wrapper self-test passed: marker retained, exit 7 re-raised, secret redacted")
+            return 0
+        raise AssertionError("run wrapper accepted exit 7")
     token = uuid.uuid4().hex[:12]
     collector = COLLECTOR or f"{OWNER}-otelcol-{token}:local"
     collector_owned = COLLECTOR is None

@@ -110,6 +110,8 @@ done
 
 ! grep -q 'State\.' "$ROOT/deploy/scripts/test-telemetry-protocol.py"
 PYTHONDONTWRITEBYTECODE=1 python3 -B "$ROOT/deploy/scripts/test-telemetry-protocol.py" \
+  --run-wrapper-self-test
+PYTHONDONTWRITEBYTECODE=1 python3 -B "$ROOT/deploy/scripts/test-telemetry-protocol.py" \
   --evidence-out "$TMP/telemetry-evidence.json"
 PYTHONDONTWRITEBYTECODE=1 python3 -B "$ROOT/deploy/scripts/check-telemetry-evidence.py" \
   "$TMP/telemetry-evidence.json" --environment local

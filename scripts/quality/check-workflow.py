@@ -46,7 +46,7 @@ TELEMETRY_SUPPLY_PINS = (
     "go.opentelemetry.io/collector/cmd/builder@v0.158.0",
     "alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
     "https://dl-cdn.alpinelinux.org/alpine/v3.24/main",
-    "python3=3.14.7-r0",
+    "python3=3.14.7-r1",
     TRIVY,
     "bff6e429b67b94bc95659387ac4240fa19c3ca3f49e7a8afcd2a1dbc35ccd442",
     "42d03618eaf737b778612108b0352a506ea3625830189dd5a77f8f44c7dcf503",
@@ -288,6 +288,10 @@ if args.self_test:
         if not validate(source, makefile_source, security_source, telemetry_supply_source=mutated):
             raise SystemExit(f"telemetry supply pin mutation was masked: {pin}")
         print(f"negative mutation passed: telemetry supply pin {index + 1} was rejected")
+    python_pin_drift = telemetry_supply.replace("python3=3.14.7-r1", "python3=3.14.7-r0", 1)
+    if not validate(source, makefile_source, security_source, telemetry_supply_source=python_pin_drift):
+        raise SystemExit("telemetry Python package revision mutation was masked")
+    print("negative mutation passed: telemetry Python package revision drift was rejected")
     module_drift = telemetry_supply.replace(" v0.158.0", " v0.157.0", 1)
     if not validate(source, makefile_source, security_source, telemetry_supply_source=module_drift):
         raise SystemExit("telemetry OCB module version mutation was masked")

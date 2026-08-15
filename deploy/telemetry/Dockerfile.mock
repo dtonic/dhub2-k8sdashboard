@@ -1,6 +1,6 @@
 FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 RUN printf '%s\n' 'https://dl-cdn.alpinelinux.org/alpine/v3.24/main' > /etc/apk/repositories \
-    && apk add --no-cache python3=3.14.7-r0 \
+    && apk add --no-cache python3=3.14.7-r1 \
     && test "$(python3 --version)" = 'Python 3.14.7'
 RUN mkdir -p /fixture && chmod 0555 /fixture
 COPY --chmod=0444 deploy/scripts/telemetry-mock-server.py /fixture/server.py
