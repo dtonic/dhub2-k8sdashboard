@@ -14,6 +14,7 @@ import { AlertsView } from "@/features/alerts/AlertsView";
 import { DashboardView } from "@/features/dashboards/DashboardView";
 import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
 import "./styles/index.css";
+import { AuthGate } from "@/app/AuthGate";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,7 +39,7 @@ async function bootstrap() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
+        <AuthGate><BrowserRouter>
           <Routes>
             <Route element={<AppShell />}>
               <Route path="/" element={<ClusterOverview />} />
@@ -55,7 +56,7 @@ async function bootstrap() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
-        </BrowserRouter>
+        </BrowserRouter></AuthGate>
       </QueryClientProvider>
     </StrictMode>,
   );

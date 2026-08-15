@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
@@ -67,8 +68,9 @@ type Deps struct {
 }
 
 type Server struct {
-	deps Deps
-	mux  *http.ServeMux
+	deps      Deps
+	mux       *http.ServeMux
+	authGuard *authGuard
 }
 
 var errQueryBudget = errors.New("server query budget exceeded")
@@ -105,13 +107,16 @@ func NewServer(d Deps) *Server {
 	if d.ProviderRegistry == nil {
 		d.ProviderRegistry = localProviderRegistry{provider: d.Store}
 	}
-	s := &Server{deps: d, mux: http.NewServeMux()}
+	s := &Server{deps: d, mux: http.NewServeMux(), authGuard: newAuthGuard(d.Now)}
 	s.routes()
 	return s
 }
 
 func (s *Server) routes() {
 	m := s.mux
+	if routes, ok := s.deps.Resolver.(interface{ RegisterAuthRoutes(*http.ServeMux) }); ok {
+		routes.RegisterAuthRoutes(m)
+	}
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -212,15 +217,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !operationalPath[r.URL.Path] {
+	isAuthPath := strings.HasPrefix(r.URL.Path, "/api/v1/auth/")
+	if isAuthPath {
+		release, ok := s.authGuard.acquire(r)
+		if !ok {
+			w.Header().Set("Retry-After", "1")
+			writeError(w, r, http.StatusTooManyRequests, "auth_rate_limited", "인증 요청 한도를 초과했습니다.")
+			return
+		}
+		defer release()
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+	if !operationalPath[r.URL.Path] && !isAuthPath {
 		var err error
 		sc, err = s.deps.Resolver.Resolve(r)
 		if err != nil {
 			// 인증 실패(401)와 권한 부족(403)은 다른 상태입니다. 여기는 401만 나갑니다 —
 			// 유효한 토큰의 권한 부족은 빈 Scope로 통과해 아래에서 403이 됩니다. (#10)
+			status, code := http.StatusUnauthorized, "unauthorized"
+			if errors.Is(err, auth.ErrSessionUnavailable) {
+				status, code = http.StatusServiceUnavailable, "session_unavailable"
+			}
 			w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-dashboard"`)
-			writeError(w, r, http.StatusUnauthorized, "unauthorized", "인증이 필요합니다.")
-			s.audit(r, scope.Scope{}, http.StatusUnauthorized, started)
+			writeError(w, r, status, code, "인증이 필요합니다.")
+			s.audit(r, scope.Scope{}, status, started)
 			return
 		}
 	}
@@ -247,7 +269,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// SSE 스트림은 질의가 아니라 연결입니다 — query guard의 12s budget·rate·slow
 	// 계측을 타면 스트림이 강제 종료됩니다. 스트림 전용 상한이 자원을 지킵니다. (#12)
 	isStream := pattern == streamRoute
-	if !operationalPath[r.URL.Path] && !isStream {
+	if !operationalPath[r.URL.Path] && !isAuthPath && !isStream {
 		user := sc.Subject
 		if user == "" {
 			user = "auth-none"
@@ -283,7 +305,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			observability.RecordQueryRef(r.Context(), ref)
 		}
 	}
-	if !operationalPath[r.URL.Path] && !isStream && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
+	if !operationalPath[r.URL.Path] && !isAuthPath && !isStream && s.deps.Now().Sub(started) >= s.deps.Guard.SlowThreshold() {
 		s.deps.ProtectionMetrics.Slow(pattern)
 		args := []any{"route", route, "status", rec.status, "durationMs", s.deps.Now().Sub(started).Milliseconds(), "bytes", rec.bytes, "requestId", reqID, "scope", scopeText(sc)}
 		if trace != nil {

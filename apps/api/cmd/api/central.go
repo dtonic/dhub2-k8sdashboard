@@ -62,6 +62,9 @@ func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config) err
 	if err != nil {
 		return err
 	}
+	if closer, ok := resolver.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
 	streamMetrics := stream.NewMetrics()
 	hub, err := stream.New(stream.Config{
 		RingSize:          cfg.StreamReplayEvents,

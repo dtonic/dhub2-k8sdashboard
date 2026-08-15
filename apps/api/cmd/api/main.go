@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 
@@ -153,6 +154,9 @@ func run(logger *slog.Logger) error {
 	resolver, err := buildResolver(ctx, logger, cfg)
 	if err != nil {
 		return err
+	}
+	if closer, ok := resolver.(interface{ Close() error }); ok {
+		defer closer.Close()
 	}
 
 	platformMetrics := observability.New()
@@ -293,6 +297,14 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 			ClusterName:    cfg.ClusterName,
 			Clusters:       clusters,
 			Central:        cfg.ClusterState.Mode == "central",
+			Session: auth.SessionConfig{
+				Enabled: cfg.Auth.SessionEnabled, PublicOrigin: cfg.Auth.PublicOrigin,
+				RedirectURI: cfg.Auth.RedirectURI, ClientID: cfg.Auth.ClientID,
+				ClientSecret: cfg.Auth.ClientSecret, EncryptionKey: cfg.Auth.SessionKey,
+				RedisAddr: cfg.RedisAddr, RedisTimeout: cfg.RedisOpTimeout,
+				TransactionTTL: cfg.Auth.LoginTransactionTTL, IdleTTL: cfg.Auth.SessionIdleTTL,
+				AbsoluteTTL: cfg.Auth.SessionAbsoluteTTL, RefreshSkew: cfg.Auth.RefreshSkew, MaxSessions: cfg.Auth.SessionMaxSessions,
+			},
 		}, logger)
 		if err != nil {
 			// 인증이 깨진 채로 뜨면 전부 401이 되어 장애처럼 보입니다. 여기서 멈춥니다.
@@ -310,6 +322,12 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 		if err != nil {
 			return nil, err
 		}
+		owned := false
+		defer func() {
+			if !owned {
+				_ = idp.Close()
+			}
+		}()
 		r, err := auth.NewResolver(ctx, auth.Config{
 			IssuerURL:   idp.Issuer,
 			Audience:    audience,
@@ -319,13 +337,39 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 		if err != nil {
 			return nil, err
 		}
+		managed := &managedMockResolver{Resolver: r, idp: idp}
+		owned = true
 		// 개발 편의 — 토큰 발급 방법만 알려주고 토큰 자체는 로그에 남기지 않습니다.
 		logger.Warn("인증: mock IdP — 운영 금지. 누구나 토큰을 만들 수 있습니다",
 			"issuer", idp.Issuer,
 			"tokenHint", "curl -X POST '"+idp.Issuer+"/token?sub=dev&roles=platform.admin'")
-		return r, nil
+		return managed, nil
 	}
 	return nil, fmt.Errorf("알 수 없는 AUTH_MODE %q (none|oidc|mock)", cfg.Auth.Mode)
+}
+
+type managedMockResolver struct {
+	*auth.Resolver
+	idp       *auth.MockIDP
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (r *managedMockResolver) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		if r.Resolver != nil {
+			r.closeErr = r.Resolver.Close()
+		}
+		if r.idp != nil {
+			if err := r.idp.Close(); r.closeErr == nil {
+				r.closeErr = err
+			}
+		}
+	})
+	return r.closeErr
 }
 
 // sources는 데이터소스 어댑터를 고릅니다.

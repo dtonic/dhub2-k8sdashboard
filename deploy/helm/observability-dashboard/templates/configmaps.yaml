@@ -18,6 +18,17 @@ data:
   {{- if .Values.redis.enabled }}
   REDIS_ADDR: {{ printf "%s-redis:6379" (include "dashboard.fullname" .) | quote }}
   {{- end }}
+  {{- if .Values.authSession.enabled }}
+  AUTH_SESSION_ENABLED: "true"
+  AUTH_PUBLIC_ORIGIN: {{ .Values.authSession.publicOrigin | quote }}
+  OIDC_REDIRECT_URI: {{ .Values.authSession.redirectURI | quote }}
+  OIDC_CLIENT_ID: {{ .Values.authSession.clientID | quote }}
+  AUTH_SESSION_IDLE_TTL: {{ .Values.authSession.idleTTL | quote }}
+  AUTH_SESSION_ABSOLUTE_TTL: {{ .Values.authSession.absoluteTTL | quote }}
+  AUTH_LOGIN_TTL: {{ .Values.authSession.loginTTL | quote }}
+  AUTH_REFRESH_SKEW: {{ .Values.authSession.refreshSkew | quote }}
+  AUTH_SESSION_MAX: {{ .Values.authSession.maxSessions | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31,10 +42,21 @@ data:
       listen 8080;
       server_name _;
       root /usr/share/nginx/html;
+      {{- if .Values.authSession.enabled }}
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Referrer-Policy "no-referrer" always;
+      sub_filter '<meta name="k8s-auth-session" content="disabled" />' '<meta name="k8s-auth-session" content="enabled" />';
+      sub_filter_once on;
+      {{- end }}
 
       location = /healthz {
         access_log off;
         add_header Content-Type text/plain;
+        {{- if .Values.authSession.enabled }}
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        {{- end }}
         return 200 "ok\n";
       }
 
@@ -49,7 +71,26 @@ data:
         proxy_cache off;
         proxy_read_timeout 1h;
         add_header X-Accel-Buffering no always;
+        {{- if .Values.authSession.enabled }}
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        {{- end }}
       }
+
+      {{- if .Values.authSession.enabled }}
+      location = /api/v1/auth/callback {
+        access_log off;
+        proxy_pass http://{{ include "dashboard.fullname" . }}-api:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+      }
+      {{- end }}
 
       location / {
         try_files $uri $uri/ /index.html;

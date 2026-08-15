@@ -68,6 +68,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and (ne .Values.environment "dev") (not .Values.secretRevision) }}{{ fail "stage/prod require secretRevision for explicit secret rollout tracking" }}{{ end -}}
 {{- if and (ne .Values.environment "dev") .Values.redis.enabled (or (not (regexMatch "^sha256:[a-f0-9]{64}$" .Values.redis.image.digest)) (not .Values.redis.persistence.enabled)) }}{{ fail "stage/prod bundled Redis requires immutable digest and persistence" }}{{ end -}}
 {{- if and (not .Values.redis.enabled) (not .Values.api.existingSecret.name) }}{{ fail "disabled bundled Redis requires existingSecret.name containing REDIS_ADDR" }}{{ end -}}
+{{- if .Values.authSession.enabled -}}
+{{- $expectedOrigin := printf "https://%s" .Values.ingress.host -}}
+{{- if or (ne .Values.api.config.AUTH_MODE "oidc") (not .Values.ingress.enabled) (not .Values.ingress.tls.enabled) (empty .Values.ingress.tls.secretName) (ne .Values.authSession.publicOrigin $expectedOrigin) (ne .Values.authSession.redirectURI (printf "%s/api/v1/auth/callback" $expectedOrigin)) (empty .Values.authSession.clientID) (empty .Values.api.existingSecret.name) (empty .Values.api.existingSecret.keys.authSessionKey) }}{{ fail "browser session requires OIDC, exact HTTPS TLS ingress origin/callback, client ID, and existing Secret key" }}{{ end -}}
+{{- $idleText := toString .Values.authSession.idleTTL -}}{{- $absoluteText := toString .Values.authSession.absoluteTTL -}}{{- $loginText := toString .Values.authSession.loginTTL -}}{{- $skewText := toString .Values.authSession.refreshSkew -}}
+{{- $idleMul := 1 -}}{{- if hasSuffix "m" $idleText }}{{- $idleMul = 60 -}}{{- else if hasSuffix "h" $idleText }}{{- $idleMul = 3600 -}}{{- end -}}
+{{- $absoluteMul := 1 -}}{{- if hasSuffix "m" $absoluteText }}{{- $absoluteMul = 60 -}}{{- else if hasSuffix "h" $absoluteText }}{{- $absoluteMul = 3600 -}}{{- end -}}
+{{- $loginMul := 1 -}}{{- if hasSuffix "m" $loginText }}{{- $loginMul = 60 -}}{{- else if hasSuffix "h" $loginText }}{{- $loginMul = 3600 -}}{{- end -}}
+{{- $skewMul := 1 -}}{{- if hasSuffix "m" $skewText }}{{- $skewMul = 60 -}}{{- else if hasSuffix "h" $skewText }}{{- $skewMul = 3600 -}}{{- end -}}
+{{- $idleSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $idleText)))) $idleMul -}}{{- $absoluteSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $absoluteText)))) $absoluteMul -}}{{- $loginSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $loginText)))) $loginMul -}}{{- $skewSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $skewText)))) $skewMul -}}
+{{- if or (lt $idleSeconds 1) (gt $idleSeconds 3600) (lt $absoluteSeconds 1) (gt $absoluteSeconds 86400) (gt $idleSeconds $absoluteSeconds) (lt $loginSeconds 1) (gt $loginSeconds 600) (lt $skewSeconds 1) (gt $skewSeconds 900) }}{{ fail "browser session durations are outside safe bounds" }}{{ end -}}
+{{- if or (lt (int .Values.authSession.maxSessions) 1) (gt (int .Values.authSession.maxSessions) 100000) }}{{ fail "browser session maxSessions is outside safe bounds" }}{{ end -}}
+{{- if and (ne .Values.environment "dev") .Values.redis.enabled (not .Values.redis.persistence.enabled) }}{{ fail "stage/prod browser session requires persistent shared Redis" }}{{ end -}}
+{{- $oidcEgress := false -}}{{- range .Values.networkPolicy.external -}}{{- if eq .purpose "oidc" }}{{- $oidcEgress = true -}}{{- end -}}{{- end -}}
+{{- if and (ne .Values.environment "dev") (not $oidcEgress) }}{{ fail "stage/prod browser session requires explicit OIDC issuer egress" }}{{ end -}}
+{{- $redisEgress := false -}}{{- range .Values.networkPolicy.external -}}{{- if eq .purpose "redis" }}{{- $redisEgress = true -}}{{- end -}}{{- end -}}
+{{- if and (not .Values.redis.enabled) (not $redisEgress) }}{{ fail "external browser session Redis requires exactly one explicit redis egress destination" }}{{ end -}}
+{{- end -}}
 {{- if and .Values.dashboardBuilder.enabled (or (empty .Values.api.existingSecret.name) (empty .Values.dashboardBuilder.databaseURLKey) (empty .Values.dashboardBuilder.cursorKeyKey) (not .Values.dashboardBuilder.postgresEgress.cidrs)) }}{{ fail "dashboard builder requires existingSecret keys and bounded PostgreSQL egress CIDRs" }}{{ end -}}
 {{- if and .Values.dashboardBuilder.enabled (not (regexMatch "^(?:[1-9]|[12][0-9]|30)s$" .Values.dashboardBuilder.connectTimeout)) }}{{ fail "dashboard builder connectTimeout must be between 1s and 30s" }}{{ end -}}
 {{- if and .Values.dashboardBuilder.enabled (ne .Values.environment "dev") (not .Values.dashboardBuilder.requireTLS) }}{{ fail "stage/prod dashboard builder requires verified PostgreSQL TLS" }}{{ end -}}

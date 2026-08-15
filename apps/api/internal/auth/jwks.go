@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,49 +40,76 @@ type keyStore struct {
 	lastRefresh time.Time
 }
 
+// discoveryDoc은 발급자 메타데이터에서 이 서버가 쓰는 필드만 담습니다.
+// Bearer 검증은 jwks_uri만, 브라우저 세션 code flow는 authorize/token 엔드포인트까지 씁니다.
+type discoveryDoc struct {
+	Issuer                string `json:"issuer"`
+	JWKSURI               string `json:"jwks_uri"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+}
+
 // discover는 issuer의 /.well-known/openid-configuration에서 jwks_uri를 찾습니다.
 func discover(ctx context.Context, client *http.Client, issuer string) (string, error) {
+	doc, err := discoverDoc(ctx, client, issuer)
+	if err != nil {
+		return "", err
+	}
+	return doc.JWKSURI, nil
+}
+
+// discoverDoc은 발급자 메타데이터를 받아 jwks_uri의 transport 경계까지 검증합니다.
+// authorize/token 엔드포인트 검증은 그 값을 실제로 쓰는 code flow 쪽에서 합니다.
+func discoverDoc(ctx context.Context, client *http.Client, issuer string) (discoveryDoc, error) {
 	discoveryURL := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
 	if err != nil {
-		return "", err
+		return discoveryDoc{}, err
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("OIDC discovery에 연결할 수 없습니다: %w", err)
+		return discoveryDoc{}, fmt.Errorf("OIDC discovery에 연결할 수 없습니다: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OIDC discovery 응답 %d", res.StatusCode)
+		if res.StatusCode >= 300 && res.StatusCode < 400 {
+			target, err := res.Location()
+			if err == nil {
+				if err := validateProviderURL(target, issuer); err != nil {
+					return discoveryDoc{}, fmt.Errorf("안전하지 않은 discovery redirect: %w", err)
+				}
+			}
+		}
+		return discoveryDoc{}, fmt.Errorf("OIDC discovery 응답 %d", res.StatusCode)
 	}
-	var doc struct {
-		Issuer  string `json:"issuer"`
-		JWKSURI string `json:"jwks_uri"`
-	}
+	var doc discoveryDoc
 	if err := json.NewDecoder(io.LimitReader(res.Body, maxJWKSBytes)).Decode(&doc); err != nil {
-		return "", err
+		return discoveryDoc{}, err
 	}
 	// 발급자 문서의 issuer가 설정과 다르면 잘못된 곳을 보고 있는 것입니다.
 	if doc.Issuer != issuer {
-		return "", fmt.Errorf("discovery issuer가 설정과 다릅니다")
+		return discoveryDoc{}, fmt.Errorf("discovery issuer가 설정과 다릅니다")
 	}
 	if doc.JWKSURI == "" {
-		return "", fmt.Errorf("jwks_uri가 없습니다")
+		return discoveryDoc{}, fmt.Errorf("jwks_uri가 없습니다")
 	}
 	jwksURL, err := url.Parse(doc.JWKSURI)
 	if err != nil || !jwksURL.IsAbs() {
-		return "", fmt.Errorf("jwks_uri는 절대 HTTP(S) URL이어야 합니다")
+		return discoveryDoc{}, fmt.Errorf("jwks_uri는 절대 HTTP(S) URL이어야 합니다")
 	}
 	if err := validateProviderURL(jwksURL, issuer); err != nil {
-		return "", fmt.Errorf("안전하지 않은 jwks_uri: %w", err)
+		return discoveryDoc{}, fmt.Errorf("안전하지 않은 jwks_uri: %w", err)
 	}
-	return doc.JWKSURI, nil
+	return doc, nil
 }
 
 func validateIssuerURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("OIDC issuer는 절대 HTTP(S) URL이어야 합니다")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || !canonicalIssuerPath(u.Path) {
+		return fmt.Errorf("OIDC issuer에는 userinfo, query, fragment, percent encoding, 비정규 경로를 사용할 수 없습니다")
 	}
 	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
 		return fmt.Errorf("HTTP OIDC issuer는 loopback에서만 허용됩니다")
@@ -93,6 +121,9 @@ func validateIssuerURL(raw string) error {
 func validateProviderURL(target *url.URL, issuer string) error {
 	if target == nil || !target.IsAbs() || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
 		return fmt.Errorf("provider URL은 절대 HTTP(S) URL이어야 합니다")
+	}
+	if target.User != nil || target.Fragment != "" {
+		return fmt.Errorf("provider URL에는 userinfo 또는 fragment를 사용할 수 없습니다")
 	}
 	issuerURL, err := url.Parse(issuer)
 	if err != nil {
@@ -108,6 +139,16 @@ func validateProviderURL(target *url.URL, issuer string) error {
 		return fmt.Errorf("HTTP provider는 loopback issuer와 loopback endpoint만 허용됩니다")
 	}
 	return nil
+}
+
+// canonicalIssuerPath permits an exact issuer path with one optional trailing
+// slash. The configured spelling remains authoritative for discovery and JWT
+// iss equality; alternate trailing-slash spellings are never normalized.
+func canonicalIssuerPath(value string) bool {
+	if value == "" || value == "/" {
+		return true
+	}
+	return pathpkg.Clean(value) == strings.TrimSuffix(value, "/")
 }
 
 func isLoopbackHost(host string) bool {

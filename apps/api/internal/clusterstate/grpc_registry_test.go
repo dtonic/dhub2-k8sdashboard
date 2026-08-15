@@ -58,10 +58,7 @@ func TestGRPCRegistryReadinessTracksInfrastructureTCPNotClusterFreshness(t *test
 	}
 	server.Stop()
 	waitReady(t, r, false)
-	listener, err = net.Listen("tcp", address)
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener = listenSameAddress(t, address)
 	server = serveHealth(t, listener)
 	waitReady(t, r, true)
 	server.Stop()
@@ -73,6 +70,21 @@ func TestGRPCRegistryReadinessTracksInfrastructureTCPNotClusterFreshness(t *test
 	}
 	if r.Ready() {
 		t.Fatal("ready remained true after monitor shutdown")
+	}
+}
+
+func listenSameAddress(t *testing.T, address string) net.Listener {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		listener, err := net.Listen("tcp", address)
+		if err == nil {
+			return listener
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rebind %s after server stop: %v", address, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

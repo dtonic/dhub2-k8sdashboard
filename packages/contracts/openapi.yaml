@@ -18,6 +18,85 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/auth/login:
+    get:
+      operationId: beginBrowserLogin
+      description: Starts a bounded one-time login transaction and sets an HttpOnly __Host- login cookie; no OIDC token is returned to the browser.
+      security: []
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          description: Bounded relative Web UI route only; API, operational, absolute, encoded, and unknown paths are rejected.
+          schema: {type: string, maxLength: 2048, pattern: "^/"}
+      responses:
+        "302": {description: Redirect to OIDC authorization endpoint, headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}, Location: {schema: {type: string}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "429": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+  /api/v1/auth/callback:
+    get:
+      operationId: completeBrowserLogin
+      description: Requires the matching one-time HttpOnly login cookie and state, rotates the browser session SID, and redirects without exposing OIDC tokens.
+      security: []
+      parameters:
+        - {name: code, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 2048}}
+        - {name: state, in: query, required: true, schema: {type: string, minLength: 43, maxLength: 43}}
+      responses:
+        "303": {description: Safe same-origin return redirect, headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}, Location: {schema: {type: string}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "429": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+  /api/v1/auth/session:
+    get:
+      operationId: getBrowserSession
+      description: The browser session cookie is optional; an absent, unknown, or expired session returns authenticated false without exposing the cookie or token.
+      security: []
+      responses:
+        "200": {description: Bounded browser auth status without OIDC tokens, headers: {X-Request-ID: {$ref: "#/components/headers/XRequestID"}}, content: {application/json: {schema: {$ref: "#/components/schemas/AuthSessionResponse"}}}}
+        "429": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshBrowserSession
+      security:
+        - cookieAuth: []
+      parameters:
+        - {name: Origin, in: header, required: true, description: Must exactly match the configured HTTPS public origin., schema: {type: string, format: uri, maxLength: 2048}}
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}}
+      responses:
+        "204":
+          description: Browser session refreshed with a rotated CSRF generation
+          headers:
+            X-Request-ID: {$ref: "#/components/headers/XRequestID"}
+            X-CSRF-Token:
+              required: true
+              schema: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "429": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutBrowserSession
+      security:
+        - cookieAuth: []
+      parameters:
+        - {name: Origin, in: header, required: true, description: Must exactly match the configured HTTPS public origin., schema: {type: string, format: uri, maxLength: 2048}}
+        - {name: X-CSRF-Token, in: header, required: true, schema: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}}
+      responses:
+        "204": {$ref: "#/components/responses/DashboardNoContent"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
   /api/v1/dashboard-capabilities:
     get:
       operationId: getDashboardCapabilities
@@ -653,6 +732,11 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-k8s-dashboard
+      description: Opaque same-origin HttpOnly browser-session handle; it is not an OIDC token and may outlive the server-side session.
     bearerAuth:
       type: http
       scheme: bearer
@@ -1009,6 +1093,11 @@ components:
             - unsupported_media_type
             - body_too_large
             - dashboard_store_unavailable
+            - bad_request
+            - auth_unavailable
+            - refresh_conflict
+            - auth_rate_limited
+            - session_unavailable
         message:
           type: string
         requestId:
@@ -1048,6 +1137,41 @@ components:
     ScopeResponse:
       type: object
       description: "원본: src/index.ts의 ScopeResponse"
+    AuthSessionResponse:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [authenticated]
+          properties:
+            authenticated: {type: boolean, const: false}
+        - type: object
+          additionalProperties: false
+          required: [authenticated, refreshable, csrfToken]
+          properties:
+            authenticated: {type: boolean, const: false}
+            refreshable: {type: boolean, const: true}
+            csrfToken: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}
+        - type: object
+          additionalProperties: false
+          required: [authenticated, principal, capabilities, expiresAt, refreshAt, csrfToken]
+          properties:
+            authenticated: {type: boolean, const: true}
+            principal:
+              type: object
+              additionalProperties: false
+              required: [displayName]
+              properties: {displayName: {type: string, minLength: 1, maxLength: 128}}
+            capabilities:
+              type: object
+              additionalProperties: false
+              required: [canEditDashboard, canPublishDashboard]
+              properties:
+                canEditDashboard: {type: boolean}
+                canPublishDashboard: {type: boolean}
+            expiresAt: {type: string, format: date-time}
+            refreshAt: {type: string, format: date-time}
+            csrfToken: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}
+      description: "원본: src/index.ts의 AuthSessionResponse. OIDC token과 raw role/subject는 포함하지 않음"
     ClusterOverviewResponse:
       type: object
       description: "원본: src/index.ts의 ClusterOverviewResponse"

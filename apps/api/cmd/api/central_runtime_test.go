@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
@@ -322,6 +324,8 @@ func TestRunCentralProductionLifecycleWithOIDCAndPrivateCA(t *testing.T) {
 	cfg.Addr = apiAddr
 	cfg.UseDemoData = false
 	cfg.Auth = config.AuthConfig{Mode: "oidc", Issuer: idp.Issuer, Audience: "issue25-central", RolesClaim: "roles", Leeway: time.Minute, JWKSMinRefresh: time.Second}
+	redisServer := miniredis.RunT(t)
+	enableCentralBrowserSession(&cfg, redisServer.Addr())
 	cfg.ClusterState = config.ClusterStateConfig{Mode: "central", RegistryEndpoint: registryListener.Addr().String(), RegistryServerName: "registry", Clusters: []string{"a"}, TrustDomain: "example.test", CertFile: apiFiles.CertFile, KeyFile: apiFiles.KeyFile, CAFile: apiFiles.CAFile, MaxClusters: 1, MaxResources: 100, MaxChunkResources: 10, MaxMessageBytes: 4 << 20, StaleTTL: time.Minute, HeartbeatTimeout: time.Minute}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -348,6 +352,40 @@ func TestRunCentralProductionLifecycleWithOIDCAndPrivateCA(t *testing.T) {
 		_ = conn.Close()
 		t.Fatal("central HTTP listener leaked after cancellation")
 	}
+	waitUntil(t, time.Second, func() bool { return redisServer.CurrentConnectionCount() == 0 })
+}
+
+func TestRunCentralClosesSessionRedisWhenHubConstructionFails(t *testing.T) {
+	idp, err := auth.StartMockIDP("127.0.0.1:0", "central-close", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = idp.Close() })
+	redisServer := miniredis.RunT(t)
+	cfg := config.Load()
+	cfg.Auth = config.AuthConfig{Mode: "oidc", Issuer: idp.Issuer, Audience: "central-close", RolesClaim: "roles", Leeway: time.Minute, JWKSMinRefresh: time.Second}
+	cfg.ClusterState = config.ClusterStateConfig{Mode: "central", Clusters: []string{"a"}, MaxClusters: 1}
+	enableCentralBrowserSession(&cfg, redisServer.Addr())
+	cfg.StreamReplayEvents = stream.MaxRingSize + 1
+	if err := runCentral(context.Background(), discardLogger(), cfg); err == nil {
+		t.Fatal("invalid hub configuration unexpectedly started")
+	}
+	waitUntil(t, time.Second, func() bool { return redisServer.CurrentConnectionCount() == 0 })
+}
+
+func enableCentralBrowserSession(cfg *config.Config, redisAddr string) {
+	cfg.RedisAddr = redisAddr
+	cfg.RedisOpTimeout = time.Second
+	cfg.Auth.SessionEnabled = true
+	cfg.Auth.PublicOrigin = "https://dashboard.example"
+	cfg.Auth.RedirectURI = "https://dashboard.example/api/v1/auth/callback"
+	cfg.Auth.ClientID = "browser-client"
+	cfg.Auth.SessionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	cfg.Auth.LoginTransactionTTL = 2 * time.Minute
+	cfg.Auth.SessionIdleTTL = 10 * time.Minute
+	cfg.Auth.SessionAbsoluteTTL = time.Hour
+	cfg.Auth.RefreshSkew = time.Minute
+	cfg.Auth.SessionMaxSessions = 10
 }
 
 func seedRegistryCluster(t *testing.T, reg *registry.Registry, id string) {

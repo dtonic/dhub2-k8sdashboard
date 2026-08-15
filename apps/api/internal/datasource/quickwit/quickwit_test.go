@@ -1101,21 +1101,41 @@ func TestUpstreamFailureIsClassifiedAndRetriedOnce(t *testing.T) {
 
 func TestTimeoutIsClassifiedAndRetriedOnce(t *testing.T) {
 	var hits atomic.Int32
-	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	canceled := make(chan struct{}, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		<-release
+		started <- struct{}{}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		canceled <- struct{}{}
 	}))
 	t.Cleanup(srv.Close)
-	s, err := New(Config{BaseURL: srv.URL, Timeout: 20 * time.Millisecond}, catalog)
+	s, err := New(Config{BaseURL: srv.URL, Timeout: time.Second}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	begin := time.Now()
 	_, err = s.Search(context.Background(), baseQuery("payments"))
-	close(release)
+	if elapsed := time.Since(begin); elapsed > 3*time.Second {
+		t.Fatalf("logical timeout exceeded broad bound: %v", elapsed)
+	}
 	if !errors.Is(err, datasource.ErrUnavailable) {
 		t.Fatalf("timeout은 ErrUnavailable이어야 합니다: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("attempt %d did not start", i+1)
+		}
+		select {
+		case <-canceled:
+		case <-time.After(time.Second):
+			t.Fatalf("attempt %d context was not canceled", i+1)
+		}
 	}
 	if got := hits.Load(); got != 2 {
 		t.Fatalf("timeout 재시도는 1회여야 합니다: %d회 호출", got)

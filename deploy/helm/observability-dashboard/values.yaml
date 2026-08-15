@@ -42,6 +42,19 @@ api:
       quickwitUsername: QUICKWIT_USERNAME
       quickwitPassword: QUICKWIT_PASSWORD
       redisAddr: REDIS_ADDR
+      authSessionKey: AUTH_SESSION_KEY
+      oidcClientSecret: OIDC_CLIENT_SECRET
+
+authSession:
+  enabled: false
+  publicOrigin: ""
+  redirectURI: ""
+  clientID: ""
+  idleTTL: 30m
+  absoluteTTL: 8h
+  loginTTL: 5m
+  refreshSkew: 2m
+  maxSessions: 10000
 
 # Direct is the byte-for-byte compatible default. Central mode uses only the
 # shared registry and never mounts a Kubernetes service-account token.

@@ -2,6 +2,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useScope } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { embeddedDashboards } from "@/generated/dashboards";
+import { useAuth } from "@/app/AuthGate";
+import { StreamInvalidator } from "@/app/StreamInvalidator";
 
 const NAV = [
   { to: "/", label: "Cluster Overview", end: true },
@@ -17,9 +19,11 @@ export function AppShell() {
   const scope = useScope();
   const { clusterId } = useDashboardParams();
   const cluster = scope.data?.clusters.find((c) => c.id === clusterId);
+  const auth = useAuth();
 
   return (
     <div className="app">
+      <StreamInvalidator clusterId={auth.enabled ? clusterId : undefined} />
       <a className="skip-link" href="#main">
         본문으로 건너뛰기
       </a>
@@ -36,6 +40,7 @@ export function AppShell() {
         <span className="muted" style={{ font: "var(--type-meta)" }}>
           Mock API · 실데이터 아님
         </span>
+		{auth.enabled && auth.session?.authenticated && <span className="auth-user">{auth.session.principal.displayName}<button type="button" onClick={() => void auth.logout()}>Sign out</button></span>}
       </header>
 
       <nav className="app__nav" aria-label="주요 화면">

@@ -156,6 +156,12 @@ spec:
             - name: DASHBOARD_DB_REQUIRE_TLS
               value: {{ $.Values.dashboardBuilder.requireTLS | quote }}
             {{- end }}
+            {{- if $.Values.authSession.enabled }}
+            - name: AUTH_SESSION_KEY
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.api.existingSecret.keys.authSessionKey }}, optional: false}}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.api.existingSecret.keys.oidcClientSecret }}, optional: true}}
+            {{- end }}
           {{- end }}
           lifecycle: {preStop: {sleep: {seconds: 5}}}
           startupProbe: {httpGet: {path: /readyz, port: http}, periodSeconds: 5, failureThreshold: 30}

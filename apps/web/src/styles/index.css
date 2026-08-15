@@ -19,3 +19,5 @@
 .dashboard-gauge strong { color: var(--color-text-primary); font: var(--type-display); }
 .dashboard-gauge span { color: var(--color-text-secondary); font: var(--type-meta); }
 @media (max-width: 900px) { .dashboard-grid { display: block; } .dashboard-grid > div { margin-bottom: var(--space-4); } }
+.auth-state { min-height: 100vh; display: grid; place-content: center; gap: var(--space-4); color: var(--color-text-primary); background: var(--color-bg-canvas); }
+.auth-user { display: inline-flex; align-items: center; gap: var(--space-3); }

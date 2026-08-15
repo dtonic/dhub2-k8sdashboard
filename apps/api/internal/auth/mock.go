@@ -107,13 +107,17 @@ func (m *MockIDP) Close() error {
 }
 
 func (m *MockIDP) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
-		"issuer":   m.Issuer,
-		"jwks_uri": m.Issuer + "/jwks",
+		"issuer":                 m.Issuer,
+		"jwks_uri":               m.Issuer + "/jwks",
+		"authorization_endpoint": m.Issuer + "/authorize",
+		"token_endpoint":         m.Issuer + "/token",
 	})
 }
 
 func (m *MockIDP) handleJWKS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	pub := m.key.Public().(*rsa.PublicKey)
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 		"keys": []map[string]string{{

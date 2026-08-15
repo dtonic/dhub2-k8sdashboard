@@ -57,7 +57,7 @@ func TestFixtureStaysOutOfProduction(t *testing.T) {
 		isTagged := strings.Contains(string(src), "//go:build e2efixture")
 		// 픽스처 소스는 **전부**(내부 패키지·cmd 포함) 빌드 태그 뒤에 있어야 합니다.
 		// 일반 `go build ./...`에는 한 파일도 포함되지 않습니다.
-		if strings.HasPrefix(rel, "internal/e2efixture/") || strings.HasPrefix(rel, "cmd/e2efixture/") {
+		if strings.HasPrefix(rel, "internal/e2efixture/") || strings.HasPrefix(rel, "cmd/e2efixture/") || strings.HasPrefix(rel, "cmd/authfixture/") {
 			if !isTagged {
 				t.Errorf("%s: e2efixture 소스에 //go:build e2efixture 태그가 없습니다", rel)
 			}

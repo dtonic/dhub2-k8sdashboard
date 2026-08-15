@@ -198,14 +198,56 @@ func TestProviderTransportPolicy(t *testing.T) {
 		"loopback HTTP":           {"http://127.0.0.1:8081/jwks", "http://127.0.0.1:8080", true},
 		"loopback to remote HTTP": {"http://remote.example/jwks", "http://127.0.0.1:8080", false},
 		"relative jwks":           {"/jwks", "https://idp.example", false},
+		"provider query":          {"https://idp.example/jwks?version=1", "https://idp.example", true},
+		"provider userinfo":       {"https://user@idp.example/jwks", "https://idp.example", false},
+		"provider fragment":       {"https://idp.example/jwks#keys", "https://idp.example", false},
 	} {
 		err := validateProviderURL(parse(tc.target), tc.issuer)
 		if (err == nil) != tc.ok {
 			t.Errorf("%s: err=%v", name, err)
 		}
 	}
-	if err := validateIssuerURL("http://idp.example"); err == nil {
-		t.Fatal("remote HTTP issuer가 통과했습니다")
+	for name, raw := range map[string]string{
+		"remote HTTP":  "http://idp.example",
+		"userinfo":     "https://user@idp.example/tenant",
+		"query":        "https://idp.example/tenant?realm=ops",
+		"fragment":     "https://idp.example/tenant#issuer",
+		"percent path": "https://idp.example/%74enant",
+		"dot path":     "https://idp.example/tenant/../other",
+	} {
+		if err := validateIssuerURL(raw); err == nil {
+			t.Errorf("%s issuer passed: %q", name, raw)
+		}
+	}
+	for _, raw := range []string{"https://idp.example/tenant", "https://idp.example/tenant/", "http://127.0.0.1:8080/tenant"} {
+		if err := validateIssuerURL(raw); err != nil {
+			t.Errorf("valid issuer path rejected: %q: %v", raw, err)
+		}
+	}
+}
+
+func TestDiscoveryIssuerTrailingSlashIsNotNormalized(t *testing.T) {
+	var issuer *httptest.Server
+	issuer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer.URL, "jwks_uri": issuer.URL + "/jwks"})
+	}))
+	t.Cleanup(issuer.Close)
+	if _, err := NewResolver(context.Background(), Config{IssuerURL: issuer.URL + "/", Audience: "app"}, nil); err == nil || !strings.Contains(err.Error(), "issuer") {
+		t.Fatalf("alternate trailing-slash issuer spelling passed: %v", err)
+	}
+}
+
+func TestDiscoverWrapperReturnsValidatedJWKSURI(t *testing.T) {
+	var issuer *httptest.Server
+	issuer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer.URL + "/tenant", "jwks_uri": issuer.URL + "/keys?version=1"})
+	}))
+	t.Cleanup(issuer.Close)
+	got, err := discover(context.Background(), issuer.Client(), issuer.URL+"/tenant")
+	if err != nil || got != issuer.URL+"/keys?version=1" {
+		t.Fatalf("discover wrapper: uri=%q err=%v", got, err)
 	}
 }
 

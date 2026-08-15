@@ -233,6 +233,18 @@ export interface ScopeResponse {
   }>;
 }
 
+export type AuthSessionResponse =
+  | { authenticated: false }
+  | { authenticated: false; refreshable: true; csrfToken: string }
+  | {
+      authenticated: true;
+      principal: { displayName: string };
+      capabilities: { canEditDashboard: boolean; canPublishDashboard: boolean };
+      expiresAt: string;
+      refreshAt: string;
+      csrfToken: string;
+    };
+
 export interface DashboardCapabilities { enabled:boolean; canEdit:boolean; canPublish:boolean; maxDrafts:number; maxWidgets:number; }
 export type DashboardDraftState = "draft" | "submitted" | "approved";
 export interface DashboardDraft { id:string; revision:number; state:DashboardDraftState; owned:boolean; schemaVersion:1; definition:DashboardDefinition; createdAt:string; updatedAt:string; }
@@ -260,6 +272,11 @@ export interface ApiError {
     | "unsupported_media_type"
     | "body_too_large"
     | "dashboard_store_unavailable"
+	| "bad_request"
+	| "auth_unavailable"
+	| "refresh_conflict"
+	| "auth_rate_limited"
+	| "session_unavailable"
     | "internal";
   message: string;
   /** 응답 헤더 X-Request-ID와 항상 같은 값. 문의·로그 대조는 이 값 하나로 합니다. */

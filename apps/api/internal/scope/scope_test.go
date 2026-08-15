@@ -63,6 +63,9 @@ func TestNamespacesJSON(t *testing.T) {
 	if c.Namespaces[0] != "z" {
 		t.Fatal("원본이 정렬로 오염되었습니다")
 	}
+	if empty, ok := (scope.Cluster{}).NamespacesJSON().([]string); !ok || empty == nil || len(empty) != 0 {
+		t.Fatalf("빈 제한 범위는 JSON 배열이어야 합니다: %#v", empty)
+	}
 }
 
 // TestScopeClusterLookupAndContext — 클러스터 조회, 컨텍스트 왕복,

@@ -5,6 +5,7 @@ package e2efixture
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -381,5 +382,46 @@ func TestCloseReleasesListener(t *testing.T) {
 			t.Fatalf("Close 후에도 포트가 잡혀 있습니다: %v", err)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestShortTokenTTLIsConsumedByOneIDToken(t *testing.T) {
+	idp, err := startCodeIDP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idp.Close()
+	idp.nextTokenTTL.Store(int64(4 * time.Second))
+	lifetime := func(raw string) int64 {
+		parts := strings.Split(raw, ".")
+		if len(parts) != 3 {
+			t.Fatalf("JWT parts=%d", len(parts))
+		}
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims struct {
+			ExpiresAt int64 `json:"exp"`
+			IssuedAt  int64 `json:"iat"`
+		}
+		if err := json.Unmarshal(payload, &claims); err != nil {
+			t.Fatal(err)
+		}
+		return claims.ExpiresAt - claims.IssuedAt
+	}
+	first, err := idp.jwt("nonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := idp.jwt("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lifetime(first); got != 4 {
+		t.Fatalf("first lifetime=%ds", got)
+	}
+	if got := lifetime(second); got != 300 {
+		t.Fatalf("second lifetime=%ds", got)
 	}
 }

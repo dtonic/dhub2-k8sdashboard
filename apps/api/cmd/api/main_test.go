@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	urlpkg "net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
@@ -76,19 +80,24 @@ func TestRunStopsOnInvalidConfigBeforeKubernetes(t *testing.T) {
 }
 
 func TestRunRoutesValidatedCentralModeBeforeAnyKubernetesClient(t *testing.T) {
+	dir := t.TempDir()
+	ca, caKey := testCA(t)
+	caPath := writeTestPEM(t, dir, "preflight-ca.pem", "CERTIFICATE", ca.Raw)
+	apiCert, apiKey := testLeaf(t, ca, caKey, "", "spiffe://example.test/cluster-state-api/preflight")
+	certPath := writeTestCert(t, dir, "preflight-api", apiCert, apiKey)
 	t.Setenv("CLUSTER_STATE_MODE", "central")
 	t.Setenv("CLUSTER_STATE_REGISTRY_ENDPOINT", "registry.example.test:9443")
 	t.Setenv("CLUSTER_STATE_REGISTRY_SERVER_NAME", "registry.example.test")
 	t.Setenv("CLUSTER_STATE_CLUSTERS", "cluster-a")
 	t.Setenv("CLUSTER_STATE_TRUST_DOMAIN", "example.test")
-	t.Setenv("CLUSTER_STATE_TLS_CERT_FILE", "/nonexistent/api.crt")
-	t.Setenv("CLUSTER_STATE_TLS_KEY_FILE", "/nonexistent/api.key")
-	t.Setenv("CLUSTER_STATE_TLS_CA_FILE", "/nonexistent/ca.crt")
+	t.Setenv("CLUSTER_STATE_TLS_CERT_FILE", certPath)
+	t.Setenv("CLUSTER_STATE_TLS_KEY_FILE", filepath.Join(dir, "preflight-api.key"))
+	t.Setenv("CLUSTER_STATE_TLS_CA_FILE", caPath)
 	t.Setenv("AUTH_MODE", "oidc")
 	t.Setenv("OIDC_ISSUER", "https://issuer.example.test")
 	t.Setenv("OIDC_AUDIENCE", "dashboard")
 	t.Setenv("USE_DEMO_DATA", "false")
-	t.Setenv("QUERY_CATALOG_DIR", "/nonexistent/query-catalog")
+	t.Setenv("QUERY_CATALOG_DIR", filepath.Join(t.TempDir(), "missing-query-catalog"))
 	err := run(discardLogger())
 	if err == nil || !strings.Contains(err.Error(), "query-catalog") {
 		t.Fatalf("central mode did not fail at the query catalog boundary: %v", err)
@@ -209,8 +218,25 @@ func TestBuildResolverModes(t *testing.T) {
 	cfg.Auth.Mode = "mock"
 	cfg.Auth.MockAddr = "127.0.0.1:0"
 	cfg.ClusterID = "seoul"
-	if _, err := buildResolver(ctx, discardLogger(), cfg); err != nil {
+	mockResolver, err := buildResolver(ctx, discardLogger(), cfg)
+	if err != nil {
 		t.Fatalf("mock 모드 기동 실패: %v", err)
+	}
+	managed, ok := mockResolver.(*managedMockResolver)
+	if !ok {
+		t.Fatalf("mock resolver does not own its IdP: %T", mockResolver)
+	}
+	issuer := managed.idp.Issuer
+	if err := managed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := managed.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	if response, err := client.Get(issuer + "/.well-known/openid-configuration"); err == nil {
+		response.Body.Close()
+		t.Fatal("mock IdP remained reachable after resolver close")
 	}
 
 	cfg.Auth.Mode = "oidc"
@@ -233,6 +259,39 @@ func TestBuildResolverModes(t *testing.T) {
 	cfg.Auth.MockAddr = listener.Addr().String()
 	if _, err := buildResolver(ctx, discardLogger(), cfg); err == nil {
 		t.Fatal("mock resolver accepted an occupied listen address")
+	}
+}
+
+func TestBuildResolverSessionCloseDirectAndCentral(t *testing.T) {
+	idp, err := auth.StartMockIDP("127.0.0.1:0", "resolver-close", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = idp.Close() })
+	for _, mode := range []string{"direct", "central"} {
+		t.Run(mode, func(t *testing.T) {
+			redisServer := miniredis.RunT(t)
+			cfg := config.Load()
+			cfg.Auth = config.AuthConfig{Mode: "oidc", Issuer: idp.Issuer, Audience: "resolver-close", RolesClaim: "roles", Leeway: time.Minute, JWKSMinRefresh: time.Second}
+			cfg.ClusterState.Mode = mode
+			cfg.ClusterState.Clusters = []string{"a"}
+			enableCentralBrowserSession(&cfg, redisServer.Addr())
+			resolver, err := buildResolver(context.Background(), discardLogger(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closer, ok := resolver.(interface{ Close() error })
+			if !ok {
+				t.Fatalf("resolver is not closeable: %T", resolver)
+			}
+			if redisServer.CurrentConnectionCount() == 0 {
+				t.Fatal("session Redis connection was not opened")
+			}
+			if err := closer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			waitUntil(t, time.Second, func() bool { return redisServer.CurrentConnectionCount() == 0 })
+		})
 	}
 }
 

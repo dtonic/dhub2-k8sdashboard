@@ -53,7 +53,8 @@ func (c Cluster) NamespacesJSON() any {
 	if c.All {
 		return "all"
 	}
-	out := append([]string(nil), c.Namespaces...)
+	out := make([]string, len(c.Namespaces))
+	copy(out, c.Namespaces)
 	sort.Strings(out)
 	return out
 }

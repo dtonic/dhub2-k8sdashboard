@@ -40,6 +40,11 @@ bundled Redis는 HA/replication/operator가 없는 단일 장애점입니다. st
 보존하지만 가용성을 높이지 않습니다. prod는 기본적으로 외부 Redis 주소만 `REDIS_ADDR` Secret key로
 받습니다. 애플리케이션의 Redis auth/TLS 기능은 추가하지 않았습니다.
 
+브라우저 세션을 외부 Redis와 사용할 때는 `networkPolicy.external`에 `purpose: redis`인 목적지를
+정확히 하나 선언해야 합니다. chart는 Secret의 `REDIS_ADDR` host/port를 읽지 않으므로 운영자가 이
+egress CIDR/port와 Secret 값을 일치시켜야 하며, 불일치하면 API 기동/readiness가 fail closed됩니다.
+bundled Redis를 사용하는 경우에는 별도 external Redis egress가 필요하지 않습니다.
+
 ## 기존 Secret 계약
 
 `api.existingSecret.name`은 이미 존재하는 Secret 이름이며 다음 key 이름만 참조합니다.

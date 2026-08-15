@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["environment", "ui", "api", "clusterState", "redis", "dashboardBuilder", "networkPolicy", "telemetry"],
+  "required": ["environment", "ui", "api", "authSession", "clusterState", "redis", "dashboardBuilder", "networkPolicy", "telemetry"],
   "properties": {
     "environment": {"enum": ["dev", "stage", "prod"]},
     "imagePullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]},
@@ -16,6 +16,7 @@
         }}
       ]
     },
+    "authSession": {"type":"object","required":["enabled","publicOrigin","redirectURI","clientID","idleTTL","absoluteTTL","loginTTL","refreshSkew","maxSessions"],"properties":{"enabled":{"type":"boolean"},"publicOrigin":{"type":"string"},"redirectURI":{"type":"string"},"clientID":{"type":"string"},"idleTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"absoluteTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"loginTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"refreshSkew":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"maxSessions":{"type":"integer","minimum":1,"maximum":100000}}},
     "clusterState": {"type":"object","required":["mode","clusters","trustDomain","registryEndpoint","registryServerName","tls","registry","limits"],"properties":{"mode":{"enum":["direct","central"]},"clusters":{"type":"array","maxItems":64,"uniqueItems":true,"items":{"type":"string","maxLength":63,"pattern":"^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$"}},"trustDomain":{"type":"string"},"registryEndpoint":{"type":"string"},"registryServerName":{"type":"string","maxLength":253,"pattern":"^$|^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"},"tls":{"type":"object"},"registry":{"type":"object","properties":{"agentService":{"type":"object","properties":{"sourceCidrs":{"type":"array","items":{"$ref":"#/definitions/ipv4Cidr"}}}}}},"limits":{"type":"object","properties":{"ingressFrameRate":{"type":"number","minimum":1,"maximum":100000},"ingressByteRate":{"type":"number","minimum":1024,"maximum":1073741824},"ingressFrameBurst":{"type":"integer","minimum":1,"maximum":100000},"ingressByteBurst":{"type":"integer","minimum":1024,"maximum":1073741824},"staleTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"heartbeatTimeout":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"}}}}},
     "redis": {
       "type": "object", "required": ["enabled", "image", "persistence", "resources"],
@@ -120,6 +121,24 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "required": ["authSession", "redis"],
+        "properties": {
+          "authSession": {"required": ["enabled"], "properties": {"enabled": {"const": true}}},
+          "redis": {"required": ["enabled"], "properties": {"enabled": {"const": false}}}
+        }
+      },
+      "then": {
+        "properties": {
+          "networkPolicy": {
+            "properties": {
+              "external": {"contains": {"type": "object", "required": ["purpose"], "properties": {"purpose": {"const": "redis"}}}}
+            }
+          }
+        }
+      }
+    },
     {
       "if": {"properties": {"environment": {"enum": ["stage", "prod"]}}},
       "then": {

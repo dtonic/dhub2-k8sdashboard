@@ -25,13 +25,16 @@ var routePattern = regexp.MustCompile(`HandleFunc\("(GET|HEAD|POST|PUT|PATCH|DEL
 
 func routerRoutes(t *testing.T) map[string]bool {
 	t.Helper()
-	src, err := os.ReadFile("server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
+	files := []string{"server.go", filepath.Join("..", "auth", "session.go")}
 	routes := map[string]bool{}
-	for _, m := range routePattern.FindAllStringSubmatch(string(src), -1) {
-		routes[m[1]+" "+m[2]] = true
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range routePattern.FindAllStringSubmatch(string(src), -1) {
+			routes[m[1]+" "+m[2]] = true
+		}
 	}
 	if len(routes) == 0 {
 		t.Fatal("server.go에서 라우트를 찾지 못했습니다 — 등록 형식이 바뀌었으면 routePattern을 갱신하세요")
@@ -175,13 +178,59 @@ func TestOpenAPIErrorAndAuthBoundary(t *testing.T) {
 	for op, def := range specOperations(t, doc) {
 		path := op[strings.Index(op, " ")+1:]
 		security, declared := def["security"].([]any)
-		operational := path == "/healthz" || path == "/readyz" || path == "/version" || path == "/metrics"
+		cookieMutation := op == "POST /api/v1/auth/refresh" || op == "POST /api/v1/auth/logout"
+		operational := path == "/healthz" || path == "/readyz" || path == "/version" || path == "/metrics" || (strings.HasPrefix(path, "/api/v1/auth/") && !cookieMutation)
 		if operational && (!declared || len(security) != 0) {
 			t.Errorf("%s: 운영 경로는 security: []여야 합니다", op)
 		}
-		if !operational && declared {
+		if !operational && !cookieMutation && declared {
 			t.Errorf("%s: /api/v1 경로가 전역 인증을 덮어썼습니다", op)
 		}
+	}
+}
+
+func TestOpenAPIBrowserSessionMutationBoundary(t *testing.T) {
+	doc := loadSpec(t)
+	components := asMap(doc["components"])
+	cookieAuth := asMap(asMap(components["securitySchemes"])["cookieAuth"])
+	if cookieAuth["type"] != "apiKey" || cookieAuth["in"] != "cookie" || cookieAuth["name"] != "__Host-k8s-dashboard" {
+		t.Fatalf("cookieAuth must describe the exact opaque __Host- session cookie: %v", cookieAuth)
+	}
+
+	ops := specOperations(t, doc)
+	for _, op := range []string{"POST /api/v1/auth/refresh", "POST /api/v1/auth/logout"} {
+		definition := ops[op]
+		security := asSlice(definition["security"])
+		if len(security) != 1 {
+			t.Fatalf("%s must require cookieAuth: %v", op, security)
+		}
+		if _, ok := asMap(security[0])["cookieAuth"]; !ok {
+			t.Fatalf("%s security must be cookieAuth: %v", op, security)
+		}
+
+		headers := map[string]map[string]any{}
+		for _, raw := range asSlice(definition["parameters"]) {
+			parameter := asMap(raw)
+			if parameter["in"] == "header" {
+				headers[fmt.Sprint(parameter["name"])] = parameter
+			}
+		}
+		origin := headers["Origin"]
+		if origin["required"] != true || asMap(origin["schema"])["format"] != "uri" {
+			t.Errorf("%s must require the exact-origin URI header", op)
+		}
+		csrf := headers["X-CSRF-Token"]
+		csrfSchema := asMap(csrf["schema"])
+		if csrf["required"] != true || csrfSchema["minLength"] != 43 || csrfSchema["maxLength"] != 43 || csrfSchema["pattern"] != "^[A-Za-z0-9_-]{43}$" {
+			t.Errorf("%s must require the bounded CSRF header: %v", op, csrf)
+		}
+	}
+
+	refreshResponses := asMap(ops["POST /api/v1/auth/refresh"]["responses"])
+	rotated := asMap(asMap(asMap(refreshResponses["204"])["headers"])["X-CSRF-Token"])
+	rotatedSchema := asMap(rotated["schema"])
+	if rotated["required"] != true || rotatedSchema["minLength"] != 43 || rotatedSchema["maxLength"] != 43 || rotatedSchema["pattern"] != "^[A-Za-z0-9_-]{43}$" {
+		t.Fatalf("refresh 204 must declare the rotated bounded CSRF response header: %v", rotated)
 	}
 }
 

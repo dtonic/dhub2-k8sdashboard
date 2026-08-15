@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -247,6 +248,18 @@ func TestValidateRejectsInvalidRequiredConfig(t *testing.T) {
 			c.Auth.Issuer = "http://idp.example.com"
 			c.Auth.Audience = "dashboard-api"
 		}, "OIDC_ISSUER"},
+		"issuer userinfo": {func(c *Config) {
+			c.Auth.Mode, c.Auth.Issuer, c.Auth.Audience = "oidc", "https://user@idp.example.com/tenant", "dashboard-api"
+		}, "OIDC_ISSUER"},
+		"issuer query": {func(c *Config) {
+			c.Auth.Mode, c.Auth.Issuer, c.Auth.Audience = "oidc", "https://idp.example.com/tenant?realm=ops", "dashboard-api"
+		}, "OIDC_ISSUER"},
+		"issuer fragment": {func(c *Config) {
+			c.Auth.Mode, c.Auth.Issuer, c.Auth.Audience = "oidc", "https://idp.example.com/tenant#issuer", "dashboard-api"
+		}, "OIDC_ISSUER"},
+		"issuer percent path": {func(c *Config) {
+			c.Auth.Mode, c.Auth.Issuer, c.Auth.Audience = "oidc", "https://idp.example.com/%74enant", "dashboard-api"
+		}, "OIDC_ISSUER"},
 		"audience 없는 oidc": {func(c *Config) {
 			c.Auth.Mode = "oidc"
 			c.Auth.Issuer = "https://idp.example.com"
@@ -318,6 +331,108 @@ func TestValidateRejectsInvalidRequiredConfig(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("데이터소스 주소는 기동 차단 대상이 아닙니다: %v", err)
 	}
+}
+
+func TestBrowserSessionCrossFieldBoundaries(t *testing.T) {
+	base := Load()
+	base.Auth.Mode = "oidc"
+	base.Auth.Issuer = "https://issuer.example"
+	base.Auth.Audience = "dashboard"
+	base.Auth.SessionEnabled = true
+	base.Auth.PublicOrigin = "https://dashboard.example"
+	base.Auth.RedirectURI = "https://dashboard.example/api/v1/auth/callback"
+	base.Auth.ClientID = "dashboard"
+	base.Auth.SessionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	base.RedisAddr = "redis.example:6379"
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid browser session: %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"non oidc mode", func(c *Config) { c.Auth.Mode = "none" }},
+		{"http origin", func(c *Config) { c.Auth.PublicOrigin = "http://dashboard.example" }},
+		{"origin path", func(c *Config) { c.Auth.PublicOrigin = "https://dashboard.example/path" }},
+		{"origin userinfo", func(c *Config) {
+			c.Auth.PublicOrigin = "https://user@dashboard.example"
+			c.Auth.RedirectURI = "https://user@dashboard.example/api/v1/auth/callback"
+		}},
+		{"redirect mismatch", func(c *Config) { c.Auth.RedirectURI = "https://dashboard.example/other" }},
+		{"missing redis", func(c *Config) { c.RedisAddr = "" }},
+		{"missing client", func(c *Config) { c.Auth.ClientID = "" }},
+		{"short key", func(c *Config) { c.Auth.SessionKey = base64.RawURLEncoding.EncodeToString(make([]byte, 31)) }},
+		{"idle exceeds absolute", func(c *Config) { c.Auth.SessionIdleTTL = c.Auth.SessionAbsoluteTTL + 1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			if cfg.Validate() == nil {
+				t.Fatal("invalid cross-field configuration passed")
+			}
+		})
+	}
+}
+
+func TestBrowserSessionEnvironmentParsingIsStrictOnlyWhenRelevant(t *testing.T) {
+	t.Setenv("AUTH_MODE", "oidc")
+	t.Setenv("OIDC_ISSUER", "https://issuer.example")
+	t.Setenv("OIDC_AUDIENCE", "dashboard")
+	t.Setenv("AUTH_PUBLIC_ORIGIN", "https://dashboard.example")
+	t.Setenv("OIDC_REDIRECT_URI", "https://dashboard.example/api/v1/auth/callback")
+	t.Setenv("OIDC_CLIENT_ID", "dashboard")
+	t.Setenv("AUTH_SESSION_KEY", base64.RawURLEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("REDIS_ADDR", "redis.example:6379")
+
+	t.Run("malformed enabled", func(t *testing.T) {
+		t.Setenv("AUTH_SESSION_ENABLED", "sometimes")
+		if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), "AUTH_SESSION_ENABLED") {
+			t.Fatalf("malformed enable flag did not fail closed: %v", err)
+		}
+	})
+	t.Run("disabled ignores unrelated session tuning", func(t *testing.T) {
+		t.Setenv("AUTH_SESSION_ENABLED", "false")
+		t.Setenv("AUTH_SESSION_IDLE_TTL", "not-a-duration")
+		if err := Load().Validate(); err != nil {
+			t.Fatalf("disabled legacy mode changed: %v", err)
+		}
+	})
+	for _, tc := range []struct{ name, key, value string }{
+		{"malformed idle", "AUTH_SESSION_IDLE_TTL", "not-a-duration"},
+		{"overflow absolute", "AUTH_SESSION_ABSOLUTE_TTL", "999999999999999999999h"},
+		{"zero login", "AUTH_LOGIN_TTL", "0s"},
+		{"negative skew", "AUTH_REFRESH_SKEW", "-1s"},
+		{"idle max epsilon", "AUTH_SESSION_IDLE_TTL", "1h1ns"},
+		{"absolute max epsilon", "AUTH_SESSION_ABSOLUTE_TTL", "24h1ns"},
+		{"login max epsilon", "AUTH_LOGIN_TTL", "10m1ns"},
+		{"skew max epsilon", "AUTH_REFRESH_SKEW", "15m1ns"},
+		{"malformed max sessions", "AUTH_SESSION_MAX", "many"},
+		{"max sessions overflow", "AUTH_SESSION_MAX", "100001"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_SESSION_ENABLED", "true")
+			t.Setenv(tc.key, tc.value)
+			want := "TTL"
+			if tc.key == "AUTH_SESSION_MAX" {
+				want = "AUTH_SESSION_MAX"
+			}
+			if err := Load().Validate(); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("invalid auth session duration passed: %v", err)
+			}
+		})
+	}
+	t.Run("exact maxima", func(t *testing.T) {
+		t.Setenv("AUTH_SESSION_ENABLED", "true")
+		t.Setenv("AUTH_SESSION_IDLE_TTL", "1h")
+		t.Setenv("AUTH_SESSION_ABSOLUTE_TTL", "24h")
+		t.Setenv("AUTH_LOGIN_TTL", "10m")
+		t.Setenv("AUTH_REFRESH_SKEW", "15m")
+		t.Setenv("AUTH_SESSION_MAX", "100000")
+		if err := Load().Validate(); err != nil {
+			t.Fatalf("exact maxima rejected: %v", err)
+		}
+	})
 }
 
 // TestScopeFromConfig — 정적 Scope 변환입니다. 이름이 없으면 ID를 씁니다.

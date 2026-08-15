@@ -3,10 +3,12 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -26,6 +28,9 @@ type Config struct {
 	JWKSMinRefresh time.Duration
 	// HTTPTimeout은 discovery·JWKS 요청 상한입니다. 기본 10초입니다.
 	HTTPTimeout time.Duration
+	// HTTPClient optionally supplies trusted roots for private enterprise IdPs.
+	// Redirect handling and the configured timeout are still enforced below.
+	HTTPClient *http.Client
 
 	// ClusterID·ClusterName은 역할 인자를 이 프로세스와 대조할 때 씁니다.
 	ClusterID   string
@@ -35,13 +40,33 @@ type Config struct {
 
 	// Now는 테스트에서 시간을 고정합니다.
 	Now func() time.Time
+
+	// Session is an explicit, server-side browser session opt-in.
+	Session SessionConfig
 }
 
 // Resolver는 Bearer JWT를 검증하고 Scope를 계산합니다. scope.Resolver 구현입니다.
 type Resolver struct {
-	cfg    Config
-	keys   *keyStore
-	logger *slog.Logger
+	cfg       Config
+	keys      *keyStore
+	logger    *slog.Logger
+	flow      *sessionFlow
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Close releases resources owned by an enabled browser-session flow. It is
+// nil-safe and idempotent so startup rollback and normal shutdown can share it.
+func (r *Resolver) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		if r.flow != nil && r.flow.redis != nil {
+			r.closeErr = r.flow.redis.Close()
+		}
+	})
+	return r.closeErr
 }
 
 // NewResolver는 issuer discovery로 JWKS 위치를 찾고 최초 키를 받아옵니다.
@@ -76,29 +101,44 @@ func NewResolver(ctx context.Context, cfg Config, logger *slog.Logger) (*Resolve
 		logger = slog.Default()
 	}
 
-	client := &http.Client{
-		Timeout: cfg.HTTPTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("provider redirect가 너무 많습니다")
-			}
-			return validateProviderURL(req.URL, cfg.IssuerURL)
-		},
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{}
+	} else {
+		clone := *client
+		client = &clone
 	}
-	jwksURI, err := discover(ctx, client, cfg.IssuerURL)
+	client.Timeout = cfg.HTTPTimeout
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("OIDC redirect limit exceeded")
+		}
+		return validateProviderURL(req.URL, cfg.IssuerURL)
+	}
+	doc, err := discoverDoc(ctx, client, cfg.IssuerURL)
 	if err != nil {
 		return nil, err
 	}
 	ks := &keyStore{
 		httpClient: client,
-		jwksURI:    jwksURI,
+		jwksURI:    doc.JWKSURI,
 		minRefresh: cfg.JWKSMinRefresh,
 		now:        cfg.Now,
 	}
 	if err := ks.refresh(ctx); err != nil {
 		return nil, fmt.Errorf("JWKS를 받아오지 못했습니다: %w", err)
 	}
-	return &Resolver{cfg: cfg, keys: ks, logger: logger}, nil
+	r := &Resolver{cfg: cfg, keys: ks, logger: logger}
+	if cfg.Session.Enabled {
+		tokenClient := *client
+		tokenClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		flow, err := newSessionFlow(cfg, doc, &tokenClient, ks)
+		if err != nil {
+			return nil, err
+		}
+		r.flow = flow
+	}
+	return r, nil
 }
 
 // Resolve는 요청의 Bearer 토큰에서 Scope를 계산합니다. scope.Resolver 구현입니다.
@@ -111,7 +151,24 @@ func NewResolver(ctx context.Context, cfg Config, logger *slog.Logger) (*Resolve
 func (r *Resolver) Resolve(req *http.Request) (scope.Scope, error) {
 	raw, ok := bearerToken(req)
 	if !ok {
-		return scope.Scope{}, fmt.Errorf("%w: Authorization 헤더 없음", ErrInvalidToken)
+		// A present Authorization header is authoritative. Malformed/unsupported
+		// schemes must never downgrade to a valid browser cookie.
+		if req.Header.Get("Authorization") != "" {
+			return scope.Scope{}, ErrInvalidToken
+		}
+		if r.flow == nil {
+			return scope.Scope{}, fmt.Errorf("%w: Authorization 헤더 없음", ErrInvalidToken)
+		}
+		claims, err := r.flow.resolve(req)
+		if err != nil {
+			reason := "invalid"
+			if errors.Is(err, ErrSessionUnavailable) {
+				reason = "store_unavailable"
+			}
+			r.logger.Warn("browser_session_auth_failed", "reason", reason)
+			return scope.Scope{}, err
+		}
+		return r.scopeFor(claims), nil
 	}
 	claims, err := verifyJWT(raw, func(kid string) (any, bool) {
 		return r.keys.get(req.Context(), kid)
@@ -121,13 +178,17 @@ func (r *Resolver) Resolve(req *http.Request) (scope.Scope, error) {
 		r.logger.Warn("토큰 검증 실패", "reason", err.Error())
 		return scope.Scope{}, err
 	}
+	return r.scopeFor(claims), nil
+}
+
+func (r *Resolver) scopeFor(claims Claims) scope.Scope {
 	var sc scope.Scope
 	if r.cfg.Central {
 		_, sc = ScopeForCentral(claims, r.cfg.Clusters)
 	} else {
 		_, sc = ScopeFor(claims, r.cfg.ClusterID, r.cfg.ClusterName)
 	}
-	return sc, nil
+	return sc
 }
 
 // bearerToken은 Authorization 헤더에서 토큰을 꺼냅니다. 대소문자를 가리지 않습니다.

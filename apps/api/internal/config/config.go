@@ -5,17 +5,20 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -115,7 +118,19 @@ type AuthConfig struct {
 	Leeway         time.Duration
 	JWKSMinRefresh time.Duration
 	// MockAddr은 mock IdP의 바인드 주소입니다. loopback을 벗어나지 마세요.
-	MockAddr string
+	MockAddr              string
+	SessionEnabled        bool
+	SessionEnabledInvalid bool
+	PublicOrigin          string
+	RedirectURI           string
+	ClientID              string
+	ClientSecret          string
+	SessionKey            string
+	SessionIdleTTL        time.Duration
+	SessionAbsoluteTTL    time.Duration
+	LoginTransactionTTL   time.Duration
+	RefreshSkew           time.Duration
+	SessionMaxSessions    int
 }
 
 type ClusterStateConfig struct {
@@ -163,6 +178,7 @@ type QuickwitConfig struct {
 
 func Load() Config {
 	nsList, all := scope.ParseNamespaces(env("SCOPE_NAMESPACES", "*"))
+	sessionEnabled, sessionEnabledInvalid := strictEnvBool("AUTH_SESSION_ENABLED", false)
 	return Config{
 		Addr:                     env("ADDR", ":8080"),
 		Kubeconfig:               env("KUBECONFIG", ""),
@@ -212,13 +228,25 @@ func Load() Config {
 			RequireTLS:     envBool("DASHBOARD_DB_REQUIRE_TLS", false),
 		},
 		Auth: AuthConfig{
-			Mode:           env("AUTH_MODE", "none"),
-			Issuer:         env("OIDC_ISSUER", ""),
-			Audience:       env("OIDC_AUDIENCE", ""),
-			RolesClaim:     env("OIDC_ROLES_CLAIM", "roles"),
-			Leeway:         envDuration("OIDC_LEEWAY", time.Minute),
-			JWKSMinRefresh: envDuration("OIDC_JWKS_MIN_REFRESH", 5*time.Minute),
-			MockAddr:       env("AUTH_MOCK_ADDR", "127.0.0.1:8091"),
+			Mode:                  env("AUTH_MODE", "none"),
+			Issuer:                env("OIDC_ISSUER", ""),
+			Audience:              env("OIDC_AUDIENCE", ""),
+			RolesClaim:            env("OIDC_ROLES_CLAIM", "roles"),
+			Leeway:                envDuration("OIDC_LEEWAY", time.Minute),
+			JWKSMinRefresh:        envDuration("OIDC_JWKS_MIN_REFRESH", 5*time.Minute),
+			MockAddr:              env("AUTH_MOCK_ADDR", "127.0.0.1:8091"),
+			SessionEnabled:        sessionEnabled,
+			SessionEnabledInvalid: sessionEnabledInvalid,
+			PublicOrigin:          env("AUTH_PUBLIC_ORIGIN", ""),
+			RedirectURI:           env("OIDC_REDIRECT_URI", ""),
+			ClientID:              env("OIDC_CLIENT_ID", ""),
+			ClientSecret:          env("OIDC_CLIENT_SECRET", ""),
+			SessionKey:            env("AUTH_SESSION_KEY", ""),
+			SessionIdleTTL:        strictEnvDuration("AUTH_SESSION_IDLE_TTL", 30*time.Minute),
+			SessionAbsoluteTTL:    strictEnvDuration("AUTH_SESSION_ABSOLUTE_TTL", 8*time.Hour),
+			LoginTransactionTTL:   strictEnvDuration("AUTH_LOGIN_TTL", 5*time.Minute),
+			RefreshSkew:           strictEnvDuration("AUTH_REFRESH_SKEW", 2*time.Minute),
+			SessionMaxSessions:    strictEnvInt("AUTH_SESSION_MAX", auth.DefaultMaxSessions),
 		},
 		Greptime: GreptimeConfig{
 			URL:           env("GREPTIME_URL", ""),
@@ -251,6 +279,12 @@ func Load() Config {
 // 형식이 틀린 선택적 튜닝 env는 Load()가 기본값으로 대체합니다.
 func (c Config) Validate() error {
 	var errs []error
+	if c.Auth.SessionEnabledInvalid {
+		errs = append(errs, errors.New("AUTH_SESSION_ENABLED must be a boolean"))
+	}
+	if c.Auth.SessionEnabled && c.Auth.Mode != "oidc" {
+		errs = append(errs, errors.New("AUTH_SESSION_ENABLED에는 AUTH_MODE=oidc가 필요합니다"))
+	}
 	if c.ClusterState.Mode != "direct" && c.ClusterState.Mode != "central" {
 		errs = append(errs, errors.New("CLUSTER_STATE_MODE must be direct or central"))
 	}
@@ -415,17 +449,46 @@ func (c Config) Validate() error {
 		}
 	case "oidc":
 		u, err := url.Parse(c.Auth.Issuer)
-		if err != nil || !u.IsAbs() || u.Scheme != "https" || u.Host == "" {
+		if err != nil || !validOIDCIssuer(u) {
 			errs = append(errs, fmt.Errorf(
 				"AUTH_MODE=oidc에는 절대 HTTPS OIDC_ISSUER가 필요합니다: %q", c.Auth.Issuer))
 		}
 		if c.Auth.Audience == "" {
 			errs = append(errs, errors.New("AUTH_MODE=oidc에는 OIDC_AUDIENCE가 필요합니다"))
 		}
+		if c.Auth.SessionEnabled {
+			origin, originErr := url.Parse(c.Auth.PublicOrigin)
+			if originErr != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+				errs = append(errs, errors.New("AUTH_SESSION_ENABLED에는 경로 없는 HTTPS AUTH_PUBLIC_ORIGIN이 필요합니다"))
+			}
+			if c.Auth.RedirectURI != strings.TrimSuffix(c.Auth.PublicOrigin, "/")+"/api/v1/auth/callback" {
+				errs = append(errs, errors.New("OIDC_REDIRECT_URI는 AUTH_PUBLIC_ORIGIN callback과 정확히 같아야 합니다"))
+			}
+			key, keyErr := base64.RawURLEncoding.DecodeString(c.Auth.SessionKey)
+			if c.Auth.ClientID == "" || c.RedisAddr == "" || keyErr != nil || len(key) != 32 {
+				errs = append(errs, errors.New("브라우저 세션에는 OIDC_CLIENT_ID, 공유 REDIS_ADDR, 32-byte base64url AUTH_SESSION_KEY가 필요합니다"))
+			}
+			if c.Auth.SessionIdleTTL <= 0 || c.Auth.SessionIdleTTL > auth.MaxSessionIdleTTL || c.Auth.SessionAbsoluteTTL <= 0 || c.Auth.SessionAbsoluteTTL > auth.MaxSessionAbsoluteTTL || c.Auth.SessionIdleTTL > c.Auth.SessionAbsoluteTTL || c.Auth.LoginTransactionTTL <= 0 || c.Auth.LoginTransactionTTL > auth.MaxLoginTransactionTTL || c.Auth.RefreshSkew <= 0 || c.Auth.RefreshSkew > auth.MaxRefreshSkew {
+				errs = append(errs, errors.New("브라우저 세션 TTL 설정이 유효하지 않습니다"))
+			}
+			if c.Auth.SessionMaxSessions < 1 || c.Auth.SessionMaxSessions > auth.MaxSessions {
+				errs = append(errs, errors.New("AUTH_SESSION_MAX must be between 1 and 100000"))
+			}
+		}
 	default:
 		errs = append(errs, fmt.Errorf("알 수 없는 AUTH_MODE %q (none|oidc|mock)", c.Auth.Mode))
 	}
 	return errors.Join(errs...)
+}
+
+func validOIDCIssuer(u *url.URL) bool {
+	if u == nil || !u.IsAbs() || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return false
+	}
+	if u.Path == "" || u.Path == "/" {
+		return true
+	}
+	return pathpkg.Clean(u.Path) == strings.TrimSuffix(u.Path, "/")
 }
 
 func validateListenAddr(addr string) error {
@@ -482,6 +545,15 @@ func envBool(k string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+func strictEnvBool(k string, def bool) (bool, bool) {
+	v := os.Getenv(k)
+	if v == "" {
+		return def, false
+	}
+	b, err := strconv.ParseBool(v)
+	return b, err != nil
 }
 
 func envInt(k string, def int) int {

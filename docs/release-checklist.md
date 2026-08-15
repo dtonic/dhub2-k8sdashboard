@@ -1,5 +1,9 @@
 # 릴리스 체크리스트 (#22)
 
+- [ ] 브라우저 세션 사용 시 TLS ingress origin/callback, OIDC issuer egress, 공유 Redis, immutable Secret refs를 확인했다.
+- [ ] `AUTH_SESSION_KEY` 정기 교체는 최대 absolute TTL drain 뒤 `secretRevision` 조정 재시작으로 수행하거나, 침해 시 즉시 전 세션 무효화를 승인했다.
+- [ ] CSP `script-src`는 self-only이며 기존 inline style 때문에 `style-src 'unsafe-inline'` 예외만 존재함을 브라우저에서 확인했다.
+
 MVP 릴리스 승인 기준입니다. 아래 게이트가 전부 통과해야 릴리스를 승인합니다.
 개별 항목의 세부 정책은 [품질 게이트](quality-gates.md)를, 배포·롤백 절차는
 [Helm 배포 §롤백](../deploy/README.md#롤백)을 따릅니다.
@@ -28,12 +32,13 @@ MVP 릴리스 승인 기준입니다. 아래 게이트가 전부 통과해야 �
 - **파괴적 실백엔드 시나리오는 미검증입니다.** 통합 E2E는 가짜 informer와 결정적
   데이터소스 위에서 돕니다. 실제 GreptimeDB/Quickwit의 장애 주입·복구, 실클러스터의
   Pod 재시작 유발 같은 파괴 검증은 수행하지 않았습니다 (`make api-itest`는 읽기 전용 기본).
-- **UI는 아직 Authorization 헤더를 붙이지 않습니다.** `apps/web/src/api/client.ts`의
-  fetch에는 인증 헤더가 없고, SSE(`/events/stream`) 제품 배선도 후속입니다. 통합 E2E는
-  테스트 컨텍스트 헤더로 이 간극을 메워 검증했으며, 실사용자 로그인 흐름(토큰 획득·갱신·
-  fetch/EventSource 헤더 전달)은 Web-API 실연결 후속 작업입니다.
-- SSE 실시간 갱신은 백엔드 프로토콜만 구현되어 있고(ADR 0007) 제품 UI에는 연결되지
-  않았습니다.
+- **브라우저 세션 provider profile은 refresh ID token을 요구합니다.** OIDC Core에서 이는
+  선택 사항이므로, refresh 응답에 `OIDC_CLIENT_ID` audience와 최신 role claim이 든 서명
+  ID token을 주지 않는 provider는 현재 호환되지 않습니다. 사전 provider 검증 없이
+  `authSession.enabled`를 켜지 않습니다.
+- 브라우저는 token 대신 same-origin HttpOnly 세션과 fetch-stream SSE를 사용합니다.
+  릴리스 전 실제 nginx TLS 경로에서 refresh·logout·CSRF·Last-Event-ID replay와
+  Redis idle/absolute 만료를 확인합니다.
 
 ## 릴리스 절차 요약
 

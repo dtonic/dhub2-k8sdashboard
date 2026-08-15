@@ -46,9 +46,14 @@ type Claims struct {
 	Username string
 	// Roles는 역할 클레임의 값입니다. 문자열 배열 또는 공백 구분 문자열을 받습니다.
 	Roles []string
+	// Nonce는 OIDC code flow의 재생 방지 값입니다. Bearer 경로는 쓰지 않고,
+	// 브라우저 세션 로그인(id_token 검증)에서만 대조합니다.
+	Nonce           string
+	AuthorizedParty string
 
 	ExpiresAt time.Time
 	NotBefore time.Time
+	IssuedAt  time.Time
 }
 
 // rawClaims는 JSON 해석용 중간 형태입니다.
@@ -58,8 +63,11 @@ type rawClaims struct {
 	Audience json.RawMessage `json:"aud"`
 	Email    string          `json:"email"`
 	Username string          `json:"preferred_username"`
+	Nonce    string          `json:"nonce"`
+	Azp      string          `json:"azp"`
 	Exp      float64         `json:"exp"`
 	Nbf      float64         `json:"nbf"`
+	Iat      float64         `json:"iat"`
 }
 
 type jwsHeader struct {
@@ -139,17 +147,22 @@ func verifyJWT(token string, keyOf func(kid string) (any, bool), issuer, audienc
 		return Claims{}, fmt.Errorf("%w: 클레임", ErrInvalidToken)
 	}
 	c := Claims{
-		Issuer:   rc.Issuer,
-		Subject:  rc.Subject,
-		Email:    rc.Email,
-		Username: rc.Username,
-		Audience: parseAudience(rc.Audience),
+		Issuer:          rc.Issuer,
+		Subject:         rc.Subject,
+		Email:           rc.Email,
+		Username:        rc.Username,
+		Nonce:           rc.Nonce,
+		AuthorizedParty: rc.Azp,
+		Audience:        parseAudience(rc.Audience),
 	}
 	if rc.Exp > 0 {
 		c.ExpiresAt = time.Unix(int64(rc.Exp), 0)
 	}
 	if rc.Nbf > 0 {
 		c.NotBefore = time.Unix(int64(rc.Nbf), 0)
+	}
+	if rc.Iat > 0 {
+		c.IssuedAt = time.Unix(int64(rc.Iat), 0)
 	}
 
 	if c.Issuer != issuer {

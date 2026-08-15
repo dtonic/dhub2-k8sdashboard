@@ -93,6 +93,11 @@ KUBECONFIG=~/.kube/config make dev-api
 | 환경변수 | 기본값 | 설명 |
 |---|---|---|
 | `AUTH_MODE` | `none` | `none`(정적 Scope · 개발/데모) · `oidc`(운영) · `mock`(로컬 IdP · **운영 금지**) |
+| `AUTH_SESSION_ENABLED` | `false` | OIDC server-side browser session 명시적 opt-in |
+| `AUTH_PUBLIC_ORIGIN` / `OIDC_REDIRECT_URI` | (비움) | 경로 없는 HTTPS origin과 정확한 callback |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | (비움) | code flow client 설정. Secret은 Secret env로만 주입 |
+| `AUTH_SESSION_KEY` | (비움) | 32-byte base64url AES-256-GCM 키. ConfigMap/로그 금지 |
+| `AUTH_SESSION_IDLE_TTL` / `AUTH_SESSION_ABSOLUTE_TTL` | `30m` / `8h` | idle 및 절대 만료 상한 |
 | `OIDC_ISSUER` | (비움) | 발급자 HTTPS URL. 예: `https://login.microsoftonline.com/<tenant>/v2.0`. HTTP는 직접 실행한 loopback mock/test에서만 허용 |
 | `OIDC_AUDIENCE` | (비움) | 이 API의 client id. `AUTH_MODE=oidc`에서는 필수이며 빈 값이면 기동 실패. mock은 비우면 `k8s-dashboard-local` 사용 |
 | `OIDC_ROLES_CLAIM` | `roles` | 역할이 실린 클레임 이름 |
@@ -111,6 +116,12 @@ Quickwit의 `namespace` `pod_name` `pod_uid` `level` `container` `workload_name`
 필터·집계에 쓰이므로 인덱스에서 **fast field**(raw 토크나이저)여야 합니다.
 선택 필드 `event_id`는 stored unique event id이면 충분하며 fast field일 필요는 없습니다.
 없으면 한 scroll traversal 안에서만 안정적인 nonce+ordinal ID를 사용합니다(ADR 0006).
+
+브라우저 세션을 켠 OIDC provider는 authorization code와 refresh 응답 모두에서
+`OIDC_CLIENT_ID` audience 및 최신 role claim을 포함한 서명 ID token을 제공해야 합니다.
+OIDC Core상 refresh ID token은 선택 사항이므로, 이를 생략하는 provider는 현재 profile과
+호환되지 않으며 refresh 시 세션이 fail-closed 됩니다. API Bearer token의 audience는 기존
+`OIDC_AUDIENCE`를 그대로 사용합니다.
 
 ### 실어댑터가 지키는 규칙
 
