@@ -163,15 +163,6 @@ echo 'browser fixture: redis ready'
 
 SESSION_KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
 MAIN_PORT=$(free_port); OUTAGE_PORT=$(free_port)
-SUBNET=$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$NETWORK")
-IPS=$(python3 - "$SUBNET" <<'PY'
-import ipaddress,sys
-net=ipaddress.ip_network(sys.argv[1])
-if net.version != 4 or net.num_addresses < 32: raise SystemExit("fixture network is too small")
-print(net.network_address + 10, net.network_address + 11)
-PY
-)
-MAIN_IP=${IPS% *}; OUTAGE_IP=${IPS#* }
 mkdir "$TMP/runtime-bin" "$TMP/proxy-secrets" "$TMP/api-secrets" "$TMP/proxy-state" "$TMP/auth-main-state" "$TMP/auth-outage-state" "$TMP/nginx"
 cp "$TMP/server.crt" "$TMP/server.key" "$TMP/ca.crt" "$TMP/token" "$TMP/proxy-secrets/"
 cp "$TMP/ca.crt" "$TMP/client.crt" "$TMP/client.key" "$TMP/token" "$TMP/api-secrets/"
@@ -211,24 +202,31 @@ if docker exec "$PROXY_CONTAINER" python3 -c 'open("/secrets/token","wb").write(
 fi
 [ "$(docker exec "$PROXY_CONTAINER" python3 -c 'import os;print(os.path.exists("/secrets/client.key"))')" = False ]
 echo 'browser fixture: private proxy ready'
-AUTH_MAIN_ID=$(docker run -d --name "$AUTH_MAIN" --hostname auth-main --network "$NETWORK" --ip "$MAIN_IP" --user 65532:65532 \
+AUTH_MAIN_ID=$(docker run -d --name "$AUTH_MAIN" --hostname auth-main --network "$NETWORK" --network-alias auth-main --user 65532:65532 \
   --entrypoint /runtime/authfixture -v "$TMP/runtime-bin:/runtime:ro" -v "$TMP/api-secrets:/secrets:ro" -v "$TMP/auth-main-state:/state" -v "$ROOT/apps/web/dist:/web:ro" "$API_RUNTIME_IMAGE" \
-  -dist /web -redis redis:6379 -key "$SESSION_KEY" -backend-addr "$MAIN_IP:0" \
+  -dist /web -redis redis:6379 -key "$SESSION_KEY" -backend-addr "0.0.0.0:9444" \
   -public-origin "https://127.0.0.1:$MAIN_PORT" -ready-file /state/ready.json -cert-file /state/tls.crt -key-file /state/tls.key \
   -alertmanager-url https://proxy:9443/am -alertmanager-public-url https://alerts.public.test/am \
   -alertmanager-token-file /secrets/token -alertmanager-ca-file /secrets/ca.crt -alertmanager-client-cert-file /secrets/client.crt \
   -alertmanager-client-key-file /secrets/client.key -alertmanager-server-name alertmanager.test)
-AUTH_OUTAGE_ID=$(docker run -d --name "$AUTH_OUTAGE" --hostname auth-outage --network "$NETWORK" --ip "$OUTAGE_IP" --user 65532:65532 \
+AUTH_OUTAGE_ID=$(docker run -d --name "$AUTH_OUTAGE" --hostname auth-outage --network "$NETWORK" --network-alias auth-outage --user 65532:65532 \
   --entrypoint /runtime/authfixture -v "$TMP/runtime-bin:/runtime:ro" -v "$TMP/api-secrets:/secrets:ro" -v "$TMP/auth-outage-state:/state" -v "$ROOT/apps/web/dist:/web:ro" "$API_RUNTIME_IMAGE" \
-  -dist /web -redis redis:6379 -key "$SESSION_KEY" -backend-addr "$OUTAGE_IP:0" \
+  -dist /web -redis redis:6379 -key "$SESSION_KEY" -backend-addr "0.0.0.0:9444" \
   -public-origin "https://127.0.0.1:$OUTAGE_PORT" -ready-file /state/ready.json -cert-file /state/tls.crt -key-file /state/tls.key \
   -alertmanager-url https://proxy:9443/outage -alertmanager-public-url https://alerts.public.test/am \
   -alertmanager-token-file /secrets/token -alertmanager-ca-file /secrets/ca.crt -alertmanager-client-cert-file /secrets/client.crt \
   -alertmanager-client-key-file /secrets/client.key -alertmanager-server-name alertmanager.test)
 [ "$(docker inspect -f '{{.Config.Image}} {{.Config.User}} {{json .Config.Entrypoint}}' "$AUTH_MAIN")" = "$API_RUNTIME_IMAGE 65532:65532 [\"/runtime/authfixture\"]" ]
 [ "$(docker inspect -f '{{.Config.Image}} {{.Config.User}} {{json .Config.Entrypoint}}' "$AUTH_OUTAGE")" = "$API_RUNTIME_IMAGE 65532:65532 [\"/runtime/authfixture\"]" ]
-[ "$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$AUTH_MAIN")" = "$MAIN_IP" ]
-[ "$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$AUTH_OUTAGE")" = "$OUTAGE_IP" ]
+for auth_container in "$AUTH_MAIN" "$AUTH_OUTAGE"; do
+  case "$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$auth_container")" in null|'{}') ;; *) echo 'auth fixture published a host port' >&2; exit 1;; esac
+  [ -z "$(docker port "$auth_container")" ] || { echo 'auth fixture exposed a published port' >&2; exit 1; }
+done
+NETWORK_ID=$(docker network inspect -f '{{.Id}}' "$NETWORK")
+[ "$(docker inspect -f "{{with index .NetworkSettings.Networks \"$NETWORK\"}}{{.NetworkID}}{{end}}" "$AUTH_MAIN")" = "$NETWORK_ID" ]
+[ "$(docker inspect -f "{{with index .NetworkSettings.Networks \"$NETWORK\"}}{{.NetworkID}}{{end}}" "$AUTH_OUTAGE")" = "$NETWORK_ID" ]
+docker inspect -f "{{with index .NetworkSettings.Networks \"$NETWORK\"}}{{json .Aliases}}{{end}}" "$AUTH_MAIN" | grep -Fq '"auth-main"'
+docker inspect -f "{{with index .NetworkSettings.Networks \"$NETWORK\"}}{{json .Aliases}}{{end}}" "$AUTH_OUTAGE" | grep -Fq '"auth-outage"'
 [ "$(stat -c '%a' "$TMP/runtime-bin/authfixture")" = 555 ]
 [ "$(stat -c '%a' "$TMP/api-secrets/token")" = 440 ]
 [ "$(stat -c '%a:%g' "$TMP/runtime-bin")" = 550:65532 ]
@@ -243,8 +241,10 @@ if [ ! -s "$TMP/auth-main-state/ready.json" ] || [ ! -s "$TMP/auth-outage-state/
 echo 'browser fixture: auth sessions ready'
 MAIN_UPSTREAM=$(python3 -c 'import json,sys,urllib.parse;print(urllib.parse.urlsplit(json.load(open(sys.argv[1]))["fixtureURL"]).port)' "$TMP/auth-main-state/ready.json")
 OUTAGE_UPSTREAM=$(python3 -c 'import json,sys,urllib.parse;print(urllib.parse.urlsplit(json.load(open(sys.argv[1]))["fixtureURL"]).port)' "$TMP/auth-outage-state/ready.json")
-sed -e "s/__UPSTREAM_HOST__/$MAIN_IP/g" -e "s/__UPSTREAM_PORT__/$MAIN_UPSTREAM/g" "$ROOT/deploy/alertmanager/nginx-auth.conf" > "$TMP/nginx/main.conf"
-sed -e "s/__UPSTREAM_HOST__/$OUTAGE_IP/g" -e "s/__UPSTREAM_PORT__/$OUTAGE_UPSTREAM/g" "$ROOT/deploy/alertmanager/nginx-auth.conf" > "$TMP/nginx/outage.conf"
+[ "$MAIN_UPSTREAM" = 9444 ]
+[ "$OUTAGE_UPSTREAM" = 9444 ]
+sed -e "s/__UPSTREAM_HOST__/auth-main/g" -e "s/__UPSTREAM_PORT__/9444/g" "$ROOT/deploy/alertmanager/nginx-auth.conf" > "$TMP/nginx/main.conf"
+sed -e "s/__UPSTREAM_HOST__/auth-outage/g" -e "s/__UPSTREAM_PORT__/9444/g" "$ROOT/deploy/alertmanager/nginx-auth.conf" > "$TMP/nginx/outage.conf"
 docker run --rm --entrypoint /bin/sh -v "$TMP/auth-main-state:/auth-main" -v "$TMP/auth-outage-state:/auth-outage" -v "$TMP/nginx:/nginx" "$PYTHON_IMAGE" -c \
   'chmod 0444 /auth-main/tls.crt /auth-main/tls.key /auth-outage/tls.crt /auth-outage/tls.key /nginx/main.conf /nginx/outage.conf' >/dev/null
 

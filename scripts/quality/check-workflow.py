@@ -25,6 +25,9 @@ ALERTMANAGER_IMAGE = "quay.io/prometheus/alertmanager@sha256:27c475db5fb156cab31
 ALERT_HOST_PROXY = 'python3 "$ROOT/deploy/alertmanager/proxy.py" --upstream "$ADMIN_URL"'
 ALERT_BROWSER_PROXY_MOUNT = '-v "$ROOT/deploy/alertmanager/proxy.py:/proxy.py:ro"'
 ALERT_BROWSER_PROXY_RUN = 'python3 /proxy.py --container-network'
+ALERT_BROWSER_FIXED_BIND = '-backend-addr "0.0.0.0:9444"'
+ALERT_BROWSER_MAIN_DNS = 's/__UPSTREAM_HOST__/auth-main/g'
+ALERT_BROWSER_OUTAGE_DNS = 's/__UPSTREAM_HOST__/auth-outage/g'
 ACTION_PINS = {
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
     "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
@@ -120,6 +123,24 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
                      "go test -tags integration", "TestActualAlertmanagerPrivateCABearerScopeAndFailures"):
         if alertmanager_source.count(required) != 1:
             errors.append("Alertmanager production integration command drifted")
+    if alertmanager_source.count(ALERT_BROWSER_FIXED_BIND) != 2:
+        errors.append("Alertmanager browser backends must use the fixed isolated container port")
+    for marker in (ALERT_BROWSER_MAIN_DNS, ALERT_BROWSER_OUTAGE_DNS):
+        if alertmanager_source.count(marker) != 1:
+            errors.append("Alertmanager browser nginx must use owned-network DNS upstreams")
+    auth_runs = re.findall(
+        r'(?ms)^AUTH_(?:MAIN|OUTAGE)_ID=\$\(docker run .*?^\s+-alertmanager-client-key-file .*?\)$',
+        alertmanager_source,
+    )
+    if len(auth_runs) != 2:
+        errors.append("Alertmanager browser auth container commands drifted")
+    forbidden_auth_cli = re.compile(
+        r'(?<!\S)(?:--ip(?:=|\s)|--network(?:=host|\s+host)(?=\s|\\|$)|-p(?:=|\s)|--publish(?:=|\s))'
+    )
+    if any(forbidden_auth_cli.search(command) for command in auth_runs):
+        errors.append("Alertmanager browser auth containers must not use static IP, host network, or published ports")
+    if "SUBNET=" in alertmanager_source:
+        errors.append("Alertmanager browser fixture must not depend on static IPAM or host networking")
     if text.count(POSTGRES_TEST_URL_LINE) != 2:
         errors.append("dashboard PostgreSQL integration URL drifted")
     coverage_step = "      - run: make api-coverage\n        env:\n          " + POSTGRES_TEST_URL_LINE
@@ -267,6 +288,16 @@ if args.self_test:
         ("Alertmanager browser proxy mount drift", alertmanager_source.replace(ALERT_BROWSER_PROXY_MOUNT, '-v "$ROOT/deploy/alertmanager/proxy.py:/proxy.py"', 1)),
         ("Alertmanager browser proxy run removed", alertmanager_source.replace(ALERT_BROWSER_PROXY_RUN, "python3 /proxy.py", 1)),
         ("Alertmanager browser proxy duplicated", alertmanager_source + "\n# " + ALERT_BROWSER_PROXY_RUN + "\n"),
+        ("Alertmanager browser fixed bind drift", alertmanager_source.replace(ALERT_BROWSER_FIXED_BIND, '-backend-addr "0.0.0.0:0"', 1)),
+        ("Alertmanager browser main DNS drift", alertmanager_source.replace(ALERT_BROWSER_MAIN_DNS, 's/__UPSTREAM_HOST__/127.0.0.1/g', 1)),
+        ("Alertmanager browser outage DNS drift", alertmanager_source.replace(ALERT_BROWSER_OUTAGE_DNS, 's/__UPSTREAM_HOST__/127.0.0.1/g', 1)),
+        ("Alertmanager browser static IP dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --ip 10.0.0.10 --user", 1)),
+        ("Alertmanager browser static IP equals dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --ip=10.0.0.10 --user", 1)),
+        ("Alertmanager browser host network dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --network host --user", 1)),
+        ("Alertmanager browser host network equals dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --network=host --user", 1)),
+        ("Alertmanager browser short publish dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main -p 9444:9444 --user", 1)),
+        ("Alertmanager browser publish dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --publish 9444:9444 --user", 1)),
+        ("Alertmanager browser publish equals dependency", alertmanager_source.replace("--network-alias auth-main --user", "--network-alias auth-main --publish=9444:9444 --user", 1)),
     ):
         if not validate(source, makefile_source, security_source, alertmanager_source=mutated_alertmanager):
             raise SystemExit(f"{label} mutation was masked")

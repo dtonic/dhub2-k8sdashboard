@@ -190,9 +190,8 @@ func StartAuthSession(ctx context.Context, cfg AuthSessionConfig, logger *slog.L
 	f.server = httptest.NewUnstartedServer(proxy)
 	if cfg.BackendAddr != "" {
 		host, port, splitErr := net.SplitHostPort(cfg.BackendAddr)
-		ip := net.ParseIP(host)
-		if splitErr != nil || ip == nil || !ip.IsPrivate() || port != "0" {
-			return nil, errors.New("auth fixture backend must use an explicit private IP and port 0")
+		if splitErr != nil || host != "0.0.0.0" || port != "9444" {
+			return nil, errors.New("auth fixture container backend must use 0.0.0.0:9444")
 		}
 		listener, listenErr := net.Listen("tcp", cfg.BackendAddr)
 		if listenErr != nil {
