@@ -43,6 +43,45 @@ api:
       quickwitPassword: QUICKWIT_PASSWORD
       redisAddr: REDIS_ADDR
 
+# Direct is the byte-for-byte compatible default. Central mode uses only the
+# shared registry and never mounts a Kubernetes service-account token.
+clusterState:
+  mode: direct # direct | central
+  clusters: []
+  trustDomain: ""
+  registryEndpoint: ""
+  registryServerName: ""
+  tls:
+    apiExistingSecret: ""
+    registryExistingSecret: ""
+    certKey: tls.crt
+    privateKeyKey: tls.key
+    caKey: ca.crt
+  registry:
+    image: {repository: observability-dashboard-api, tag: dev, digest: ""}
+    replicas: 1
+    agentPort: 9443
+    queryPort: 9444
+    agentService:
+      type: ClusterIP
+      sourceCidrs: []
+    resources:
+      requests: {cpu: 250m, memory: 768Mi}
+      limits: {cpu: "2", memory: 1536Mi}
+  limits:
+    maxClusters: 64
+    maxResources: 100000
+    maxChunkResources: 1000
+    maxMessageBytes: 4194304
+    maxStateBytes: 268435456
+    maxTotalStateBytes: 536870912
+    ingressFrameRate: 1000
+    ingressByteRate: 16777216
+    ingressFrameBurst: 2000
+    ingressByteBurst: 8388608
+    staleTTL: 5m
+    heartbeatTimeout: 45s
+
 dashboardBuilder:
   enabled: false
   databaseURLKey: DATABASE_URL

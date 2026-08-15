@@ -75,6 +75,26 @@ func TestRunStopsOnInvalidConfigBeforeKubernetes(t *testing.T) {
 	}
 }
 
+func TestRunRoutesValidatedCentralModeBeforeAnyKubernetesClient(t *testing.T) {
+	t.Setenv("CLUSTER_STATE_MODE", "central")
+	t.Setenv("CLUSTER_STATE_REGISTRY_ENDPOINT", "registry.example.test:9443")
+	t.Setenv("CLUSTER_STATE_REGISTRY_SERVER_NAME", "registry.example.test")
+	t.Setenv("CLUSTER_STATE_CLUSTERS", "cluster-a")
+	t.Setenv("CLUSTER_STATE_TRUST_DOMAIN", "example.test")
+	t.Setenv("CLUSTER_STATE_TLS_CERT_FILE", "/nonexistent/api.crt")
+	t.Setenv("CLUSTER_STATE_TLS_KEY_FILE", "/nonexistent/api.key")
+	t.Setenv("CLUSTER_STATE_TLS_CA_FILE", "/nonexistent/ca.crt")
+	t.Setenv("AUTH_MODE", "oidc")
+	t.Setenv("OIDC_ISSUER", "https://issuer.example.test")
+	t.Setenv("OIDC_AUDIENCE", "dashboard")
+	t.Setenv("USE_DEMO_DATA", "false")
+	t.Setenv("QUERY_CATALOG_DIR", "/nonexistent/query-catalog")
+	err := run(discardLogger())
+	if err == nil || !strings.Contains(err.Error(), "query-catalog") {
+		t.Fatalf("central mode did not fail at the query catalog boundary: %v", err)
+	}
+}
+
 func TestPanelQueryRefsAreSortedAndUnique(t *testing.T) {
 	refs := panelQueryRefs(defaultCatalog(t))
 	if len(refs) == 0 {

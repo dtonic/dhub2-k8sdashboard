@@ -210,7 +210,7 @@ func TestLiveEveryPodNormalizesToAKnownState(t *testing.T) {
 	// 픽스처는 우리가 상상한 상태만 담습니다. 실클러스터에는 우리가 안 만든 조합이 있습니다.
 	_, store, _, _ := setupLive(t)
 
-	pods := store.CatalogPods("", 0)
+	pods := store.CatalogPods(liveClusterID, "", 0)
 	if len(pods) == 0 {
 		t.Skip("클러스터에 Pod가 없습니다")
 	}
@@ -461,7 +461,7 @@ func TestLiveDeployedServiceAccountCannotReadSecrets(t *testing.T) {
 
 func anyNamespace(t *testing.T, store *clusterstate.Store) string {
 	t.Helper()
-	pods := store.CatalogPods("", 0)
+	pods := store.CatalogPods(liveClusterID, "", 0)
 	for _, p := range pods {
 		if p.Namespace != "" {
 			return p.Namespace

@@ -50,15 +50,16 @@ func TestLiveQuickwitOTLPSchemaCompatibility(t *testing.T) {
 	}
 	s, err := New(Config{BaseURL: liveBase(t), Index: "otel-logs-v0_7", Fields: FieldMap{
 		Timestamp: "timestamp_nanos", Level: "severity_text", Message: "body.message",
+		Cluster:   "resource_attributes.k8s.cluster.name",
 		Namespace: "resource_attributes.k8s.namespace.name", PodName: "resource_attributes.k8s.pod.name",
 		PodUID: "resource_attributes.k8s.pod.uid", Container: "resource_attributes.k8s.container.name",
 		WorkloadKind: "resource_attributes.k8s.workload.kind", WorkloadName: "resource_attributes.k8s.workload.name",
 		Node: "resource_attributes.k8s.node.name", EventID: "attributes.event_id",
-	}}, fakeCatalog{})
+	}, ClusterScoped: true}, fakeCatalog{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := datasource.LogQuery{Target: datasource.Target{ClusterID: "fixture", Namespace: "payments"},
+	q := datasource.LogQuery{Target: datasource.Target{ClusterID: "cluster-a", Namespace: "payments"},
 		Window: datasource.Window{From: time.Now().Add(-5 * time.Minute), To: time.Now().Add(time.Minute), Step: time.Minute}, PageSize: 1}
 	page, err := s.Search(context.Background(), q)
 	if err != nil || len(page.Lines) != 1 || page.Next == "" {
@@ -70,10 +71,16 @@ func TestLiveQuickwitOTLPSchemaCompatibility(t *testing.T) {
 			t.Fatalf("OTLP sensitive value escaped masking: %q", first.Message)
 		}
 	}
-	if first.ID != "event-2" || first.T == 0 || first.Message == "" || first.Namespace != "payments" || first.PodName != "checkout-2" ||
-		first.PodUID != "pod-2" || first.ContainerName != "api" || first.WorkloadKind != "Deployment" || first.WorkloadName != "checkout" ||
+	if first.ID != "event-cluster-a-2" || first.T == 0 || first.Message == "" || first.Namespace != "payments" || first.PodName != "checkout-same" ||
+		first.PodUID != "pod-same" || first.ContainerName != "api" || first.WorkloadKind != "Deployment" || first.WorkloadName != "checkout" ||
 		first.NodeName != "node-a" || first.TraceID != "0123456789abcdef0123456789abcdef" || first.SpanID != "0123456789abcdef" || first.Level != contract.LevelError {
 		t.Fatalf("OTLP field/scope/masking mismatch: %+v", first)
+	}
+	crossCluster := q
+	crossCluster.Target.ClusterID = "cluster-b"
+	crossCluster.Cursor = page.Next
+	if _, err = s.Search(context.Background(), crossCluster); err == nil {
+		t.Fatal("cluster-a cursor was accepted for cluster-b")
 	}
 	q.Cursor = page.Next
 	second, err := s.Search(context.Background(), q)
@@ -83,17 +90,17 @@ func TestLiveQuickwitOTLPSchemaCompatibility(t *testing.T) {
 	filtered := q
 	filtered.Cursor = ""
 	filtered.PageSize = 10
-	filtered.Target.PodUID = "pod-1"
+	filtered.Target.PodUID = "pod-same"
 	filtered.Target.WorkloadKind = "Deployment"
 	filtered.Target.WorkloadName = "checkout"
 	filtered.Container = "api"
 	filtered.Levels = []contract.LogLevel{contract.LevelError}
 	filteredPage, err := s.Search(context.Background(), filtered)
-	if err != nil || len(filteredPage.Lines) != 1 || filteredPage.Lines[0].PodUID != "pod-1" {
+	if err != nil || len(filteredPage.Lines) != 2 || filteredPage.Lines[0].PodUID != "pod-same" {
 		t.Fatalf("OTLP pod/workload/container/level filter: %+v err=%v", filteredPage, err)
 	}
 	facets, err := s.Facets(context.Background(), datasource.LogQuery{Target: q.Target, Window: q.Window})
-	if err != nil || len(facets.Workloads) != 1 || facets.Workloads[0].Name != "checkout" || facets.Workloads[0].Count != 2 || len(facets.Pods) != 2 || len(facets.Containers) != 1 {
+	if err != nil || len(facets.Workloads) != 1 || facets.Workloads[0].Name != "checkout" || facets.Workloads[0].Count != 2 || len(facets.Pods) != 1 || len(facets.Containers) != 1 {
 		t.Fatalf("OTLP facets: %+v err=%v", facets, err)
 	}
 	hist, err := s.Histogram(context.Background(), datasource.LogQuery{Target: q.Target, Window: q.Window})

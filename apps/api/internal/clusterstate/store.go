@@ -175,11 +175,17 @@ func New(c Clients, opts Options) (*Store, error) {
 // 동기화 전에 요청을 받으면 "Pod 0개"처럼 **틀린 값이 정상처럼** 보입니다.
 // 그래서 준비되기 전에는 서버가 degraded를 내려보내야 합니다. (HasSynced 참고)
 func (s *Store) Start(ctx context.Context) error {
-	s.factory.Start(ctx.Done())
-	s.eventFactory.Start(ctx.Done())
-	s.metaFactory.Start(ctx.Done())
+	return s.StartAndWait(ctx, ctx)
+}
 
-	if !cache.WaitForCacheSync(ctx.Done(), s.synced...) {
+// StartAndWait keeps watches bound to runCtx while bounding only initial cache
+// synchronization with syncCtx.
+func (s *Store) StartAndWait(runCtx, syncCtx context.Context) error {
+	s.factory.Start(runCtx.Done())
+	s.eventFactory.Start(runCtx.Done())
+	s.metaFactory.Start(runCtx.Done())
+
+	if !cache.WaitForCacheSync(syncCtx.Done(), s.synced...) {
 		return fmt.Errorf("informer 캐시 동기화에 실패했습니다")
 	}
 	return nil

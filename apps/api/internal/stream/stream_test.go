@@ -1,14 +1,17 @@
 package stream
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	v1 "github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 )
 
@@ -30,8 +33,16 @@ func TestHubConfigCapsAreValidatedBeforeAllocation(t *testing.T) {
 			t.Fatalf("config was not rejected before entropy/allocation: cfg=%+v err=%v", cfg, err)
 		}
 	}
-	if err := validateConfig(Config{RingSize: MaxRingSize, MaxConnections: MaxConnections, SubscriberBuffer: 64}); err != nil {
+	if err := validateConfig(Config{RingSize: MaxRingSize, MaxConnections: MaxConnections, SubscriberBuffer: 64, MaxClusters: 1, MaxRetainedEvents: MaxRingSize}); err != nil {
 		t.Fatalf("exact cap boundary rejected: %v", err)
+	}
+}
+
+func TestHubRejectsInvalidAndDuplicateConfiguredClusters(t *testing.T) {
+	for _, ids := range [][]string{{"A"}, {"bad/cluster"}, {"a", "a"}} {
+		if _, err := New(Config{ClusterIDs: ids}, nil); err == nil {
+			t.Fatalf("clusters %q were accepted", ids)
+		}
 	}
 }
 
@@ -63,11 +74,15 @@ func allFilter() Filter { return Filter{ClusterID: testCluster, All: true} }
 
 func nsFilter(ns ...string) Filter { return Filter{ClusterID: testCluster, Namespaces: ns} }
 
+func testCursor(h *Hub, subject string, filter Filter, seq uint64) string {
+	return h.eventID(h.cursorBinding(sha256.Sum256([]byte(subject)), filter), seq)
+}
+
 func TestPublishAssignsExactInstanceIDAndValidObservedAt(t *testing.T) {
 	now := time.Date(2026, 8, 14, 10, 20, 30, 123, time.UTC)
 	h := newTestHub(t, Config{Now: func() time.Time { return now }}, nil)
-	if got := h.InstanceID(); len(got) != 32 {
-		t.Fatalf("instance ID length=%d want 32", len(got))
+	if got := h.InstanceID(); len(got) != 24 {
+		t.Fatalf("instance ID length=%d want 24", len(got))
 	}
 	sub, err := h.Subscribe("u", allFilter(), "")
 	if err != nil {
@@ -237,7 +252,7 @@ func seqOf(t *testing.T, id string) uint64 {
 func TestReplayWithCurrentIDIsEmpty(t *testing.T) {
 	h := newTestHub(t, Config{}, nil)
 	h.Publish(podEnv("payments"))
-	sub, err := h.Subscribe("u", allFilter(), h.eventID(1))
+	sub, err := h.Subscribe("u", allFilter(), testCursor(h, "u", allFilter(), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,11 +268,11 @@ func TestResetOnForeignStaleFutureID(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"foreign": "deadbeefdeadbeefdeadbeefdeadbeef-3", // 다른 인스턴스 (형식은 유효)
-		"stale":   h.eventID(1),                         // 링(4개)이 이미 버린 구간
-		"future":  h.eventID(999),                       // 아직 발행되지 않은 시퀀스
+		"foreign": "deadbeefdeadbeefdeadbeef.0000000000000000-3",
+		"stale":   testCursor(h, "u-stale", allFilter(), 1),
+		"future":  testCursor(h, "u-future", allFilter(), 999),
 	}
-	if cases["foreign"] == h.eventID(3) {
+	if cases["foreign"] == testCursor(h, "u-foreign", allFilter(), 3) {
 		t.Skip("난수 인스턴스 충돌 — 재실행하세요")
 	}
 	for name, id := range cases {
@@ -273,6 +288,158 @@ func TestResetOnForeignStaleFutureID(t *testing.T) {
 			t.Fatalf("%s: action=%s", name, replay[0].Envelope.Action)
 		}
 		sub.Close()
+	}
+}
+
+func TestClusterPartitionFloodCursorBindingAndDynamicValidation(t *testing.T) {
+	cfg := Config{RingSize: 4, SubscriberBuffer: 8, ClusterIDs: []string{"a", "b"}, MaxClusters: 2, MaxRetainedEvents: 8}
+	h := newTestHub(t, cfg, nil)
+	bFilter := Filter{ClusterID: "b", All: true}
+	b, err := h.Subscribe("viewer", bFilter, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		e := podEnv("ns")
+		e.ClusterID, e.Entity.ClusterID = "b", "b"
+		h.Publish(e)
+	}
+	bFirst := recv(t, b.Events())
+	_ = recv(t, b.Events())
+	b.Close()
+
+	for i := 0; i < 100; i++ {
+		e := podEnv("noisy")
+		e.ClusterID, e.Entity.ClusterID = "a", "a"
+		h.Publish(e)
+	}
+	reconnected, err := h.Subscribe("viewer", bFilter, bFirst.Envelope.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay := reconnected.Replay(); len(replay) != 1 || replay[0].Envelope.ClusterID != "b" || replay[0].Envelope.Kind == contract.StreamKindReset {
+		t.Fatalf("cluster A evicted B replay: %+v", replay)
+	}
+	reconnected.Close()
+
+	bindings := []struct {
+		subject string
+		filter  Filter
+	}{
+		{"other", bFilter},
+		{"viewer", Filter{ClusterID: "b", Namespaces: []string{"other"}}},
+		{"viewer", Filter{ClusterID: "a", All: true}},
+	}
+	for _, tc := range bindings {
+		if _, err := h.Subscribe(tc.subject, tc.filter, bFirst.Envelope.ID); err != ErrBadLastEventID {
+			t.Fatalf("cursor binding subject=%q filter=%+v: %v", tc.subject, tc.filter, err)
+		}
+	}
+
+	beforeConnections, beforeRetained := h.Stats()
+	beforeSlots := h.allocatedSlots
+	invalid := podEnv("ns")
+	invalid.ClusterID = "invalid/cluster"
+	h.Publish(invalid)
+	unknown := podEnv("ns")
+	unknown.ClusterID = "c"
+	h.Publish(unknown)
+	if _, err := h.Subscribe("viewer", Filter{ClusterID: "invalid/cluster", All: true}, ""); err == nil {
+		t.Fatal("invalid dynamic subscription was accepted")
+	}
+	afterConnections, afterRetained := h.Stats()
+	if beforeConnections != afterConnections || beforeRetained != afterRetained || beforeSlots != h.allocatedSlots {
+		t.Fatalf("rejected cluster changed resources: conns %d/%d retained %d/%d slots %d/%d", beforeConnections, afterConnections, beforeRetained, afterRetained, beforeSlots, h.allocatedSlots)
+	}
+	if afterRetained > cfg.MaxRetainedEvents {
+		t.Fatalf("global retention exceeded: %d > %d", afterRetained, cfg.MaxRetainedEvents)
+	}
+
+	dynamic := newTestHub(t, Config{RingSize: 4, MaxClusters: 2, MaxRetainedEvents: 8}, nil)
+	dynamic.Publish(invalid)
+	if _, err := dynamic.Subscribe("viewer", Filter{ClusterID: invalid.ClusterID, All: true}, ""); err == nil {
+		t.Fatal("allowlist-empty hub accepted invalid cluster")
+	}
+	if connections, retained := dynamic.Stats(); connections != 0 || retained != 0 || dynamic.allocatedSlots != 0 {
+		t.Fatalf("allowlist-empty rejection allocated state: connections=%d retained=%d slots=%d", connections, retained, dynamic.allocatedSlots)
+	}
+}
+
+func TestForeignCursorOnEmptyClusterResetsAtZeroThenNextIsOne(t *testing.T) {
+	h := newTestHub(t, Config{ClusterIDs: []string{"a"}, MaxClusters: 1}, nil)
+	f := Filter{ClusterID: "a", All: true}
+	sub, err := h.Subscribe("u", f, "deadbeefdeadbeefdeadbeef.0000000000000000-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sub.Replay(); len(got) != 1 || seqOf(t, got[0].Envelope.ID) != 0 || got[0].Envelope.Kind != contract.StreamKindReset {
+		t.Fatalf("empty foreign replay=%+v", got)
+	}
+	e := podEnv("ns")
+	e.ClusterID, e.Entity.ClusterID = "a", "a"
+	h.Publish(e)
+	if got := recv(t, sub.Events()); seqOf(t, got.Envelope.ID) != 1 {
+		t.Fatalf("first live sequence=%d", seqOf(t, got.Envelope.ID))
+	}
+}
+
+func TestSlowNoisyClusterSubscriberDoesNotDelayOtherCluster(t *testing.T) {
+	h := newTestHub(t, Config{RingSize: 8, SubscriberBuffer: 1, ClusterIDs: []string{"a", "b"}, MaxClusters: 2, MaxRetainedEvents: 16}, nil)
+	slow, err := h.Subscribe("slow", Filter{ClusterID: "a", All: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast, err := h.Subscribe("fast", Filter{ClusterID: "b", All: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		e := podEnv("ns")
+		e.ClusterID, e.Entity.ClusterID = "a", "a"
+		h.Publish(e)
+	}
+	start := time.Now()
+	e := podEnv("ns")
+	e.ClusterID, e.Entity.ClusterID = "b", "b"
+	h.Publish(e)
+	if got := recv(t, fast.Events()); got.Envelope.ClusterID != "b" {
+		t.Fatalf("fast subscriber got %+v", got.Envelope)
+	}
+	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
+		t.Fatalf("cluster B delivery delayed %s", elapsed)
+	}
+	for range slow.Events() {
+	}
+}
+
+func TestTwoReplicaRingsHaveEquivalentEventsAndIndependentCursors(t *testing.T) {
+	now := time.Date(2026, 8, 15, 1, 2, 3, 0, time.UTC)
+	cfg := Config{RingSize: 8, SubscriberBuffer: 8, ClusterIDs: []string{"a"}, MaxClusters: 1, Now: func() time.Time { return now }}
+	h1, h2 := newTestHub(t, cfg, nil), newTestHub(t, cfg, nil)
+	f := Filter{ClusterID: "a", All: true}
+	s1, _ := h1.Subscribe("u", f, "")
+	s2, _ := h2.Subscribe("u", f, "")
+	frames := []*v1.WatchFrame{
+		{ClusterId: "a", Epoch: 1, Type: v1.WatchFrameType_WATCH_SNAPSHOT_COMMIT, ObservedUnixMs: now.UnixMilli()},
+		{ClusterId: "a", Epoch: 1, Seq: 1, Type: v1.WatchFrameType_WATCH_DELTA, ObservedUnixMs: now.UnixMilli(), Change: &v1.CatalogChange{Epoch: 1, Seq: 1, Action: v1.CatalogAction_CATALOG_CREATED, Resource: &v1.CatalogResource{Kind: v1.KindPod, Uid: "p", Namespace: "ns", Name: "p"}}},
+	}
+	for _, frame := range frames {
+		h1.PublishWatchFrame(frame)
+		h2.PublishWatchFrame(frame)
+	}
+	for range frames {
+		one, two := recv(t, s1.Events()), recv(t, s2.Events())
+		if one.Envelope.ID == two.Envelope.ID {
+			t.Fatal("replicas unexpectedly shared a cursor namespace")
+		}
+		one.Envelope.ID, two.Envelope.ID = "", ""
+		if !reflect.DeepEqual(one.Envelope, two.Envelope) {
+			t.Fatalf("replica event mismatch: %+v / %+v", one.Envelope, two.Envelope)
+		}
+	}
+	foreign, err := h2.Subscribe("u", f, testCursor(h1, "u", f, 1))
+	if err != nil || len(foreign.Replay()) != 1 || foreign.Replay()[0].Envelope.Kind != contract.StreamKindReset {
+		t.Fatalf("foreign replica cursor did not reset: replay=%+v err=%v", foreign.Replay(), err)
 	}
 }
 
@@ -506,7 +673,7 @@ func BenchmarkReplayFullRing(b *testing.B) {
 	if _, retained := h.Stats(); retained != ring {
 		b.Fatalf("보존 이벤트가 링 크기를 넘었습니다: %d", retained)
 	}
-	first := h.eventID(uint64(ring*3 - ring + 1)) // 링의 가장 오래된 항목
+	first := testCursor(h, "u", allFilter(), uint64(ring*3-ring+1)) // 링의 가장 오래된 항목
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

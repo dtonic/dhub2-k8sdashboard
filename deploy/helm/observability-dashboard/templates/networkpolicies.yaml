@@ -75,9 +75,18 @@ spec:
         - namespaceSelector: {{ toYaml .Values.networkPolicy.dns.namespaceSelector | nindent 12 }}
           podSelector: {{ toYaml .Values.networkPolicy.dns.podSelector | nindent 12 }}
       ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- if eq .Values.clusterState.mode "direct" }}
     {{- range .Values.networkPolicy.kubernetesApiCidrs }}
     - to: [{ipBlock: {cidr: {{ . | quote }}}}]
       ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+    {{- else }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" $ | nindent 14 }}
+              app.kubernetes.io/component: cluster-state-registry
+      ports: [{protocol: TCP, port: {{ .Values.clusterState.registry.queryPort }}}]
     {{- end }}
     {{- if .Values.redis.enabled }}
     - to:

@@ -174,7 +174,8 @@ data:
               - keep_keys(attributes, ["k8s.cluster.name", "k8s.cluster.uid", "k8s.namespace.name", "k8s.workload.kind", "k8s.workload.name", "k8s.workload.uid", "k8s.pod.name", "k8s.pod.uid", "k8s.container.name", "k8s.node.name", "k8s.node.uid", "service.name", "service.namespace", "service.instance.id", "service.version"])
           - context: datapoint
             statements:
-              - keep_keys(attributes, ["container", "cpu", "device", "direction", "interface", "namespace", "pod", "resource", "state", "type", "unit"])
+              - set(attributes["k8s_cluster_name"], resource.attributes["k8s.cluster.name"]) where resource.attributes["k8s.cluster.name"] != nil
+              - keep_keys(attributes, ["container", "cpu", "device", "direction", "interface", "k8s_cluster_name", "namespace", "pod", "resource", "state", "type", "unit"])
         log_statements:
           - context: resource
             statements:

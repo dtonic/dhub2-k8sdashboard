@@ -114,3 +114,82 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 	// 보안 주체와 감사 식별자는 변경 가능한 표시용 클레임이 아니라 OIDC sub입니다.
 	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, Clusters: []scope.Cluster{c}}
 }
+
+// ScopeForCentral is fail-closed for multi-cluster deployments: only explicit
+// qualified viewer roles apply; platform.admin is bounded by configured IDs.
+func ScopeForCentral(claims Claims, configured []scope.Cluster) (Principal, scope.Scope) {
+	p := Principal{Subject: claims.Subject, Email: claims.Email, Username: claims.Username, Roles: claims.Roles}
+	known := map[string]scope.Cluster{}
+	for _, c := range configured {
+		if c.Name == "" {
+			c.Name = c.ID
+		}
+		known[c.ID] = c
+	}
+	access := map[string]*scope.Cluster{}
+	get := func(id string) *scope.Cluster {
+		if c := access[id]; c != nil {
+			return c
+		}
+		base, ok := known[id]
+		if !ok {
+			return nil
+		}
+		base.All = false
+		base.Namespaces = nil
+		access[id] = &base
+		return &base
+	}
+	for _, role := range claims.Roles {
+		name, arg, has := strings.Cut(role, ":")
+		switch name {
+		case RolePlatformAdmin:
+			if !has {
+				for id := range known {
+					get(id).All = true
+				}
+				p.CanPublish = true
+			}
+		case RoleDashboardEditor:
+			if !has {
+				p.CanEdit = true
+			}
+		case RoleClusterViewer:
+			if has && arg != "" {
+				if c := get(arg); c != nil {
+					c.All = true
+				}
+			}
+		case RoleNamespaceViewer:
+			if !has {
+				continue
+			}
+			cid, ns, ok := strings.Cut(arg, "/")
+			if ok && ns != "" {
+				if c := get(cid); c != nil {
+					c.Namespaces = append(c.Namespaces, ns)
+				}
+			}
+		}
+	}
+	out := make([]scope.Cluster, 0, len(access))
+	for _, c := range access {
+		sort.Strings(c.Namespaces)
+		c.Namespaces = unique(c.Namespaces)
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, Clusters: out}
+}
+func unique(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	out := in[:1]
+	for _, v := range in[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
+}

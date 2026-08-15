@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/upstream"
@@ -44,6 +45,9 @@ type Config struct {
 	MaxDataPoints int
 	// MaxConcurrent는 화면 1회 그리기에서 GreptimeDB로 나가는 동시 질의 상한입니다.
 	MaxConcurrent int
+	// ClusterScoped requires the #23 collector's k8s_cluster_name metric label
+	// on every central-mode query and response. Empty preserves direct mode.
+	ClusterScoped bool
 	Observer      upstream.Observer
 }
 
@@ -155,7 +159,7 @@ func (s *Source) Trends(ctx context.Context, t datasource.Target, w datasource.W
 				qctx, cancel := context.WithTimeout(gctx, q.Limits.Timeout)
 				defer cancel()
 				observability.RecordQueryRef(qctx, q.Ref)
-				pts, err := s.rangeQuery(qctx, expr, w.From, w.To, step)
+				pts, err := s.rangeQueryScoped(qctx, expr, w.From, w.To, step, sc.ClusterName)
 				if err != nil {
 					return err
 				}
@@ -184,8 +188,11 @@ func (s *Source) effectiveStep(q querycatalog.Query, step, span time.Duration) t
 // 메트릭 라벨(namespace, pod 이름)을 카탈로그의 UID로 되돌리고,
 // 카탈로그에 없는 Pod(이미 사라진 Pod의 잔여 시계열)는 버립니다. (README §5)
 func (s *Source) Usage(ctx context.Context, clusterID string) (map[string]contract.ContainerUsage, error) {
+	if s.cfg.ClusterScoped && !clusterid.Valid(clusterID) {
+		return nil, fmt.Errorf("invalid cluster scope")
+	}
 	uidOf := map[string]string{}
-	for _, p := range s.catalog.CatalogPods("", 0) {
+	for _, p := range s.catalog.CatalogPods(clusterID, "", 0) {
 		uidOf[p.Namespace+"/"+p.Name] = p.UID
 	}
 
@@ -194,14 +201,18 @@ func (s *Source) Usage(ctx context.Context, clusterID string) (map[string]contra
 		if !ok {
 			return nil, fmt.Errorf("카탈로그에 %s 정의가 없습니다", ref)
 		}
-		expr, err := q.Render(querycatalog.Scope{}, time.Minute, nil)
+		scope := querycatalog.Scope{}
+		if s.cfg.ClusterScoped {
+			scope.ClusterName = clusterID
+		}
+		expr, err := q.Render(scope, time.Minute, nil)
 		if err != nil {
 			return nil, err
 		}
 		qctx, cancel := context.WithTimeout(ctx, q.Limits.Timeout)
 		defer cancel()
 		observability.RecordQueryRef(qctx, q.Ref)
-		return s.instantQuery(qctx, expr)
+		return s.instantQuery(qctx, expr, scope.ClusterName)
 	}
 
 	cpu, err := run("metrics.usage.cpu_milli")
@@ -249,6 +260,10 @@ type promResponse struct {
 }
 
 func (s *Source) rangeQuery(ctx context.Context, expr string, from, to time.Time, step time.Duration) ([]contract.TrendPoint, error) {
+	return s.rangeQueryScoped(ctx, expr, from, to, step, "")
+}
+
+func (s *Source) rangeQueryScoped(ctx context.Context, expr string, from, to time.Time, step time.Duration, expectedCluster string) ([]contract.TrendPoint, error) {
 	q := url.Values{}
 	q.Set("db", s.cfg.DB)
 	q.Set("query", expr)
@@ -263,13 +278,16 @@ func (s *Source) rangeQuery(ctx context.Context, expr string, from, to time.Time
 	if len(res.Data.Result) == 0 {
 		return []contract.TrendPoint{}, nil
 	}
+	if expectedCluster != "" && (len(res.Data.Result) != 1 || res.Data.Result[0].Metric["k8s_cluster_name"] != expectedCluster) {
+		return nil, fmt.Errorf("GreptimeDB cluster label mismatch")
+	}
 	// 카탈로그 질의는 전부 sum(...)이라 시리즈가 하나여야 합니다.
 	// 여러 개가 오면 첫 시리즈만 씁니다 — 합치면 이중 집계가 됩니다.
 	return cleanPoints(res.Data.Result[0].Values), nil
 }
 
 // instantQuery는 "namespace/pod" → 값 맵을 돌려줍니다.
-func (s *Source) instantQuery(ctx context.Context, expr string) (map[string]float64, error) {
+func (s *Source) instantQuery(ctx context.Context, expr, expectedCluster string) (map[string]float64, error) {
 	q := url.Values{}
 	q.Set("db", s.cfg.DB)
 	q.Set("query", expr)
@@ -280,6 +298,9 @@ func (s *Source) instantQuery(ctx context.Context, expr string) (map[string]floa
 	}
 	out := make(map[string]float64, len(res.Data.Result))
 	for _, r := range res.Data.Result {
+		if expectedCluster != "" && r.Metric["k8s_cluster_name"] != expectedCluster {
+			return nil, fmt.Errorf("GreptimeDB cluster label mismatch")
+		}
 		v, ok := sampleValue(r.Value)
 		if !ok {
 			continue

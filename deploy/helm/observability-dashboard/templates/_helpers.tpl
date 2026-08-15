@@ -14,7 +14,52 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 app.kubernetes.io/name: {{ include "dashboard.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+{{- define "dashboard.validIPv4CIDR" -}}
+{{- $parts := splitList "/" . -}}
+{{- if ne (len $parts) 2 }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}
+{{- $octets := splitList "." (index $parts 0) -}}
+{{- if or (ne (len $octets) 4) (not (regexMatch "^[0-9]+$" (index $parts 1))) (lt (atoi (index $parts 1)) 1) (gt (atoi (index $parts 1)) 32) }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}
+{{- range $octets }}{{- if or (not (regexMatch "^[0-9]{1,3}$" .)) (gt (atoi .) 255) }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}{{- end -}}
+{{- if eq . "0.0.0.0/0" }}{{ fail "central Registry agent source CIDR is invalid" }}{{ end -}}
+{{- end -}}
 {{- define "dashboard.validate" -}}
+{{- $central := eq .Values.clusterState.mode "central" -}}
+{{- if not (has .Values.clusterState.mode (list "direct" "central")) }}{{ fail "clusterState.mode must be direct or central" }}{{ end -}}
+{{- if $central -}}
+{{- if ne .Values.api.config.AUTH_MODE "oidc" }}{{ fail "central mode requires AUTH_MODE=oidc" }}{{ end -}}
+{{- if ne (toString .Values.api.config.USE_DEMO_DATA) "false" }}{{ fail "central mode requires USE_DEMO_DATA=false" }}{{ end -}}
+{{- if or (empty .Values.clusterState.clusters) (gt (len .Values.clusterState.clusters) (int .Values.clusterState.limits.maxClusters)) }}{{ fail "central mode requires bounded configured clusters" }}{{ end -}}
+{{- $seenClusters := dict -}}{{- range .Values.clusterState.clusters -}}{{- if or (not (regexMatch "^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$" .)) (hasKey $seenClusters .) }}{{ fail "central cluster IDs must be unique canonical IDs" }}{{ end -}}{{- $_ := set $seenClusters . true -}}{{- end -}}
+{{- if or (empty .Values.clusterState.trustDomain) (empty .Values.clusterState.registryEndpoint) (empty .Values.clusterState.registryServerName) (empty .Values.clusterState.tls.apiExistingSecret) (empty .Values.clusterState.tls.registryExistingSecret) (eq .Values.clusterState.tls.apiExistingSecret .Values.clusterState.tls.registryExistingSecret) }}{{ fail "central mode requires distinct API and Registry mTLS Secrets plus endpoint identity" }}{{ end -}}
+{{- if not (regexMatch "^[A-Za-z0-9.-]+:[0-9]{1,5}$" .Values.clusterState.registryEndpoint) }}{{ fail "central registry endpoint must be host:port" }}{{ end -}}
+{{- if ne .Values.clusterState.registryEndpoint (printf "%s-cluster-state-registry:%d" (include "dashboard.fullname" .) (int .Values.clusterState.registry.queryPort)) }}{{ fail "central API endpoint must target the chart Registry query Service" }}{{ end -}}
+{{- $dnsName := "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$" -}}
+{{- if or (gt (len .Values.clusterState.registryServerName) 253) (not (regexMatch $dnsName .Values.clusterState.registryServerName)) (not (regexMatch "^[a-z0-9.-]+$" .Values.clusterState.trustDomain)) }}{{ fail "central TLS server name or trust domain is invalid" }}{{ end -}}
+{{- if or (empty .Values.clusterState.tls.certKey) (empty .Values.clusterState.tls.privateKeyKey) (empty .Values.clusterState.tls.caKey) (eq .Values.clusterState.tls.certKey .Values.clusterState.tls.privateKeyKey) (eq .Values.clusterState.tls.certKey .Values.clusterState.tls.caKey) (eq .Values.clusterState.tls.privateKeyKey .Values.clusterState.tls.caKey) }}{{ fail "central TLS Secret keys must be distinct and nonempty" }}{{ end -}}
+{{- if or (ne (int .Values.clusterState.registry.replicas) 1) (not (regexMatch "^sha256:[a-f0-9]{64}$" .Values.clusterState.registry.image.digest)) }}{{ fail "central registry must be singleton with an immutable image digest" }}{{ end -}}
+{{- if not (has .Values.clusterState.registry.agentService.type (list "ClusterIP" "LoadBalancer")) }}{{ fail "central Registry agent Service type is invalid" }}{{ end -}}
+{{- if empty .Values.clusterState.registry.agentService.sourceCidrs }}{{ fail "central Registry agent ingress requires bounded source CIDRs" }}{{ end -}}
+{{- range .Values.clusterState.registry.agentService.sourceCidrs }}{{ include "dashboard.validIPv4CIDR" . }}{{- end -}}
+{{- if eq (int .Values.clusterState.registry.agentPort) (int .Values.clusterState.registry.queryPort) }}{{ fail "central agent and query ports must be distinct" }}{{ end -}}
+{{- if or (lt (int .Values.clusterState.limits.maxClusters) 1) (gt (int .Values.clusterState.limits.maxClusters) 64) (lt (int .Values.clusterState.limits.maxResources) 1) (gt (int .Values.clusterState.limits.maxResources) 100000) (lt (int .Values.clusterState.limits.maxChunkResources) 1) (gt (int .Values.clusterState.limits.maxChunkResources) 1000) (lt (int .Values.clusterState.limits.maxMessageBytes) 1024) (gt (int .Values.clusterState.limits.maxMessageBytes) 4194304) }}{{ fail "central registry limits are outside safe bounds" }}{{ end -}}
+{{- if gt (int .Values.clusterState.limits.maxChunkResources) (int .Values.clusterState.limits.maxResources) }}{{ fail "central registry chunk count exceeds resource capacity" }}{{ end -}}
+{{- if or (gt (int64 .Values.clusterState.limits.maxMessageBytes) (int64 .Values.clusterState.limits.maxStateBytes)) (gt (int64 .Values.clusterState.limits.maxStateBytes) (int64 .Values.clusterState.limits.maxTotalStateBytes)) (gt (int64 .Values.clusterState.limits.maxTotalStateBytes) 536870912) }}{{ fail "central registry retained byte caps are invalid" }}{{ end -}}
+{{- $registryMemory := toString .Values.clusterState.registry.resources.limits.memory -}}
+{{- if not (regexMatch "^[1-9][0-9]*Mi$" $registryMemory) }}{{ fail "central Registry memory limit must use Mi units" }}{{ end -}}
+{{- if lt (mul (int64 (trimSuffix "Mi" $registryMemory)) 1048576) (mul (int64 .Values.clusterState.limits.maxTotalStateBytes) 2) }}{{ fail "central Registry memory limit requires 2x retained-byte headroom" }}{{ end -}}
+{{- $frameRateText := toString .Values.clusterState.limits.ingressFrameRate -}}{{- $byteRateText := toString .Values.clusterState.limits.ingressByteRate -}}
+{{- if or (not (regexMatch "^[0-9]+(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?$" $frameRateText)) (not (regexMatch "^[0-9]+(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?$" $byteRateText)) }}{{ fail "central registry ingress rates must be finite numeric values" }}{{ end -}}
+{{- if or (lt (float64 .Values.clusterState.limits.ingressFrameRate) 1.0) (gt (float64 .Values.clusterState.limits.ingressFrameRate) 100000.0) (lt (float64 .Values.clusterState.limits.ingressByteRate) 1024.0) (gt (float64 .Values.clusterState.limits.ingressByteRate) 1073741824.0) (lt (int .Values.clusterState.limits.ingressFrameBurst) 1) (gt (int .Values.clusterState.limits.ingressFrameBurst) 100000) (lt (int .Values.clusterState.limits.ingressByteBurst) 1024) (gt (int64 .Values.clusterState.limits.ingressByteBurst) 1073741824) }}{{ fail "central registry ingress limits are invalid" }}{{ end -}}
+{{- if lt (int64 .Values.clusterState.limits.ingressByteBurst) (int64 .Values.clusterState.limits.maxMessageBytes) }}{{ fail "central registry byte burst must admit one maximum message" }}{{ end -}}
+{{- $staleText := toString .Values.clusterState.limits.staleTTL -}}{{- $heartbeatText := toString .Values.clusterState.limits.heartbeatTimeout -}}
+{{- if or (not (regexMatch "^[1-9][0-9]*(?:s|m|h)$" $staleText)) (not (regexMatch "^[1-9][0-9]*(?:s|m|h)$" $heartbeatText)) }}{{ fail "central registry durations must be positive s, m, or h values" }}{{ end -}}
+{{- $staleMultiplier := 1 -}}{{- if hasSuffix "m" $staleText }}{{- $staleMultiplier = 60 -}}{{- else if hasSuffix "h" $staleText }}{{- $staleMultiplier = 3600 -}}{{- end -}}
+{{- $heartbeatMultiplier := 1 -}}{{- if hasSuffix "m" $heartbeatText }}{{- $heartbeatMultiplier = 60 -}}{{- else if hasSuffix "h" $heartbeatText }}{{- $heartbeatMultiplier = 3600 -}}{{- end -}}
+{{- $staleSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $staleText)))) $staleMultiplier -}}
+{{- $heartbeatSeconds := mul (int64 (trimSuffix "h" (trimSuffix "m" (trimSuffix "s" $heartbeatText)))) $heartbeatMultiplier -}}
+{{- if or (gt $staleSeconds 86400) (gt $heartbeatSeconds 3600) (gt $heartbeatSeconds $staleSeconds) }}{{ fail "central registry durations are outside safe bounds" }}{{ end -}}
+{{- end -}}
+
 {{- if not (has .Values.environment (list "dev" "stage" "prod")) }}{{ fail "environment must be dev, stage, or prod" }}{{ end -}}
 {{- if and (ne .Values.environment "dev") (or (eq .Values.api.config.AUTH_MODE "mock") (eq .Values.api.config.AUTH_MODE "none")) }}{{ fail "stage/prod require AUTH_MODE=oidc" }}{{ end -}}
 {{- if and (ne .Values.environment "dev") (ne (toString .Values.api.config.USE_DEMO_DATA) "false") }}{{ fail "stage/prod require USE_DEMO_DATA=false" }}{{ end -}}

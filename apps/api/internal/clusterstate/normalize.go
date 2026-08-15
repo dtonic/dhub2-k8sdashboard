@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/mask"
 )
 
 // PendingGrace는 이 시간을 넘긴 Pending을 "진행 중"이 아니라 "문제"로 봅니다.
@@ -310,6 +311,7 @@ func ContainerStatuses(pod *corev1.Pod) []contract.ContainerStatus {
 			c.Reason = cs.State.Waiting.Reason
 			c.Message = cs.State.Waiting.Message
 		}
+		c.Message, _ = mask.Apply(c.Message)
 		if t := cs.LastTerminationState.Terminated; t != nil {
 			c.LastTerminated = &contract.ContainerTermination{
 				Reason:     t.Reason,

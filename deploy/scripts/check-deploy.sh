@@ -19,6 +19,8 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+sh "$ROOT/deploy/scripts/check-cluster-state.sh"
+
 HELM_IMAGE='alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895'
 KUBECONFORM_IMAGE='ghcr.io/yannh/kubeconform:v0.6.7@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c'
 COLLECTOR_TOKEN=$(printf '%s' "${TMP##*.}" | tr '[:upper:]' '[:lower:]')
@@ -29,21 +31,27 @@ sh "$ROOT/deploy/scripts/build-telemetry-collector.sh"
 COLLECTOR_IMAGE_ID=$(docker image inspect -f '{{.Id}}' "$COLLECTOR_IMAGE")
 
 docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" lint /work/deploy/helm/observability-dashboard
+mkdir -p "$TMP/validation" "$TMP/direct-parity"
 for env in dev stage prod; do
   docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
-    --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" > "$TMP/$env.yaml"
+    --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" > "$TMP/validation/$env.yaml"
   docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
-    --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" > "$TMP/$env.second.yaml"
-  cmp "$TMP/$env.yaml" "$TMP/$env.second.yaml"
-  docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/$env.yaml"
-  python3 "$ROOT/scripts/check-deploy.py" "$TMP/$env.yaml" --environment "$env" --self-test
+    --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" > "$TMP/validation/$env.second.yaml"
+  cmp "$TMP/validation/$env.yaml" "$TMP/validation/$env.second.yaml"
+  docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template dashboard /work/deploy/helm/observability-dashboard \
+    --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" > "$TMP/direct-parity/$env.yaml"
+  docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template dashboard /work/deploy/helm/observability-dashboard \
+    --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" --set clusterState.mode=direct > "$TMP/direct-parity/$env.explicit.yaml"
+  cmp "$TMP/direct-parity/$env.yaml" "$TMP/direct-parity/$env.explicit.yaml"
+  docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/validation/$env.yaml"
+  python3 "$ROOT/scripts/check-deploy.py" "$TMP/validation/$env.yaml" --environment "$env" --self-test
   if [ "$env" = dev ]; then
-    ! grep -q 'prometheus.io/scrape' "$TMP/$env.yaml"
-    ! grep -q 'grafana-dashboard' "$TMP/$env.yaml"
+    ! grep -q 'prometheus.io/scrape' "$TMP/validation/$env.yaml"
+    ! grep -q 'grafana-dashboard' "$TMP/validation/$env.yaml"
   else
-    grep -q 'prometheus.io/scrape: "true"' "$TMP/$env.yaml"
-    grep -q 'grafana-dashboard' "$TMP/$env.yaml"
-    grep -q 'app.kubernetes.io/name: prometheus' "$TMP/$env.yaml"
+    grep -q 'prometheus.io/scrape: "true"' "$TMP/validation/$env.yaml"
+    grep -q 'grafana-dashboard' "$TMP/validation/$env.yaml"
+    grep -q 'app.kubernetes.io/name: prometheus' "$TMP/validation/$env.yaml"
   fi
 done
 
@@ -53,12 +61,12 @@ done
 docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
   --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
   --set telemetry.mode=disabled > "$TMP/disabled-explicit.yaml"
-cmp "$TMP/dev.yaml" "$TMP/disabled-explicit.yaml"
+cmp "$TMP/validation/dev.yaml" "$TMP/disabled-explicit.yaml"
 for env in dev stage prod; do
   docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
     --namespace observability --values "/work/deploy/helm/observability-dashboard/values-$env.yaml" \
     --set dashboardBuilder.enabled=false > "$TMP/$env-builder-disabled.yaml"
-  cmp "$TMP/$env.yaml" "$TMP/$env-builder-disabled.yaml"
+  cmp "$TMP/validation/$env.yaml" "$TMP/$env-builder-disabled.yaml"
 done
 
 docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
@@ -260,7 +268,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 counts = {}
 for env in ("dev", "stage", "prod"):
-    data = (root / f"{env}.yaml").read_bytes()
+    data = (root / "direct-parity" / f"{env}.yaml").read_bytes()
     kinds = Counter(re.findall(rb"^kind: (.+)$", data, re.M))
     counts[env] = kinds
     print(f"{env}: objects={sum(kinds.values())} sha256={hashlib.sha256(data).hexdigest()}")

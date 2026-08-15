@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 )
 
@@ -63,13 +64,29 @@ func TestActiveIdentityCapacityRejectsWithoutGrowing(t *testing.T) {
 	cfg := queryprotect.DefaultConfig()
 	cfg.MaxIdentities = 1
 	guard := queryprotect.New(cfg, nil)
+	if users, dashboards := guard.IdentityCounts(); users != 0 || dashboards != 0 { t.Fatal(users, dashboards) }
 	release, reason, _ := guard.Acquire("active-user", "active-dashboard")
 	if reason != "" {
 		t.Fatal(reason)
 	}
 	defer release()
+	if users, dashboards := guard.IdentityCounts(); users != 1 || dashboards != 1 { t.Fatal(users, dashboards) }
 	if _, reason, _ := guard.Acquire("second-user", "second-dashboard"); reason != "identity_capacity" {
 		t.Fatalf("reason=%q", reason)
+	}
+}
+
+func TestMetricCacheCountersAndDefaultDurations(t *testing.T) {
+	g := queryprotect.New(queryprotect.Config{}, nil)
+	if g.Timeout() <= 0 || g.SlowThreshold() <= 0 { t.Fatal(g.Timeout(), g.SlowThreshold()) }
+	m := queryprotect.NewMetrics()
+	m.ObserveCache(cache.ResultL1)
+	m.ObserveCacheError("decode")
+	m.ObserveCacheLoad()
+	var b bytes.Buffer
+	if err := m.WritePrometheus(t.Context(), &b); err != nil { t.Fatal(err) }
+	for _, want := range []string{"dashboard_cache_requests_total", "dashboard_cache_errors_total", "dashboard_cache_loads_total"} {
+		if !strings.Contains(b.String(), want) { t.Fatalf("missing %s in %s", want, b.String()) }
 	}
 }
 

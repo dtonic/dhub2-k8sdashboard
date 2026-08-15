@@ -7,6 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 MAKEFILE = ROOT / "Makefile"
 SECURITY_SCAN = ROOT / "scripts" / "quality" / "security-scan.sh"
+COVERAGE_CHECK = ROOT / "scripts" / "quality" / "check-coverage.py"
 ROOT_PACKAGE = ROOT / "package.json"
 WEB_DOCKERFILE = ROOT / "Dockerfile.web"
 API_DOCKERFILE = ROOT / "Dockerfile.api"
@@ -38,6 +39,7 @@ NPM_FIXED_DEPS = "brace-expansion@5.0.9 ip-address@10.3.1"
 WEB_BUILDER_TAG = "observability-dashboard-web-builder:ci"
 GITLEAKS = "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 TRIVY = "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+HELM = "alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895"
 TELEMETRY_SUPPLY_PINS = (
     "golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df",
     "gcr.io/distroless/static-debian13@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6",
@@ -51,6 +53,7 @@ TELEMETRY_SUPPLY_PINS = (
     "c544e7cf18f0f44c82917877dd664dda943f52a36a1dda1d948f94a5244f5030",
 )
 GOVULN = "golang.org/x/vuln/cmd/govulncheck@v1.1.4"
+GENERATED_PROTO_PACKAGE = "github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 REQUIRED_JOBS = {
     "Web (typecheck · build · e2e)",
     "API (vet · test · build)",
@@ -60,8 +63,14 @@ REQUIRED_JOB_IDS = {"web", "api", "deploy"}
 
 def validate(text, makefile, security_scan, package_source=None, docker_source=None, npm_tool_source=None,
              go_work_source=None, go_mod_source=None, api_docker_source=None, readme_source=None,
-             telemetry_supply_source=None):
+             telemetry_supply_source=None, coverage_source=None):
     errors = []
+    if coverage_source is None:
+        coverage_source = COVERAGE_CHECK.read_text(encoding="utf-8")
+    declaration = f'GENERATED_PROTO_PACKAGE = "{GENERATED_PROTO_PACKAGE}"'
+    exact_filter = "if package == GENERATED_PROTO_PACKAGE"
+    if coverage_source.count(declaration) != 1 or coverage_source.count(exact_filter) != 1:
+        errors.append("generated protobuf coverage exclusion must be one exact package equality")
     if not re.search(r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$", text):
         errors.append("top-level contents: read permission is missing")
     job_names = re.findall(r"(?m)^ {4}name:\s+(.+?)\s*$", text)
@@ -148,6 +157,8 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
         errors.append("gitleaks image is not pinned to the approved digest")
     if "make security-scan" not in text or TRIVY not in security_scan:
         errors.append("Trivy image is not pinned to the approved digest")
+    if security_scan.count(HELM) != 1:
+        errors.append("security Helm image is not pinned to the approved digest")
     if security_scan.count(POSTGRES) != 1:
         errors.append("PostgreSQL integration image is not scanned at its approved digest")
     for required in (
@@ -199,6 +210,7 @@ if args.self_test:
         ("mutable govulncheck", source, makefile_source.replace(GOVULN, "golang.org/x/vuln/cmd/govulncheck@latest", 1), security_source),
         ("mutable gitleaks", source, makefile_source, security_source.replace(GITLEAKS, "ghcr.io/gitleaks/gitleaks:v8.30.1", 1)),
         ("mutable Trivy", source, makefile_source, security_source.replace(TRIVY, "aquasec/trivy:0.74.0", 1)),
+        ("mutable security Helm", source, makefile_source, security_source.replace(HELM, "alpine/helm:3.17.3", 1)),
         ("job rename masked by step", source.replace(next(iter(REQUIRED_JOBS)), "Renamed job", 1) + f"\n      - name: {next(iter(REQUIRED_JOBS))}\n        run: true\n", makefile_source, security_source),
         ("extra job", source + "\n  unexpected:\n    name: Unexpected quality job\n    runs-on: ubuntu-latest\n    steps: []\n", makefile_source, security_source),
         ("unnamed extra job", source + "\n  unnamed-extra:\n    runs-on: ubuntu-latest\n    steps: []\n", makefile_source, security_source),
@@ -211,6 +223,15 @@ if args.self_test:
     ]
     for label, mutated_workflow, mutated_makefile, mutated_security in mutations:
         if not validate(mutated_workflow, mutated_makefile, mutated_security):
+            raise SystemExit(f"{label} mutation was masked")
+        print(f"negative mutation passed: {label} was rejected")
+    coverage_source = COVERAGE_CHECK.read_text(encoding="utf-8")
+    for label, mutated_coverage in (
+        ("generated coverage path drift", coverage_source.replace(GENERATED_PROTO_PACKAGE, GENERATED_PROTO_PACKAGE + "-drift", 1)),
+        ("generated coverage broadening", coverage_source.replace("if package == GENERATED_PROTO_PACKAGE", "if package.endswith('/protocol/v1')", 1)),
+        ("generated coverage removal", coverage_source.replace("if package == GENERATED_PROTO_PACKAGE", "if False", 1)),
+    ):
+        if not validate(source, makefile_source, security_source, coverage_source=mutated_coverage):
             raise SystemExit(f"{label} mutation was masked")
         print(f"negative mutation passed: {label} was rejected")
     package_source = ROOT_PACKAGE.read_text(encoding="utf-8")

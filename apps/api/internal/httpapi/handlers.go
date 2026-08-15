@@ -43,6 +43,7 @@ func (s *Server) handleScope(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.ClusterOverviewResponse, error) {
 		var out contract.ClusterOverviewResponse
+		store := providerFrom(ctx, s.deps.Store)
 		c, f, win, err := s.resolve(ctx, r, r.URL.Query().Get("namespace"))
 		if err != nil {
 			return out, err
@@ -60,20 +61,20 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		// 노드는 클러스터 스코프 리소스입니다. namespace로 제한된 사용자에게는
 		// 0을 보여주는 대신 "권한 없음"으로 구분해 알려줍니다.
 		if c.All {
-			v1, err1 := s.deps.Store.NodeHealth()
-			out.Nodes = kubeSection(s, v1, err1)
+			v1, err1 := store.NodeHealth()
+			out.Nodes = kubeSection(store, v1, err1)
 		} else {
 			out.Nodes = contract.Forbidden[contract.NodeHealth]("노드 상태는 클러스터 범위 권한이 필요합니다.")
 		}
 
-		v2, err2 := s.deps.Store.PodHealth(f)
-		out.Pods = kubeSection(s, v2, err2)
-		v3, err3 := s.deps.Store.WorkloadHealth(f)
-		out.Workloads = kubeSection(s, v3, err3)
-		v4, err4 := s.deps.Store.Unhealthy(f, unhealthyLimit)
-		out.Unhealthy = kubeSection(s, v4, err4)
-		v5, err5 := s.deps.Store.Events(f, win.From, eventLimit)
-		out.Events = kubeSection(s, v5, err5)
+		v2, err2 := store.PodHealth(f)
+		out.Pods = kubeSection(store, v2, err2)
+		v3, err3 := store.WorkloadHealth(f)
+		out.Workloads = kubeSection(store, v3, err3)
+		v4, err4 := store.Unhealthy(f, unhealthyLimit)
+		out.Unhealthy = kubeSection(store, v4, err4)
+		v5, err5 := store.Events(f, win.From, eventLimit)
+		out.Events = kubeSection(store, v5, err5)
 
 		panels, err := s.deps.Metrics.Trends(ctx, target, dsWindow(win), nil)
 		out.Trends = dsSection(panels, err, contract.SourceGreptimeDB, "GreptimeDB")
@@ -160,6 +161,7 @@ func topologySummary(g contract.TopologyGraph) contract.TopologySummary {
 func (s *Server) handleNamespaceList(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.NamespaceListResponse, error) {
 		var out contract.NamespaceListResponse
+		store := providerFrom(ctx, s.deps.Store)
 		c, f, win, err := s.resolve(ctx, r, "")
 		if err != nil {
 			return out, err
@@ -169,8 +171,8 @@ func (s *Server) handleNamespaceList(w http.ResponseWriter, r *http.Request) {
 			Range:       win.Contract(),
 			GeneratedAt: s.nowRFC3339(),
 		}
-		v6, err6 := s.deps.Store.NamespaceSummaries(f)
-		out.Namespaces = kubeSection(s, v6, err6)
+		v6, err6 := store.NamespaceSummaries(f)
+		out.Namespaces = kubeSection(store, v6, err6)
 		return out, nil
 	})
 }
@@ -178,6 +180,7 @@ func (s *Server) handleNamespaceList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNamespaceDetail(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.NamespaceDetailResponse, error) {
 		var out contract.NamespaceDetailResponse
+		store := providerFrom(ctx, s.deps.Store)
 		ns := r.PathValue("namespace")
 		c, f, win, err := s.resolve(ctx, r, ns)
 		if err != nil {
@@ -192,20 +195,20 @@ func (s *Server) handleNamespaceDetail(w http.ResponseWriter, r *http.Request) {
 			GeneratedAt: s.nowRFC3339(),
 		}
 
-		summary, found, err := s.deps.Store.NamespaceSummary(ns)
+		summary, found, err := store.NamespaceSummary(ns)
 		switch {
 		case err != nil:
 			out.Summary = contract.Degraded[contract.NamespaceSummary](contract.SourceKubernetes, "클러스터 상태를 읽지 못했습니다", nil)
 		case !found:
 			out.Summary = contract.Empty[contract.NamespaceSummary]()
 		default:
-			out.Summary = kubeSection(s, summary, nil)
+			out.Summary = kubeSection(store, summary, nil)
 		}
 
-		v7, err7 := s.deps.Store.Workloads(f)
-		out.Workloads = kubeSection(s, v7, err7)
-		v8, err8 := s.deps.Store.Events(f, win.From, eventLimit)
-		out.Events = kubeSection(s, v8, err8)
+		v7, err7 := store.Workloads(f)
+		out.Workloads = kubeSection(store, v7, err7)
+		v8, err8 := store.Events(f, win.From, eventLimit)
+		out.Events = kubeSection(store, v8, err8)
 
 		panels, err := s.deps.Metrics.Trends(ctx, target, dsWindow(win), nil)
 		out.Trends = dsSection(panels, err, contract.SourceGreptimeDB, "GreptimeDB")
@@ -218,6 +221,7 @@ func (s *Server) handleNamespaceDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWorkloadDetail(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.WorkloadDetailResponse, error) {
 		var out contract.WorkloadDetailResponse
+		store := providerFrom(ctx, s.deps.Store)
 		ns := r.URL.Query().Get("ns")
 		kind, name := r.PathValue("kind"), r.PathValue("name")
 		c, _, win, err := s.resolve(ctx, r, ns)
@@ -232,7 +236,7 @@ func (s *Server) handleWorkloadDetail(w http.ResponseWriter, r *http.Request) {
 			GeneratedAt: s.nowRFC3339(),
 		}
 
-		wl, found, err := s.deps.Store.Workload(ns, kind, name)
+		wl, found, err := store.Workload(ns, kind, name)
 		if err != nil || !found {
 			out.Workload = contract.Empty[contract.WorkloadSummary]()
 			out.OwnerChain = contract.Empty[[]contract.OwnerRef]()
@@ -242,12 +246,12 @@ func (s *Server) handleWorkloadDetail(w http.ResponseWriter, r *http.Request) {
 			return out, nil
 		}
 
-		out.Workload = kubeSection(s, wl, nil)
-		out.OwnerChain = kubeSection(s, s.deps.Store.WorkloadOwnerChain(ns, kind, name, wl.Ref.WorkloadUID), nil)
-		v9, err9 := s.deps.Store.PodsForWorkload(ns, kind, name, wl.Ref.WorkloadUID)
-		out.Pods = kubeSection(s, v9, err9)
-		v10, err10 := s.deps.Store.EventsForUID(wl.Ref.WorkloadUID, win.From, eventLimit)
-		out.Events = kubeSection(s, v10, err10)
+		out.Workload = kubeSection(store, wl, nil)
+		out.OwnerChain = kubeSection(store, store.WorkloadOwnerChain(ns, kind, name, wl.Ref.WorkloadUID), nil)
+		v9, err9 := store.PodsForWorkload(ns, kind, name, wl.Ref.WorkloadUID)
+		out.Pods = kubeSection(store, v9, err9)
+		v10, err10 := store.EventsForUID(wl.Ref.WorkloadUID, win.From, eventLimit)
+		out.Events = kubeSection(store, v10, err10)
 
 		target := datasource.Target{ClusterID: c.ID, Namespace: ns, WorkloadKind: kind, WorkloadName: name}
 		panels, err := s.deps.Metrics.Trends(ctx, target, dsWindow(win), nil)
@@ -261,6 +265,7 @@ func (s *Server) handleWorkloadDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.PodDetailResponse, error) {
 		var out contract.PodDetailResponse
+		store := providerFrom(ctx, s.deps.Store)
 		q := r.URL.Query()
 		ns, uid, name := q.Get("ns"), q.Get("uid"), r.PathValue("name")
 		c, _, win, err := s.resolve(ctx, r, ns)
@@ -275,7 +280,7 @@ func (s *Server) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 			GeneratedAt: s.nowRFC3339(),
 		}
 
-		pod, found, err := s.deps.Store.Pod(ns, name, uid)
+		pod, found, err := store.Pod(ns, name, uid)
 		if err != nil || !found {
 			out.Pod = contract.Empty[contract.PodSummary]()
 			out.OwnerChain = contract.Empty[[]contract.OwnerRef]()
@@ -285,12 +290,12 @@ func (s *Server) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 			return out, nil
 		}
 
-		summary := s.deps.Store.PodSummary(pod)
-		out.Pod = kubeSection(s, summary, nil)
-		out.OwnerChain = kubeSection(s, s.deps.Store.PodOwnerChain(pod), nil)
-		out.Containers = kubeSection(s, clusterstate.ContainerStatuses(pod), nil)
-		v11, err11 := s.deps.Store.EventsForUID(summary.UID, win.From, eventLimit)
-		out.Events = kubeSection(s, v11, err11)
+		summary := store.PodSummary(pod)
+		out.Pod = kubeSection(store, summary, nil)
+		out.OwnerChain = kubeSection(store, store.PodOwnerChain(pod), nil)
+		out.Containers = kubeSection(store, clusterstate.ContainerStatuses(pod), nil)
+		v11, err11 := store.EventsForUID(summary.UID, win.From, eventLimit)
+		out.Events = kubeSection(store, v11, err11)
 
 		target := datasource.Target{ClusterID: c.ID, Namespace: ns, PodUID: summary.UID}
 		panels, err := s.deps.Metrics.Trends(ctx, target, dsWindow(win), nil)
@@ -304,6 +309,7 @@ func (s *Server) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.LogSearchResponse, error) {
 		var out contract.LogSearchResponse
+		store := providerFrom(ctx, s.deps.Store)
 		q := r.URL.Query()
 		c, f, win, err := s.resolve(ctx, r, q.Get("ns"))
 		if err != nil {
@@ -338,8 +344,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		facets, err := s.deps.Logs.Facets(ctx, lq)
 		out.Facets = dsSection(facets, err, contract.SourceQuickwit, "Quickwit")
 
-		v12, err12 := s.deps.Store.Events(f, win.From, eventLimit)
-		out.Events = kubeSection(s, v12, err12)
+		v12, err12 := store.Events(f, win.From, eventLimit)
+		out.Events = kubeSection(store, v12, err12)
 
 		var nsPtr *string
 		if v := f.Single(); v != "" {
@@ -378,6 +384,7 @@ func parseLevels(v string) []contract.LogLevel {
 func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.TopologyResponse, error) {
 		var out contract.TopologyResponse
+		store := providerFrom(ctx, s.deps.Store)
 		c, f, win, err := s.resolve(ctx, r, r.URL.Query().Get("ns"))
 		if err != nil {
 			return out, err
@@ -392,8 +399,8 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 			Range:       win.Contract(),
 			GeneratedAt: s.nowRFC3339(),
 		}
-		v13, err13 := s.deps.Store.TopologyPods(f, unhealthyLimit)
-		out.Pods = kubeSection(s, v13, err13)
+		v13, err13 := store.TopologyPods(f, unhealthyLimit)
+		out.Pods = kubeSection(store, v13, err13)
 
 		graph, err := s.deps.Topology.Graph(ctx, dsTarget(c, f), dsWindow(win))
 		out.Graph = dsSection(graph, err, contract.SourceGreptimeDB, "GreptimeDB")

@@ -142,7 +142,7 @@ type CatalogPod struct {
 
 // PodCatalog는 클러스터 상태에서 Pod 신원을 빌려오는 통로입니다.
 type PodCatalog interface {
-	CatalogPods(namespace string, limit int) []CatalogPod
+	CatalogPods(clusterID, namespace string, limit int) []CatalogPod
 }
 
 /* ── 연결되지 않은 데이터소스 ──────────────────────────────────────────── */

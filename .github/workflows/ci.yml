@@ -101,6 +101,7 @@ jobs:
         env:
           REDIS_ITEST_ADDR: 127.0.0.1:6379
       - run: make api-build
+      - run: make api-proto-check api-central-itest
       - run: make api-performance
 
   deploy:

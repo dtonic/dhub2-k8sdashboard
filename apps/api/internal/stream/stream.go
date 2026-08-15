@@ -16,11 +16,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 )
 
@@ -56,9 +58,12 @@ type Config struct {
 	// SubscriberBuffer는 구독자별 고정 채널 크기입니다. 가득 차면 그 구독자를 끊습니다.
 	SubscriberBuffer int
 	// MaxConnections/MaxPerSubject는 전역·주체별 동시 연결 상한입니다.
-	MaxConnections int
-	MaxPerSubject  int
-	Now            func() time.Time
+	MaxConnections    int
+	MaxPerSubject     int
+	ClusterIDs        []string
+	MaxClusters       int
+	MaxRetainedEvents int
+	Now               func() time.Time
 }
 
 // Absolute configuration caps bound eager ring allocation and the aggregate
@@ -73,7 +78,7 @@ const (
 
 // DefaultConfig는 안전한 기본값입니다. config 패키지의 env 기본값과 같습니다.
 func DefaultConfig() Config {
-	return Config{RingSize: 1024, SubscriberBuffer: 64, MaxConnections: 256, MaxPerSubject: 8, Now: time.Now}
+	return Config{RingSize: 1024, SubscriberBuffer: 64, MaxConnections: 256, MaxPerSubject: 8, MaxClusters: 64, MaxRetainedEvents: MaxRingSize, Now: time.Now}
 }
 
 func (c *Config) setDefaults() {
@@ -89,6 +94,12 @@ func (c *Config) setDefaults() {
 	}
 	if c.MaxPerSubject <= 0 {
 		c.MaxPerSubject = d.MaxPerSubject
+	}
+	if c.MaxClusters <= 0 {
+		c.MaxClusters = d.MaxClusters
+	}
+	if c.MaxRetainedEvents <= 0 {
+		c.MaxRetainedEvents = d.MaxRetainedEvents
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -107,6 +118,19 @@ func validateConfig(c Config) error {
 	}
 	if int64(c.MaxConnections)*int64(c.SubscriberBuffer) > MaxSubscriberSlots {
 		return fmt.Errorf("stream subscriber slots %d exceed maximum %d", int64(c.MaxConnections)*int64(c.SubscriberBuffer), MaxSubscriberSlots)
+	}
+	if c.MaxClusters < 1 || c.MaxClusters > 64 || c.MaxRetainedEvents < c.RingSize || c.MaxRetainedEvents > MaxRingSize || len(c.ClusterIDs) > c.MaxClusters || len(c.ClusterIDs)*c.RingSize > c.MaxRetainedEvents {
+		return fmt.Errorf("invalid stream cluster retention limits")
+	}
+	seen := make(map[string]struct{}, len(c.ClusterIDs))
+	for _, id := range c.ClusterIDs {
+		if !clusterid.Valid(id) {
+			return fmt.Errorf("invalid stream cluster ID")
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate stream cluster ID")
+		}
+		seen[id] = struct{}{}
 	}
 	return nil
 }
@@ -148,6 +172,7 @@ type Event struct {
 	Envelope contract.EventEnvelope
 	// EnqueuedAt은 Publish 시각입니다. 핸들러가 write 시점에 지연을 관측합니다.
 	EnqueuedAt time.Time
+	seq        uint64
 }
 
 // Subscription은 구독 하나입니다. Replay()를 먼저 소비한 뒤 Events()를 읽습니다 —
@@ -156,6 +181,7 @@ type Subscription struct {
 	hub     *Hub
 	subject [sha256.Size]byte
 	filter  Filter
+	binding string
 	replay  []Event
 	ch      chan Event
 }
@@ -167,6 +193,11 @@ func (s *Subscription) Replay() []Event { return s.replay }
 // Events는 라이브 이벤트 채널입니다. 허브가 닫히거나 구독자가 느려서 끊기면 닫힙니다.
 func (s *Subscription) Events() <-chan Event { return s.ch }
 
+func (s *Subscription) decorate(event Event) Event {
+	event.Envelope.ID = s.hub.eventID(s.binding, event.seq)
+	return event
+}
+
 // Close는 구독을 해제합니다. 여러 번 불러도 안전합니다.
 func (s *Subscription) Close() { s.hub.remove(s, "client") }
 
@@ -175,17 +206,22 @@ type Hub struct {
 	cfg Config
 	obs Observer
 
-	mu       sync.Mutex
-	closed   bool
-	instance string
-	seq      uint64
+	mu             sync.Mutex
+	closed         bool
+	instance       string
+	rings          map[string]*clusterRing
+	allowed        map[string]struct{}
+	allocatedSlots int
 	// ring은 고정 크기 순환 버퍼입니다. ring[i]의 seq는 firstSeq()+i입니다.
-	ring  []Event
-	start int
-	count int
 
 	subs         map[*Subscription]struct{}
 	subjectConns map[[sha256.Size]byte]int
+}
+
+type clusterRing struct {
+	seq          uint64
+	events       []Event
+	start, count int
 }
 
 // New는 허브를 만듭니다. 고루틴을 만들지 않습니다 — 수명 관리는 Close 하나입니다.
@@ -201,56 +237,88 @@ func newWithRandom(cfg Config, obs Observer, random io.Reader) (*Hub, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	var b [16]byte
+	var b [12]byte
 	if _, err := io.ReadFull(random, b[:]); err != nil {
 		return nil, fmt.Errorf("stream instance ID entropy unavailable: %w", err)
 	}
-	return &Hub{
+	h := &Hub{
 		cfg:          cfg,
 		obs:          obs,
 		instance:     hex.EncodeToString(b[:]),
-		ring:         make([]Event, cfg.RingSize),
+		rings:        make(map[string]*clusterRing),
+		allowed:      make(map[string]struct{}, len(cfg.ClusterIDs)),
 		subs:         map[*Subscription]struct{}{},
 		subjectConns: map[[sha256.Size]byte]int{},
-	}, nil
+	}
+	for _, id := range cfg.ClusterIDs {
+		h.allowed[id] = struct{}{}
+	}
+	return h, nil
 }
 
 // InstanceID는 이 프로세스의 스트림 인스턴스 식별자입니다.
 func (h *Hub) InstanceID() string { return h.instance }
 
 // eventID는 "<instance>-<seq>"입니다. 불투명 문자열로 취급하되 서버는 형식을 압니다.
-func (h *Hub) eventID(seq uint64) string {
-	return h.instance + "-" + strconv.FormatUint(seq, 10)
+func (h *Hub) cursorBinding(subject [sha256.Size]byte, f Filter) string {
+	namespaces := append([]string(nil), f.Namespaces...)
+	sort.Strings(namespaces)
+	digest := sha256.New()
+	digest.Write([]byte(h.instance))
+	digest.Write(subject[:])
+	digest.Write([]byte(f.ClusterID))
+	if f.All {
+		digest.Write([]byte{1})
+	}
+	for _, namespace := range namespaces {
+		digest.Write([]byte{0})
+		digest.Write([]byte(namespace))
+	}
+	return hex.EncodeToString(digest.Sum(nil)[:8])
+}
+
+func (h *Hub) eventID(binding string, seq uint64) string {
+	return h.instance + "." + binding + "-" + strconv.FormatUint(seq, 10)
 }
 
 // parseLastEventID는 인바운드 Last-Event-ID를 엄격하게 해석합니다.
 // 상한 초과·형식 오류는 오류입니다 — 구독 자원 배정 전에 거절합니다.
-func (h *Hub) parseLastEventID(id string) (instance string, seq uint64, err error) {
+func (h *Hub) parseLastEventID(id string) (instance, binding string, seq uint64, err error) {
 	if len(id) == 0 || len(id) > contract.MaxStreamEventIDLen {
-		return "", 0, ErrBadLastEventID
+		return "", "", 0, ErrBadLastEventID
 	}
-	inst, rest, ok := strings.Cut(id, "-")
-	if !ok || len(inst) != len(h.instance) || len(rest) == 0 || len(rest) > 20 {
-		return "", 0, ErrBadLastEventID
+	inst, rest, ok := strings.Cut(id, ".")
+	binding, sequence, okSequence := strings.Cut(rest, "-")
+	if !ok || !okSequence || len(inst) != len(h.instance) || len(binding) != 16 || len(sequence) == 0 || len(sequence) > 20 {
+		return "", "", 0, ErrBadLastEventID
 	}
-	for i := 0; i < len(inst); i++ {
-		c := inst[i]
-		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
-			return "", 0, ErrBadLastEventID
+	for _, value := range []string{inst, binding} {
+		for i := 0; i < len(value); i++ {
+			c := value[i]
+			if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+				return "", "", 0, ErrBadLastEventID
+			}
 		}
 	}
-	n, perr := strconv.ParseUint(rest, 10, 64)
+	n, perr := strconv.ParseUint(sequence, 10, 64)
 	if perr != nil {
-		return "", 0, ErrBadLastEventID
+		return "", "", 0, ErrBadLastEventID
 	}
-	return inst, n, nil
+	return inst, binding, n, nil
 }
 
-func (h *Hub) firstSeq() uint64 { return h.seq - uint64(h.count) + 1 }
+func firstSeq(ring *clusterRing) uint64 { return ring.seq - uint64(ring.count) + 1 }
 
 // Publish는 envelope에 단조 ID를 붙여 링에 적재하고 구독자에게 팬아웃합니다.
 // **논블로킹**입니다. 채널이 가득 찬 구독자는 이 자리에서 끊습니다.
 func (h *Hub) Publish(env contract.EventEnvelope) {
+	if !clusterid.Valid(env.ClusterID) {
+		return
+	}
+	if env.Entity != nil {
+		entity := *env.Entity
+		env.Entity = &entity
+	}
 	now := h.cfg.Now()
 	if _, err := time.Parse(time.RFC3339Nano, env.ObservedAt); err != nil {
 		env.ObservedAt = now.UTC().Format(time.RFC3339Nano)
@@ -261,17 +329,33 @@ func (h *Hub) Publish(env contract.EventEnvelope) {
 		h.mu.Unlock()
 		return
 	}
-	h.seq++
-	env.ID = h.eventID(h.seq)
-	ev := Event{Envelope: env, EnqueuedAt: now}
+	if len(h.allowed) > 0 {
+		if _, ok := h.allowed[env.ClusterID]; !ok {
+			h.mu.Unlock()
+			return
+		}
+	}
+	ring := h.rings[env.ClusterID]
+	if ring == nil {
+		if len(h.rings) >= h.cfg.MaxClusters || h.allocatedSlots+h.cfg.RingSize > h.cfg.MaxRetainedEvents {
+			h.mu.Unlock()
+			return
+		}
+		ring = &clusterRing{events: make([]Event, h.cfg.RingSize)}
+		h.rings[env.ClusterID] = ring
+		h.allocatedSlots += h.cfg.RingSize
+	}
+	ring.seq++
+	env.ID = ""
+	ev := Event{Envelope: env, EnqueuedAt: now, seq: ring.seq}
 
 	// 순환 버퍼 적재 — 가장 오래된 항목을 덮습니다. 메모리는 구조적으로 고정입니다.
-	if h.count < len(h.ring) {
-		h.ring[(h.start+h.count)%len(h.ring)] = ev
-		h.count++
+	if ring.count < len(ring.events) {
+		ring.events[(ring.start+ring.count)%len(ring.events)] = ev
+		ring.count++
 	} else {
-		h.ring[h.start] = ev
-		h.start = (h.start + 1) % len(h.ring)
+		ring.events[ring.start] = ev
+		ring.start = (ring.start + 1) % len(ring.events)
 	}
 
 	var dropped []*Subscription
@@ -280,7 +364,7 @@ func (h *Hub) Publish(env contract.EventEnvelope) {
 			continue
 		}
 		select {
-		case sub.ch <- ev:
+		case sub.ch <- sub.decorate(ev):
 		default:
 			// 느린 구독자 — 여기서 기다리면 informer 콜백이 막힙니다. 끊습니다.
 			dropped = append(dropped, sub)
@@ -305,16 +389,30 @@ func (h *Hub) Publish(env contract.EventEnvelope) {
 // 한 잠금 안에서 수행합니다. 재생 절단과 라이브 시작 사이에 Publish가 끼어들 수 없어
 // 유실·중복이 없습니다.
 func (h *Hub) Subscribe(subject string, f Filter, lastEventID string) (*Subscription, error) {
+	if !clusterid.Valid(f.ClusterID) {
+		if h.obs != nil {
+			h.obs.StreamRejected("cluster")
+		}
+		return nil, ErrCapacity
+	}
+	subjectKey := sha256.Sum256([]byte(subject))
+	binding := h.cursorBinding(subjectKey, f)
 	// 형식 오류는 어떤 자원도 배정하기 전에 거절합니다.
 	var wantSeq uint64
 	var replayRequested, foreign bool
 	if lastEventID != "" {
-		inst, seq, err := h.parseLastEventID(lastEventID)
+		inst, cursorBinding, seq, err := h.parseLastEventID(lastEventID)
 		if err != nil {
 			if h.obs != nil {
 				h.obs.StreamRejected("bad_last_event_id")
 			}
 			return nil, err
+		}
+		if inst == h.instance && cursorBinding != binding {
+			if h.obs != nil {
+				h.obs.StreamRejected("cursor_scope")
+			}
+			return nil, ErrBadLastEventID
 		}
 		replayRequested = true
 		wantSeq = seq
@@ -322,7 +420,6 @@ func (h *Hub) Subscribe(subject string, f Filter, lastEventID string) (*Subscrip
 		foreign = inst != h.instance
 	}
 
-	subjectKey := sha256.Sum256([]byte(subject))
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -330,6 +427,15 @@ func (h *Hub) Subscribe(subject string, f Filter, lastEventID string) (*Subscrip
 			h.obs.StreamRejected("shutdown")
 		}
 		return nil, ErrClosed
+	}
+	if len(h.allowed) > 0 {
+		if _, ok := h.allowed[f.ClusterID]; !ok {
+			h.mu.Unlock()
+			if h.obs != nil {
+				h.obs.StreamRejected("cluster")
+			}
+			return nil, ErrCapacity
+		}
 	}
 	if len(h.subs) >= h.cfg.MaxConnections {
 		h.mu.Unlock()
@@ -350,20 +456,26 @@ func (h *Hub) Subscribe(subject string, f Filter, lastEventID string) (*Subscrip
 		hub:     h,
 		subject: subjectKey,
 		filter:  f,
+		binding: binding,
 		ch:      make(chan Event, h.cfg.SubscriberBuffer),
 	}
 
 	var replayed int
 	var reset bool
+	ring := h.rings[f.ClusterID]
+	var ringSeq uint64
+	if ring != nil {
+		ringSeq = ring.seq
+	}
 	if replayRequested {
 		switch {
-		case foreign, wantSeq > h.seq, h.count > 0 && wantSeq+1 < h.firstSeq():
+		case foreign, wantSeq > ringSeq, ring != nil && ring.count > 0 && wantSeq+1 < firstSeq(ring):
 			// 다른 인스턴스 · 미래 ID · 보존 구간 밖 — 완전 재생을 주장할 수 없습니다.
 			// 화면이 HTTP로 현재 상태를 다시 가져오도록 reset을 보냅니다.
 			reset = true
 			sub.replay = []Event{{
 				Envelope: contract.EventEnvelope{
-					ID:         h.eventID(h.seq),
+					ID:         h.eventID(binding, ringSeq),
 					Kind:       contract.StreamKindReset,
 					Action:     contract.StreamActionReset,
 					ClusterID:  f.ClusterID,
@@ -373,10 +485,10 @@ func (h *Hub) Subscribe(subject string, f Filter, lastEventID string) (*Subscrip
 			}}
 		default:
 			// 같은 인스턴스 · 보존 구간 안 — wantSeq 다음부터 순서대로 재생합니다.
-			for s := wantSeq + 1; s <= h.seq; s++ {
-				ev := h.ring[(h.start+int(s-h.firstSeq()))%len(h.ring)]
+			for s := wantSeq + 1; ring != nil && s <= ring.seq; s++ {
+				ev := ring.events[(ring.start+int(s-firstSeq(ring)))%len(ring.events)]
 				if sub.filter.allows(ev.Envelope) {
-					sub.replay = append(sub.replay, ev)
+					sub.replay = append(sub.replay, sub.decorate(ev))
 					replayed++
 				}
 			}
@@ -454,5 +566,8 @@ func (h *Hub) Close() {
 func (h *Hub) Stats() (connections int, retained int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.subs), h.count
+	for _, ring := range h.rings {
+		retained += ring.count
+	}
+	return len(h.subs), retained
 }

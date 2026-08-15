@@ -15,6 +15,7 @@
 | [0007](./0007-sse-replay-reset-backpressure.md) | SSE 상태 변경 스트림은 프로세스 로컬 재생 링 · reset 폴백 · 연결 절단 backpressure로 유계를 유지한다 | Accepted | 2026-08-14 |
 | [0008](./0008-opentelemetry-agent-gateway-pipeline.md) | OpenTelemetry Agent/Gateway 수집 소유권과 fail-closed cutover를 표준화한다 | Proposed | 2026-08-15 |
 | [0009](./0009-dashboard-drafts-postgresql-and-git-export.md) | Dashboard draft PostgreSQL 저장과 승인본 Git export | Proposed | 2026-08-15 |
+| [0010](./0010-multi-cluster-state-agent-registry.md) | 멀티 클러스터 상태 Agent와 중앙 Registry | Proposed | 2026-08-15 |
 
 ## 상태 값
 

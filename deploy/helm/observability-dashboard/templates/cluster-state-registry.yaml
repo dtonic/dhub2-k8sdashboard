@@ -1,0 +1,120 @@
+{{- if eq .Values.clusterState.mode "central" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-cluster-state-registry
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-state-registry
+spec:
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-state-registry
+  ports: [{name: query, port: {{ .Values.clusterState.registry.queryPort }}, targetPort: query}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dashboard.fullname" . }}-cluster-state-registry-agent
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-state-registry
+spec:
+  type: {{ .Values.clusterState.registry.agentService.type }}
+  {{- if eq .Values.clusterState.registry.agentService.type "LoadBalancer" }}
+  loadBalancerSourceRanges:
+    {{- toYaml .Values.clusterState.registry.agentService.sourceCidrs | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "dashboard.selector" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-state-registry
+  ports: [{name: agent, port: {{ .Values.clusterState.registry.agentPort }}, targetPort: agent}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dashboard.fullname" . }}-cluster-state-registry
+  labels:
+    {{- include "dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-state-registry
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: cluster-state-registry
+  template:
+    metadata:
+      labels:
+        {{- include "dashboard.selector" . | nindent 8 }}
+        app.kubernetes.io/component: cluster-state-registry
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: registry
+          image: {{ printf "%s@%s" .Values.clusterState.registry.image.repository .Values.clusterState.registry.image.digest | quote }}
+          command: ["/cluster-state-registry"]
+          securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
+          ports:
+            - {name: agent, containerPort: {{ .Values.clusterState.registry.agentPort }}}
+            - {name: query, containerPort: {{ .Values.clusterState.registry.queryPort }}}
+          startupProbe: {tcpSocket: {port: query}, periodSeconds: 2, failureThreshold: 30}
+          readinessProbe: {tcpSocket: {port: query}, periodSeconds: 5, failureThreshold: 3}
+          env:
+            - {name: CLUSTER_STATE_AGENT_ADDR, value: {{ printf ":%d" (int .Values.clusterState.registry.agentPort) | quote }}}
+            - {name: CLUSTER_STATE_QUERY_ADDR, value: {{ printf ":%d" (int .Values.clusterState.registry.queryPort) | quote }}}
+            - {name: CLUSTER_STATE_CLUSTERS, value: {{ join "," .Values.clusterState.clusters | quote }}}
+            - {name: CLUSTER_STATE_TRUST_DOMAIN, value: {{ .Values.clusterState.trustDomain | quote }}}
+            - {name: CLUSTER_STATE_TLS_CERT_FILE, value: /var/run/cluster-state-tls/tls.crt}
+            - {name: CLUSTER_STATE_TLS_KEY_FILE, value: /var/run/cluster-state-tls/tls.key}
+            - {name: CLUSTER_STATE_TLS_CA_FILE, value: /var/run/cluster-state-tls/ca.crt}
+            - {name: CLUSTER_STATE_MAX_CLUSTERS, value: {{ .Values.clusterState.limits.maxClusters | quote }}}
+            - {name: CLUSTER_STATE_MAX_RESOURCES, value: {{ .Values.clusterState.limits.maxResources | quote }}}
+            - {name: CLUSTER_STATE_MAX_CHUNK_RESOURCES, value: {{ .Values.clusterState.limits.maxChunkResources | quote }}}
+            - {name: CLUSTER_STATE_MAX_MESSAGE_BYTES, value: {{ .Values.clusterState.limits.maxMessageBytes | quote }}}
+            - {name: CLUSTER_STATE_MAX_STATE_BYTES, value: {{ .Values.clusterState.limits.maxStateBytes | quote }}}
+            - {name: CLUSTER_STATE_MAX_TOTAL_STATE_BYTES, value: {{ .Values.clusterState.limits.maxTotalStateBytes | quote }}}
+            - {name: CLUSTER_STATE_INGRESS_FRAME_RATE, value: {{ .Values.clusterState.limits.ingressFrameRate | quote }}}
+            - {name: CLUSTER_STATE_INGRESS_BYTE_RATE, value: {{ .Values.clusterState.limits.ingressByteRate | quote }}}
+            - {name: CLUSTER_STATE_INGRESS_FRAME_BURST, value: {{ .Values.clusterState.limits.ingressFrameBurst | quote }}}
+            - {name: CLUSTER_STATE_INGRESS_BYTE_BURST, value: {{ .Values.clusterState.limits.ingressByteBurst | quote }}}
+            - {name: CLUSTER_STATE_STALE_TTL, value: {{ .Values.clusterState.limits.staleTTL | quote }}}
+            - {name: CLUSTER_STATE_HEARTBEAT_TIMEOUT, value: {{ .Values.clusterState.limits.heartbeatTimeout | quote }}}
+          resources:
+            {{- toYaml .Values.clusterState.registry.resources | nindent 12 }}
+          volumeMounts: [{name: tls, mountPath: /var/run/cluster-state-tls, readOnly: true}]
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ .Values.clusterState.tls.registryExistingSecret }}
+            items:
+              - {key: {{ .Values.clusterState.tls.certKey }}, path: tls.crt}
+              - {key: {{ .Values.clusterState.tls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.clusterState.tls.caKey }}, path: ca.crt}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dashboard.fullname" . }}-cluster-state-registry
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "dashboard.selector" . | nindent 6 }}
+      app.kubernetes.io/component: cluster-state-registry
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "dashboard.selector" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports: [{protocol: TCP, port: {{ .Values.clusterState.registry.queryPort }}}]
+    - from:
+        {{- range .Values.clusterState.registry.agentService.sourceCidrs }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: {{ .Values.clusterState.registry.agentPort }}}]
+{{- end }}

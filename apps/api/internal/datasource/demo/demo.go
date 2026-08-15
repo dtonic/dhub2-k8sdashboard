@@ -56,7 +56,7 @@ func pick[T any](list []T, key string, i int) T {
 // 여러 namespace만 허용된 사용자(Namespace=="", Namespaces!=nil)의 범위 밖 Pod는
 // 데모 데이터에도 나타나면 안 됩니다 — 데모라도 Scope 규칙은 같습니다. (README §10)
 func (s *Source) pods(t datasource.Target) []datasource.CatalogPod {
-	all := s.Catalog.CatalogPods(t.Namespace, 0)
+	all := s.Catalog.CatalogPods(t.ClusterID, t.Namespace, 0)
 	if t.Namespace != "" || len(t.Namespaces) == 0 {
 		return all
 	}
@@ -143,7 +143,7 @@ func points(key string, w datasource.Window, panel, series string) []contract.Tr
 
 func (s *Source) Usage(_ context.Context, clusterID string) (map[string]contract.ContainerUsage, error) {
 	out := map[string]contract.ContainerUsage{}
-	for i, p := range s.Catalog.CatalogPods("", 0) {
+	for i, p := range s.Catalog.CatalogPods(clusterID, "", 0) {
 		out[p.UID] = contract.ContainerUsage{
 			CPUMilli:  40 + int(noise(clusterID+p.UID, i)*260),
 			MemoryMib: 96 + int(noise(clusterID+p.UID+"m", i)*640),

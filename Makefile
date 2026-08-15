@@ -1,7 +1,7 @@
 # K8s Dashboard — 단일 진입점 명령
 # 신규 개발자는 README §13만 보고 `make install && make dev`로 실행할 수 있어야 합니다.
 
-.PHONY: install install-ci dev dev-web dev-api build build-web build-web-production lint test test-web test-web-integration web-unit contract-test web-performance dependency-audit check design api-build api-test api-coverage api-race api-performance api-govuln api-itest api-redis-itest api-vet quality-policy security-scan observability-check deploy-check deploy-images clean
+.PHONY: install install-ci dev dev-web dev-api build build-web build-web-production lint test test-web test-web-integration web-unit contract-test web-performance dependency-audit check design api-build api-test api-coverage api-race api-performance api-govuln api-itest api-redis-itest api-vet api-proto-check api-central-itest quality-policy security-scan observability-check deploy-check deploy-images clean
 
 install:            ## 의존성 설치
 	npm install
@@ -100,6 +100,14 @@ api-postgres-itest: ## Dashboard metadata PostgreSQL CAS/migration integration
 
 api-vet:            ## Go 정적 검사
 	cd apps/api && go vet ./...
+
+api-proto-check:    ## Versioned protocol generated-source drift
+	sh deploy/scripts/check-cluster-state-proto.sh --self-test
+	cd apps/api && go test -count=1 ./internal/clusterstate/protocol/v1
+
+api-central-itest: ## Bounded private-CA registry/API integration
+	cd apps/api && go test -count=1 -timeout 2m ./cmd/api -run 'TestCentralRuntimePrivateCA|TestServeCentralHTTP'
+	cd apps/api && go test -count=1 -timeout 2m ./internal/clusterstate/transport
 
 observability-check: ## Grafana, Prometheus rules and metric-reference drift
 	sh deploy/scripts/check-observability.sh

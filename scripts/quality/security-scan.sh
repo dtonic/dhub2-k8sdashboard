@@ -20,6 +20,7 @@ mkdir -p "$SOURCE" "$TRIVY_CACHE"
 
 GITLEAKS_IMAGE='ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 TRIVY_IMAGE='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
+HELM_IMAGE='alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895'
 POSTGRES_IMAGE='cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3'
 TRIVY_USER="$(id -u):$(id -g)"
 
@@ -85,6 +86,12 @@ echo "negative mutation passed: fake secret was rejected"
 
 docker run --rm --user "$TRIVY_USER" -v "$SOURCE:/repo:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" fs --cache-dir /tmp/trivy-cache --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress /repo
 docker run --rm --user "$TRIVY_USER" -v "$SOURCE:/repo:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" fs --cache-dir /tmp/trivy-cache --scanners misconfig --severity HIGH,CRITICAL --exit-code 1 --no-progress /repo
+# The agent chart is intentionally fail-closed with unusable defaults, so scan
+# its validated example render explicitly instead of relying on chart discovery.
+docker run --rm -v "$SOURCE:/repo:ro" "$HELM_IMAGE" template agent /repo/deploy/helm/cluster-state-agent \
+  --values /repo/deploy/helm/cluster-state-agent/values-example.yaml > "$TMP/cluster-state-agent.yaml"
+docker run --rm --user "$TRIVY_USER" -v "$TMP:/scan:ro" -v "$TRIVY_CACHE:/tmp/trivy-cache" "$TRIVY_IMAGE" \
+  config --cache-dir /tmp/trivy-cache --severity HIGH,CRITICAL --exit-code 1 /scan/cluster-state-agent.yaml
 docker pull "$POSTGRES_IMAGE" >/dev/null
 docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$POSTGRES_IMAGE" | grep -Fx "$POSTGRES_IMAGE" >/dev/null
 docker image inspect --format '{{.Id}}' "$POSTGRES_IMAGE" | grep -E '^sha256:[a-f0-9]{64}$' >/dev/null

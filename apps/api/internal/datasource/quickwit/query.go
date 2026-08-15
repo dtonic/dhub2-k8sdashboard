@@ -24,6 +24,9 @@ func (s *Source) searchBody(q datasource.LogQuery, size int) map[string]any {
 func (s *Source) boolQuery(q datasource.LogQuery) map[string]any {
 	f := s.cfg.Fields
 	var filter []any
+	if s.cfg.ClusterScoped {
+		filter = append(filter, term(f.Cluster, q.Target.ClusterID))
+	}
 
 	// 시간 범위는 initial scroll snapshot을 만들 때 한 번 강제합니다.
 	rng := map[string]any{

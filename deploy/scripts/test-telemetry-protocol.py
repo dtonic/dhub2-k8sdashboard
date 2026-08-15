@@ -34,6 +34,9 @@ METRICS = {
     "kube_pod_container_resource_requests": "gauge",
     "kube_pod_container_status_restarts_total": "sum",
 }
+OWNER = os.environ.get("TELEMETRY_TEST_OWNER", "issue23")
+if not re.fullmatch(r"issue[0-9]+", OWNER):
+    raise SystemExit("TELEMETRY_TEST_OWNER must match issue[0-9]+")
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -103,6 +106,62 @@ def parse_metrics(payload: bytes) -> list[tuple[str, str, set[str]]]:
     return out
 
 
+def string_attribute(payload: bytes) -> tuple[str, str]:
+    key = decoded = ""
+    for number, wire, value in fields(payload):
+        if number == 1 and wire == 2:
+            key = value.decode()
+        elif number == 2 and wire == 2:
+            for value_number, value_wire, scalar in fields(value):
+                if value_number == 1 and value_wire == 2:
+                    decoded = scalar.decode()
+    return key, decoded
+
+
+def string_attributes(payload: bytes) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for number, wire, value in fields(payload):
+        if number == 1 and wire == 2:
+            key, decoded = string_attribute(value)
+            if key:
+                out[key] = decoded
+    return out
+
+
+def metric_cluster_attributes(payload: bytes) -> list[tuple[str, dict[str, str], dict[str, str]]]:
+    out: list[tuple[str, dict[str, str], dict[str, str]]] = []
+    for number, wire, resource_metrics in fields(payload):
+        if number != 1 or wire != 2:
+            continue
+        resource_attributes: dict[str, str] = {}
+        scopes: list[bytes] = []
+        for rm_number, rm_wire, rm_value in fields(resource_metrics):
+            if rm_number == 1 and rm_wire == 2:
+                resource_attributes = string_attributes(rm_value)
+            elif rm_number == 2 and rm_wire == 2:
+                scopes.append(rm_value)
+        for scope in scopes:
+            for scope_number, scope_wire, metric in fields(scope):
+                if scope_number != 2 or scope_wire != 2:
+                    continue
+                name = ""
+                point_attributes: dict[str, str] = {}
+                for metric_number, metric_wire, metric_value in fields(metric):
+                    if metric_number == 1 and metric_wire == 2:
+                        name = metric_value.decode()
+                    elif metric_number in (5, 7) and metric_wire == 2:
+                        for data_number, data_wire, point in fields(metric_value):
+                            if data_number == 1 and data_wire == 2:
+                                for point_number, point_wire, attribute in fields(point):
+                                    if point_number == 7 and point_wire == 2:
+                                        key, decoded = string_attribute(attribute)
+                                        if key:
+                                            point_attributes[key] = decoded
+                if name:
+                    out.append((name, resource_attributes, point_attributes))
+    return out
+
+
 def collector_stats(name: str) -> dict[str, object]:
     payload = json.loads(run("docker", "stats", "--no-stream", "--format", "{{json .}}", name).stdout)
     memory = re.match(r"([0-9.]+)([KMG]iB)", payload["MemUsage"])
@@ -117,7 +176,7 @@ def collector_stats(name: str) -> dict[str, object]:
 
 
 def collector_cpu_snapshot(name: str, helper_image: str) -> dict[str, int]:
-    helper = f"issue23-cpu-{uuid.uuid4().hex[:12]}"
+    helper = f"{OWNER}-cpu-{uuid.uuid4().hex[:12]}"
     program = (
         "import json,os,pathlib\n"
         "def runtime(path):\n"
@@ -146,7 +205,7 @@ def main() -> int:
     parser.add_argument("--evidence-out", type=Path)
     args = parser.parse_args()
     token = uuid.uuid4().hex[:12]
-    collector = COLLECTOR or f"issue23-otelcol-{token}:local"
+    collector = COLLECTOR or f"{OWNER}-otelcol-{token}:local"
     collector_owned = COLLECTOR is None
     if collector_owned:
         if run("docker", "image", "inspect", collector, check=False).returncode == 0:
@@ -158,19 +217,19 @@ def main() -> int:
         raise AssertionError(f"pre-verified collector image is missing: {collector}")
     run_started = time.monotonic()
     started_at = datetime.now(timezone.utc)
-    network = f"issue23-otel-{token}"
-    mock = f"issue23-mock-{token}"
-    mock_image = f"issue23-mock-image-{token}:local"
-    gateway = f"issue23-gateway-{token}"
-    source = f"issue23-source-{token}"
-    greptime = f"issue23-greptime-{token}"
-    greptime_source = f"issue23-greptime-source-{token}"
-    down_collector = f"issue23-down-{token}"
-    baseline_collector = f"issue23-baseline-{token}"
-    quickwit = f"issue23-quickwit-{token}"
-    quickwit_indexer = f"issue23-quickwit-index-{token}"
-    quickwit_source = f"issue23-quickwit-source-{token}"
-    owner_label = f"issue23.owner={token}"
+    network = f"{OWNER}-otel-{token}"
+    mock = f"{OWNER}-mock-{token}"
+    mock_image = f"{OWNER}-mock-image-{token}:local"
+    gateway = f"{OWNER}-gateway-{token}"
+    source = f"{OWNER}-source-{token}"
+    greptime = f"{OWNER}-greptime-{token}"
+    greptime_source = f"{OWNER}-greptime-source-{token}"
+    down_collector = f"{OWNER}-down-{token}"
+    baseline_collector = f"{OWNER}-baseline-{token}"
+    quickwit = f"{OWNER}-quickwit-{token}"
+    quickwit_indexer = f"{OWNER}-quickwit-index-{token}"
+    quickwit_source = f"{OWNER}-quickwit-source-{token}"
+    owner_label = f"{OWNER}.owner={token}"
     owned_containers: dict[str, str] = {}
     persistent_containers = (
         mock, gateway, source, down_collector, baseline_collector, greptime,
@@ -178,7 +237,7 @@ def main() -> int:
     )
     fixture_host = mock
     port = 8080
-    with tempfile.TemporaryDirectory(prefix="issue23-otel-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"{OWNER}-otel-") as tmp:
         root = Path(tmp)
         gateway_cfg = root / "gateway.yaml"
         source_cfg = root / "source.yaml"
@@ -197,7 +256,8 @@ processors:
     metric_statements:
       - context: datapoint
         statements:
-          - keep_keys(attributes, ["container", "interface", "namespace", "pod", "resource", "unit"])
+          - set(attributes["k8s_cluster_name"], resource.attributes["k8s.cluster.name"]) where resource.attributes["k8s.cluster.name"] != nil
+          - keep_keys(attributes, ["container", "interface", "k8s_cluster_name", "namespace", "pod", "resource", "unit"])
     log_statements:
       - context: log
         statements:
@@ -237,6 +297,9 @@ receivers:
           metric_relabel_configs:
             - {{source_labels: [__name__], regex: 'kube_pod_container_resource_requests|kube_pod_container_status_restarts_total', action: keep}}
 processors:
+  resource/cluster:
+    attributes:
+      - {{key: k8s.cluster.name, value: cluster-a, action: upsert}}
   filter/catalog:
     error_mode: propagate
     metrics:
@@ -246,12 +309,12 @@ exporters:
   otlp_grpc/gateway: {{endpoint: {gateway}:4317, tls: {{insecure: true}}}}
 service:
   pipelines:
-    metrics: {{receivers: [prometheus/catalog], processors: [filter/catalog], exporters: [otlp_grpc/gateway]}}
+    metrics: {{receivers: [prometheus/catalog], processors: [resource/cluster, filter/catalog], exporters: [otlp_grpc/gateway]}}
     logs: {{receivers: [otlp], exporters: [otlp_grpc/gateway]}}
 """, encoding="utf-8")
         greptime_cfg.write_text(f"""
 receivers:
-  prometheus/catalog:
+  prometheus/a:
     config:
       scrape_configs:
         - job_name: cadvisor
@@ -266,7 +329,34 @@ receivers:
           static_configs: [{{targets: ["{fixture_host}:{port}"]}}]
           metric_relabel_configs:
             - {{source_labels: [__name__], regex: 'kube_pod_container_resource_requests|kube_pod_container_status_restarts_total', action: keep}}
+  prometheus/b:
+    config:
+      scrape_configs:
+        - job_name: cadvisor-b
+          scrape_interval: 1s
+          metrics_path: /cadvisor-b-real
+          static_configs: [{{targets: ["{fixture_host}:{port}"]}}]
+          metric_relabel_configs:
+            - {{source_labels: [__name__], regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_transmit_bytes_total', action: keep}}
+        - job_name: kube-state-metrics-b
+          scrape_interval: 1s
+          metrics_path: /ksm-b-real
+          static_configs: [{{targets: ["{fixture_host}:{port}"]}}]
+          metric_relabel_configs:
+            - {{source_labels: [__name__], regex: 'kube_pod_container_resource_requests|kube_pod_container_status_restarts_total', action: keep}}
 processors:
+  resource/cluster-a:
+    attributes:
+      - {{key: k8s.cluster.name, value: cluster-a, action: upsert}}
+  resource/cluster-b:
+    attributes:
+      - {{key: k8s.cluster.name, value: cluster-b, action: upsert}}
+  transform/cluster:
+    error_mode: propagate
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["k8s_cluster_name"], resource.attributes["k8s.cluster.name"])
   filter/catalog:
     error_mode: propagate
     metrics:
@@ -280,7 +370,8 @@ exporters:
       x-greptime-otlp-metric-translation-strategy: NoTranslation
 service:
   pipelines:
-    metrics: {{receivers: [prometheus/catalog], processors: [filter/catalog], exporters: [otlp_http/greptime]}}
+    metrics/a: {{receivers: [prometheus/a], processors: [resource/cluster-a, filter/catalog, transform/cluster], exporters: [otlp_http/greptime]}}
+    metrics/b: {{receivers: [prometheus/b], processors: [resource/cluster-b, filter/catalog, transform/cluster], exporters: [otlp_http/greptime]}}
 """, encoding="utf-8")
         quickwit_cfg.write_text(f"""
 receivers:
@@ -444,6 +535,11 @@ service:
                 assert kind == METRICS[name], f"{name}: type {kind}"
                 assert {"namespace", "pod", "container"} <= labels, f"{name}: required labels {labels}"
                 assert not ({"image", "uid", "random_id"} & labels), f"{name}: unbounded labels {labels}"
+            cluster_details = [item for payload in state["metrics"] for item in metric_cluster_attributes(payload)]
+            assert cluster_details, "metric cluster attributes missing"
+            for name, resource_attrs, point_attrs in cluster_details:
+                assert resource_attrs.get("k8s.cluster.name") == "cluster-a", f"{name}: resource cluster identity drift: {resource_attrs}"
+                assert point_attrs.get("k8s_cluster_name") == "cluster-a", f"{name}: datapoint cluster label missing/spoofed: {point_attrs}"
             raw_logs = b"".join(state["logs"])
             assert b"hunter2" not in raw_logs and b"abcdefghijklmnop" not in raw_logs
             assert b"REDACTED_SECRET" in raw_logs and b"message" in raw_logs
@@ -636,30 +732,37 @@ service:
             assert metric_table_names == set(METRICS), f"unexpected Greptime metric tables: {metric_table_names}"
             assert "up" not in metric_table_names and not any(name.startswith("scrape_") for name in metric_table_names)
             queries = {
-                "metrics.cpu.used": 'sum(rate(container_cpu_usage_seconds_total{namespace="payments",container!=""}[1m]))',
-                "metrics.cpu.requested": 'sum(kube_pod_container_resource_requests{namespace="payments",resource="cpu"})',
-                "metrics.memory.used": 'sum(container_memory_working_set_bytes{namespace="payments",container!=""})',
-                "metrics.memory.requested": 'sum(kube_pod_container_resource_requests{namespace="payments",resource="memory"})',
-                "metrics.network.rx": 'sum(rate(container_network_receive_bytes_total{namespace="payments"}[1m]))',
-                "metrics.network.tx": 'sum(rate(container_network_transmit_bytes_total{namespace="payments"}[1m]))',
-                "metrics.restarts": 'sum(increase(kube_pod_container_status_restarts_total{namespace="payments"}[1m]))',
-                "metrics.usage.cpu_milli": '1000 * sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[1m]))',
-                "metrics.usage.memory_mib": 'sum by (namespace, pod) (container_memory_working_set_bytes{container!=""}) / 1048576',
+                "metrics.cpu.used": 'sum by (k8s_cluster_name) (rate(container_cpu_usage_seconds_total{k8s_cluster_name="$cluster",namespace="payments",container!=""}[1m]))',
+                "metrics.cpu.requested": 'sum by (k8s_cluster_name) (kube_pod_container_resource_requests{k8s_cluster_name="$cluster",namespace="payments",resource="cpu"})',
+                "metrics.memory.used": 'sum by (k8s_cluster_name) (container_memory_working_set_bytes{k8s_cluster_name="$cluster",namespace="payments",container!=""})',
+                "metrics.memory.requested": 'sum by (k8s_cluster_name) (kube_pod_container_resource_requests{k8s_cluster_name="$cluster",namespace="payments",resource="memory"})',
+                "metrics.network.rx": 'sum by (k8s_cluster_name) (rate(container_network_receive_bytes_total{k8s_cluster_name="$cluster",namespace="payments"}[1m]))',
+                "metrics.network.tx": 'sum by (k8s_cluster_name) (rate(container_network_transmit_bytes_total{k8s_cluster_name="$cluster",namespace="payments"}[1m]))',
+                "metrics.restarts": 'sum by (k8s_cluster_name) (increase(kube_pod_container_status_restarts_total{k8s_cluster_name="$cluster",namespace="payments"}[1m]))',
+                "metrics.usage.cpu_milli": '1000 * sum by (k8s_cluster_name, namespace, pod) (rate(container_cpu_usage_seconds_total{k8s_cluster_name="$cluster",container!=""}[1m]))',
+                "metrics.usage.memory_mib": 'sum by (k8s_cluster_name, namespace, pod) (container_memory_working_set_bytes{k8s_cluster_name="$cluster",container!=""}) / 1048576',
             }
             query_started = time.monotonic()
             missing: dict[str, object] = {}
+            scoped_results: dict[tuple[str, str], dict[str, object]] = {}
             for _ in range(120):
                 missing.clear()
-                for ref, query in queries.items():
-                    url = f"http://127.0.0.1:{greptime_port}/v1/prometheus/api/v1/query?" + urllib.parse.urlencode({"query": query})
-                    req = urllib.request.Request(url, headers={"X-Greptime-DB-Name": "public"})
-                    try:
-                        result = json.loads(urllib.request.urlopen(req, timeout=2).read())
-                    except (OSError, ValueError) as exc:
-                        missing[ref] = str(exc)
-                        continue
-                    if result.get("status") != "success" or not result.get("data", {}).get("result"):
-                        missing[ref] = result
+                for cluster in ("cluster-a", "cluster-b"):
+                    for ref, template in queries.items():
+                        query = template.replace("$cluster", cluster)
+                        assert query.count(f'k8s_cluster_name="{cluster}"') == 1, (ref, query)
+                        url = f"http://127.0.0.1:{greptime_port}/v1/prometheus/api/v1/query?" + urllib.parse.urlencode({"query": query})
+                        req = urllib.request.Request(url, headers={"X-Greptime-DB-Name": "public"})
+                        try:
+                            result = json.loads(urllib.request.urlopen(req, timeout=2).read())
+                        except (OSError, ValueError) as exc:
+                            missing[f"{cluster}/{ref}"] = str(exc)
+                            continue
+                        rows = result.get("data", {}).get("result", [])
+                        if result.get("status") != "success" or not rows:
+                            missing[f"{cluster}/{ref}"] = result
+                        else:
+                            scoped_results[(cluster, ref)] = rows[0]
                 if not missing:
                     break
                 time.sleep(0.25)
@@ -667,8 +770,19 @@ service:
                 print(run("docker", "logs", greptime_source, check=False).stdout[-5000:])
                 print(run("docker", "logs", greptime, check=False).stdout[-5000:])
                 raise AssertionError(f"Greptime query visibility timeout: {missing}")
+            for cluster in ("cluster-a", "cluster-b"):
+                for ref in queries:
+                    metric = scoped_results[(cluster, ref)].get("metric", {})
+                    assert metric.get("k8s_cluster_name") == cluster, f"{cluster}/{ref}: response identity drift: {metric}"
+            for ref in queries:
+                a_value = float(scoped_results[("cluster-a", ref)]["value"][1])
+                b_value = float(scoped_results[("cluster-b", ref)]["value"][1])
+                assert a_value != b_value, f"{ref}: A/B values merged: {a_value}"
+            a_memory = float(scoped_results[("cluster-a", "metrics.memory.used")]["value"][1])
+            b_memory = float(scoped_results[("cluster-b", "metrics.memory.used")]["value"][1])
+            assert a_memory == 1024 and b_memory == 10240, f"cross-cluster metric merge: A={a_memory} B={b_memory}"
             query_visibility = time.monotonic() - query_started
-            print(f"Greptime v1.1.4 round trip passed: query_refs={len(queries)} table_visibility_seconds={visibility_seconds:.2f} query_visibility_seconds={query_visibility:.2f}")
+            print(f"Greptime v1.1.4 A/B round trip passed: scoped_query_refs={len(queries) * 2} A_memory={a_memory} B_memory={b_memory} table_visibility_seconds={visibility_seconds:.2f} query_visibility_seconds={query_visibility:.2f}")
 
             run("docker", "run", "-d", "--name", quickwit, "--label", owner_label, "--network", network,
                 "-p", "127.0.0.1::7280", "-e", "QW_ENABLE_OTLP_ENDPOINT=true",
@@ -738,13 +852,14 @@ service:
             quickwit_ingest_port = run("docker", "port", quickwit_source, "4319/tcp").stdout.strip().rsplit(":", 1)[1]
             now_ns = time.time_ns()
             resource_logs = []
-            for index, namespace in enumerate(("payments", "payments", "other"), start=1):
+            log_fixtures = (("cluster-a", "payments"), ("cluster-a", "payments"), ("cluster-b", "payments"), ("cluster-b", "payments"), ("cluster-a", "other"))
+            for index, (cluster, namespace) in enumerate(log_fixtures, start=1):
                 resource = {
                     "attributes": [
-                        {"key": "k8s.cluster.name", "value": {"stringValue": "fixture"}},
+                        {"key": "k8s.cluster.name", "value": {"stringValue": cluster}},
                         {"key": "k8s.namespace.name", "value": {"stringValue": namespace}},
-                        {"key": "k8s.pod.name", "value": {"stringValue": f"checkout-{index}"}},
-                        {"key": "k8s.pod.uid", "value": {"stringValue": f"pod-{index}"}},
+                        {"key": "k8s.pod.name", "value": {"stringValue": "checkout-same"}},
+                        {"key": "k8s.pod.uid", "value": {"stringValue": "pod-same"}},
                         {"key": "k8s.container.name", "value": {"stringValue": "api"}},
                         {"key": "k8s.node.name", "value": {"stringValue": "node-a"}},
                         {"key": "k8s.workload.kind", "value": {"stringValue": "Deployment"}},
@@ -757,7 +872,7 @@ service:
                     "traceId": "0123456789abcdef0123456789abcdef",
                     "spanId": "0123456789abcdef",
                     "body": {"stringValue": "password=hunter2 token=abcdefghijklmnop card=4111 1111 1111 1111 email=user@example.com ipv4=10.20.30.40 ipv6=fd12:3456:789a:1::42"},
-                    "attributes": [{"key": "event_id", "value": {"stringValue": f"event-{index}"}}],
+                    "attributes": [{"key": "event_id", "value": {"stringValue": f"event-{cluster}-{index}"}}],
                 }
                 resource_logs.append({"resource": resource, "scopeLogs": [{"logRecords": [record]}]})
             otlp_req = urllib.request.Request(
@@ -781,7 +896,7 @@ service:
                 try:
                     result = json.loads(urllib.request.urlopen(search_url, timeout=2).read())
                     visible_docs = int(result.get("num_hits", 0))
-                    if visible_docs >= 3:
+                    if visible_docs >= len(log_fixtures):
                         break
                 except (OSError, ValueError):
                     pass
@@ -796,7 +911,7 @@ service:
                 assert sensitive not in stored, f"raw sensitive value persisted in Quickwit: {sensitive!r}"
             for marker in (b"REDACTED_SECRET", b"REDACTED_CARD", b"REDACTED_EMAIL", b"REDACTED_IP"):
                 assert marker in stored, f"expected redaction marker absent from Quickwit: {marker!r}"
-            assert stored.count(b"[REDACTED_IP]") == 6, "IPv4 and IPv6 must use the same marker in all three documents"
+            assert stored.count(b"[REDACTED_IP]") == 2 * len(log_fixtures), "IPv4 and IPv6 must use the same marker in every document"
             api_dir = Path(__file__).resolve().parents[2] / "apps" / "api"
             env = dict(os.environ)
             env.update({"QUICKWIT_ITEST_URL": f"http://127.0.0.1:{quickwit_port}", "QUICKWIT_OTEL_SCHEMA": "1"})
@@ -820,7 +935,14 @@ service:
             if api_test.returncode:
                 print(api_test.stdout)
                 raise AssertionError("Quickwit BFF OTLP schema integration failed")
-            print(f"Quickwit v0.9.0 OTLP→BFF passed: docs={visible_docs} visibility_seconds={quickwit_visibility:.2f}")
+            for cluster in ("cluster-a", "cluster-b"):
+                scoped_url = f"http://127.0.0.1:{quickwit_port}/api/v1/otel-logs-v0_7/search?" + urllib.parse.urlencode({"query": f'resource_attributes.k8s.cluster.name:{cluster} AND resource_attributes.k8s.namespace.name:payments'})
+                scoped = json.loads(urllib.request.urlopen(scoped_url, timeout=2).read())
+                assert int(scoped.get("num_hits", 0)) == 2, f"Quickwit cluster isolation failed for {cluster}: {scoped}"
+                encoded_scoped = json.dumps(scoped)
+                other = "cluster-b" if cluster == "cluster-a" else "cluster-a"
+                assert f"event-{cluster}-" in encoded_scoped and f"event-{other}-" not in encoded_scoped
+            print(f"Quickwit v0.9.0 OTLP/BFF A/B passed: docs={visible_docs} scoped_hits=2+2 visibility_seconds={quickwit_visibility:.2f}")
             greptime_storage = max(0, int(run("docker", "exec", greptime, "du", "-sb", "/tmp/greptime").stdout.split()[0]) - greptime_storage_before)
             quickwit_storage = max(0, int(run("docker", "exec", quickwit, "du", "-sb", "/quickwit/qwdata").stdout.split()[0]) - quickwit_storage_before)
             baseline_events = len(baseline_latencies)
@@ -934,7 +1056,7 @@ service:
                 current = run("docker", "inspect", "-f", "{{.Id}}", name, check=False)
                 if name in owned_containers and current.returncode == 0 and current.stdout.strip() == owned_containers[name]:
                     run("docker", "rm", "-f", name, check=False)
-            label = run("docker", "network", "inspect", "-f", "{{index .Labels \"issue23.owner\"}}", network, check=False)
+            label = run("docker", "network", "inspect", "-f", f'{{{{index .Labels "{OWNER}.owner"}}}}', network, check=False)
             if label.returncode == 0 and label.stdout.strip() == token:
                 run("docker", "network", "rm", network, check=False)
             run("docker", "image", "rm", mock_image, check=False)

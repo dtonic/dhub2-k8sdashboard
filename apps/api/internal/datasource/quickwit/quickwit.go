@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/mask"
@@ -52,6 +53,7 @@ type FieldMap struct {
 	TraceID      string
 	SpanID       string
 	EventID      string
+	Cluster      string
 }
 
 func (f FieldMap) withDefaults() FieldMap {
@@ -83,7 +85,7 @@ const (
 
 func (f FieldMap) validate() error {
 	paths := []string{f.Timestamp, f.Level, f.Message, f.Namespace, f.PodName, f.PodUID, f.Container,
-		f.WorkloadKind, f.WorkloadName, f.Node, f.TraceID, f.SpanID, f.EventID}
+		f.WorkloadKind, f.WorkloadName, f.Node, f.TraceID, f.SpanID, f.EventID, f.Cluster}
 	for _, path := range paths {
 		if len(path) > maxFieldPathBytes || strings.Count(path, ".") >= maxFieldPathSegments ||
 			strings.HasPrefix(path, ".") || strings.HasSuffix(path, ".") || strings.Contains(path, "..") {
@@ -106,9 +108,10 @@ type Config struct {
 	// MaxPageSize는 페이지 크기 상한입니다. 사용자가 요청해도 넘지 못합니다.
 	MaxPageSize int
 	// MaxLines는 한 조회 범위에서 훑는 총량 상한입니다. 넘으면 truncated로 알립니다.
-	MaxLines int
-	Fields   FieldMap
-	Observer upstream.Observer
+	MaxLines      int
+	Fields        FieldMap
+	ClusterScoped bool
+	Observer      upstream.Observer
 }
 
 func (c Config) withDefaults() Config {
@@ -147,6 +150,9 @@ func New(cfg Config, catalog datasource.PodCatalog) (*Source, error) {
 	if err := cfg.Fields.validate(); err != nil {
 		return nil, err
 	}
+	if cfg.ClusterScoped && cfg.Fields.Cluster != "resource_attributes.k8s.cluster.name" {
+		return nil, fmt.Errorf("central Quickwit requires resource_attributes.k8s.cluster.name")
+	}
 	client, err := upstream.New(upstream.Config{
 		BaseURL:  cfg.BaseURL,
 		What:     "Quickwit",
@@ -175,6 +181,9 @@ func (s *Source) scrollPath() string { return "/api/v1/_elastic/_search/scroll" 
 /* ── Search ─────────────────────────────────────────────────────────────── */
 
 func (s *Source) Search(ctx context.Context, q datasource.LogQuery) (datasource.LogPage, error) {
+	if err := s.validateClusterTarget(q.Target.ClusterID); err != nil {
+		return datasource.LogPage{}, err
+	}
 	cur, ok := decodeCursor(q.Cursor, s.cfg.MaxLines, s.hmacKey[:])
 	if !ok {
 		return datasource.LogPage{}, fmt.Errorf("커서를 해석할 수 없습니다")
@@ -258,6 +267,9 @@ func (s *Source) Search(ctx context.Context, q datasource.LogQuery) (datasource.
 /* ── Histogram ──────────────────────────────────────────────────────────── */
 
 func (s *Source) Histogram(ctx context.Context, q datasource.LogQuery) ([]contract.LogHistogramBucket, error) {
+	if err := s.validateClusterTarget(q.Target.ClusterID); err != nil {
+		return nil, err
+	}
 	if q.Window.Step <= 0 {
 		return nil, nil
 	}
@@ -302,6 +314,9 @@ func (s *Source) Histogram(ctx context.Context, q datasource.LogQuery) ([]contra
 // 인덱스의 uid 필드를 믿으면 이미 사라진 Pod나 다른 클러스터의 uid가 섞여
 // 딥링크가 404가 됩니다. 카탈로그에 없는 Pod는 이름만 노출합니다.
 func (s *Source) Facets(ctx context.Context, q datasource.LogQuery) (contract.LogFacets, error) {
+	if err := s.validateClusterTarget(q.Target.ClusterID); err != nil {
+		return contract.LogFacets{}, err
+	}
 	termsAgg := func(field string) map[string]any {
 		return map[string]any{"terms": map[string]any{"field": field, "size": 50}}
 	}
@@ -320,7 +335,7 @@ func (s *Source) Facets(ctx context.Context, q datasource.LogQuery) (contract.Lo
 	}
 
 	byName := map[string]datasource.CatalogPod{}
-	for _, p := range s.catalog.CatalogPods(q.Target.Namespace, 0) {
+	for _, p := range s.catalog.CatalogPods(q.Target.ClusterID, q.Target.Namespace, 0) {
 		if q.Target.AllowsNamespace(p.Namespace) {
 			byName[p.Name] = p
 		}
@@ -357,6 +372,13 @@ func (s *Source) Facets(ctx context.Context, q datasource.LogQuery) (contract.Lo
 	sort.Slice(f.Pods, func(a, b int) bool { return f.Pods[a].Name < f.Pods[b].Name })
 	sort.Slice(f.Containers, func(a, b int) bool { return f.Containers[a].Name < f.Containers[b].Name })
 	return f, nil
+}
+
+func (s *Source) validateClusterTarget(clusterID string) error {
+	if s.cfg.ClusterScoped && !clusterid.Valid(clusterID) {
+		return fmt.Errorf("invalid Quickwit cluster scope")
+	}
+	return nil
 }
 
 /* ── 문서 → LogLine ─────────────────────────────────────────────────────── */

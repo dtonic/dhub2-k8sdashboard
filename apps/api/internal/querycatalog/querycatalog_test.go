@@ -30,6 +30,24 @@ func TestDefaultCatalogIsValid(t *testing.T) {
 	}
 }
 
+func TestClusterScopeIsExactAndFailClosed(t *testing.T) {
+	cat, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := cat.Query("metrics.usage.cpu_milli")
+	expr, err := q.Render(Scope{ClusterName: "cluster-a", Namespace: "payments"}, time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(expr, `k8s_cluster_name="cluster-a"`) || !strings.Contains(expr, `namespace="payments"`) {
+		t.Fatalf("cluster scope missing: %s", expr)
+	}
+	if _, err = q.Render(Scope{ClusterName: `bad"} or vector(1)`}, time.Minute, nil); err == nil {
+		t.Fatal("invalid cluster scope accepted")
+	}
+}
+
 func TestCatalogPanelAndSeriesCaps(t *testing.T) {
 	base := "version: 1\nqueries:\n  - ref: q\n    type: promql_range\n    expr: sum(x{$__scope})\npanels:\n"
 	var panels strings.Builder

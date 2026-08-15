@@ -7,9 +7,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
@@ -146,6 +149,40 @@ func TestPodSummaryAndOwnerChain(t *testing.T) {
 	}
 }
 
+func TestDirectPodIdentityLifecycleAndOwnerEdges(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store, _ := testcluster.NewStore(t, ctx)
+	if pod, found, err := store.Pod("payments", "payments-api-7f-aaa", ""); err != nil || !found || string(pod.UID) != testcluster.UIDPodHealthy {
+		t.Fatalf("name lookup pod=%v found=%v err=%v", pod, found, err)
+	}
+	if _, found, err := store.Pod("payments", "missing", ""); err != nil || found {
+		t.Fatalf("missing name lookup found=%v err=%v", found, err)
+	}
+	if owners := store.PodOwnerChain(&corev1.Pod{}); len(owners) != 0 {
+		t.Fatalf("ownerless pod owners=%+v", owners)
+	}
+	controller := true
+	nonReplicaSet := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", OwnerReferences: []metav1.OwnerReference{{Kind: "StatefulSet", Name: "stateful", UID: types.UID("stateful-uid"), Controller: &controller}}}}
+	if owners := store.PodOwnerChain(nonReplicaSet); len(owners) != 1 || owners[0].Kind != "StatefulSet" {
+		t.Fatalf("direct workload owner=%+v", owners)
+	}
+	missingReplicaSet := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "missing-rs", UID: types.UID("missing-rs-uid"), Controller: &controller}}}}
+	if owners := store.PodOwnerChain(missingReplicaSet); len(owners) != 1 || owners[0].Kind != "ReplicaSet" {
+		t.Fatalf("missing ReplicaSet owner=%+v", owners)
+	}
+	started := metav1.NewTime(testcluster.Now.Add(-time.Hour))
+	finished := metav1.NewTime(testcluster.Now)
+	lifecycle := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "finished", Namespace: "payments", UID: types.UID("finished-uid"), CreationTimestamp: metav1.NewTime(testcluster.Now.Add(-2 * time.Hour)), DeletionTimestamp: &finished, OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "owner", UID: types.UID("owner-uid")}}},
+		Status:     corev1.PodStatus{StartTime: &started},
+	}
+	summary := store.PodSummary(lifecycle)
+	if summary.StartedAt != started.UTC().Format(time.RFC3339) || summary.FinishedAt != finished.UTC().Format(time.RFC3339) || summary.Owner == nil || summary.Owner.Kind != "Deployment" || summary.Issues == nil {
+		t.Fatalf("lifecycle summary=%+v", summary)
+	}
+}
+
 func TestSetUsagePublishesConcurrentSnapshotsSafely(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -259,7 +296,7 @@ func TestCatalogPodsBorrowsIdentity(t *testing.T) {
 	t.Cleanup(cancel)
 	store, _ := testcluster.NewStore(t, ctx)
 
-	all := store.CatalogPods("", 0)
+	all := store.CatalogPods(testcluster.ClusterID, "", 0)
 	if len(all) == 0 {
 		t.Fatal("카탈로그가 비었습니다")
 	}
@@ -268,9 +305,41 @@ func TestCatalogPodsBorrowsIdentity(t *testing.T) {
 			t.Fatalf("신원 필드 누락: %+v", p)
 		}
 	}
-	one := store.CatalogPods("payments", 1)
+	one := store.CatalogPods(testcluster.ClusterID, "payments", 1)
 	if len(one) != 1 || one[0].Namespace != "payments" {
 		t.Fatalf("limit·namespace 필터: %+v", one)
+	}
+}
+
+func TestDirectCatalogAndProviderPreserveServerOwnedClusterIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store, _ := testcluster.NewStore(t, ctx)
+
+	if got := store.CatalogPods("other-cluster", "", 0); got != nil {
+		t.Fatalf("cross-cluster catalog leaked %d pods", len(got))
+	}
+	entities := store.StreamEntityNamespaces()
+	if entities["pod:"+testcluster.UIDPodHealthy] != "payments" || entities["workload:"+testcluster.UIDDeploymentPaymentsAPI] != "payments" {
+		t.Fatalf("stream identity catalog missing pod/workload scope: %+v", entities)
+	}
+
+	registry := clusterstate.DirectRegistry{Store: store}
+	if !registry.Ready() {
+		t.Fatal("synced direct provider registry is not ready")
+	}
+	provider, err := registry.ForScreen(ctx, clusterstate.ScreenRequest{ClusterID: testcluster.ClusterID, Screen: "overview"})
+	if err != nil || provider != store {
+		t.Fatalf("direct provider=%T err=%v", provider, err)
+	}
+	if _, err := registry.ForScreen(ctx, clusterstate.ScreenRequest{ClusterID: "other-cluster", Screen: "overview"}); err == nil {
+		t.Fatal("cross-cluster direct provider resolution succeeded")
+	}
+	if (clusterstate.DirectRegistry{}).Ready() {
+		t.Fatal("nil direct registry reported ready")
+	}
+	if _, err := (clusterstate.DirectRegistry{}).ForScreen(ctx, clusterstate.ScreenRequest{ClusterID: testcluster.ClusterID}); err == nil {
+		t.Fatal("nil direct registry resolved a provider")
 	}
 }
 

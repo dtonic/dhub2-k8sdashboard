@@ -35,7 +35,7 @@ func TestCatalogPodsCarryWorkloadUID(t *testing.T) {
 	store, _ := testcluster.NewStore(t, ctx)
 
 	found := false
-	for _, cp := range store.CatalogPods("payments", 0) {
+	for _, cp := range store.CatalogPods(testcluster.ClusterID, "payments", 0) {
 		if cp.WorkloadKind == "Deployment" && cp.WorkloadName == "payments-api" {
 			found = true
 			if cp.WorkloadUID != testcluster.UIDDeploymentPaymentsAPI {

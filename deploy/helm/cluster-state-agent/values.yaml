@@ -1,0 +1,13 @@
+clusterID: ""
+telemetryClusterName: ""
+image: {repository: registry.invalid/observability-dashboard-api, digest: ""}
+registry: {endpoint: "", serverName: "", trustDomain: "", cidrs: [], port: 9443}
+tls: {existingSecret: "", certKey: tls.crt, privateKeyKey: tls.key, caKey: ca.crt}
+dns:
+  namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+  podSelector: {matchLabels: {k8s-app: kube-dns}}
+kubernetesApiCidrs: []
+limits: {maxResources: 100000, maxMessageBytes: 4194304, maxChunkResources: 1000}
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: "1", memory: 768Mi}

@@ -8,6 +8,7 @@ package greptime
 import (
 	"strings"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 )
@@ -16,6 +17,12 @@ import (
 // 대상 Pod가 카탈로그에 없다는 뜻입니다 — 질의하지 말고 빈 시리즈를 둡니다.
 func (s *Source) scope(t datasource.Target) (querycatalog.Scope, bool) {
 	sc := querycatalog.Scope{}
+	if s.cfg.ClusterScoped {
+		if !clusterid.Valid(t.ClusterID) {
+			return querycatalog.Scope{}, false
+		}
+		sc.ClusterName = t.ClusterID
+	}
 
 	switch {
 	case t.Namespace != "":
@@ -45,7 +52,7 @@ func (s *Source) scope(t datasource.Target) (querycatalog.Scope, bool) {
 }
 
 func (s *Source) podByUID(t datasource.Target) (datasource.CatalogPod, bool) {
-	for _, p := range s.catalog.CatalogPods(t.Namespace, 0) {
+	for _, p := range s.catalog.CatalogPods(t.ClusterID, t.Namespace, 0) {
 		if p.UID == t.PodUID {
 			return p, true
 		}
@@ -55,7 +62,7 @@ func (s *Source) podByUID(t datasource.Target) (datasource.CatalogPod, bool) {
 
 func (s *Source) workloadPodNames(t datasource.Target) []string {
 	var names []string
-	for _, p := range s.catalog.CatalogPods(t.Namespace, 0) {
+	for _, p := range s.catalog.CatalogPods(t.ClusterID, t.Namespace, 0) {
 		if p.WorkloadName != t.WorkloadName {
 			continue
 		}

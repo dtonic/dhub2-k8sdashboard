@@ -47,7 +47,7 @@ func TestQueriesNeverCallTheAPIServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.WorkloadOwnerChain("payments", "Deployment", "payments-api", wl.Ref.WorkloadUID)
-	store.CatalogPods("", 0)
+	store.CatalogPods(testcluster.ClusterID, "", 0)
 
 	if got := len(fakes.Typed.Actions()) - before; got != 0 {
 		t.Errorf("조회 중 API 서버 호출 %d회 발생 (want 0): %v", got, fakes.Typed.Actions()[before:])
@@ -227,7 +227,7 @@ func TestCatalogPodsBorrowRealIdentity(t *testing.T) {
 	defer cancel()
 	store, _ := testcluster.NewStore(t, ctx)
 
-	pods := store.CatalogPods("payments", 0)
+	pods := store.CatalogPods(testcluster.ClusterID, "payments", 0)
 	if len(pods) != 4 {
 		t.Fatalf("Pod 수=%d, want 4", len(pods))
 	}

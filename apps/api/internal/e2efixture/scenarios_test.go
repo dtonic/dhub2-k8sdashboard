@@ -72,7 +72,7 @@ func TestScenarioSignalsAreCoherent(t *testing.T) {
 	ctx := context.Background()
 
 	catalog := map[string]datasource.CatalogPod{}
-	for _, p := range src.Catalog.CatalogPods("", 0) {
+	for _, p := range src.Catalog.CatalogPods(testcluster.ClusterID, "", 0) {
 		catalog[p.UID] = p
 	}
 

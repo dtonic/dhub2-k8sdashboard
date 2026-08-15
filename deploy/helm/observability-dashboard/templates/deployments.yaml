@@ -90,8 +90,12 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
         secret-revision: {{ .Values.secretRevision | quote }}
     spec:
+      {{- if eq .Values.clusterState.mode "direct" }}
       serviceAccountName: {{ include "dashboard.fullname" . }}-api
       automountServiceAccountToken: true
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
       terminationGracePeriodSeconds: 30
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       topologySpreadConstraints:
@@ -115,8 +119,21 @@ spec:
             capabilities: {drop: ["ALL"]}
           ports: [{name: http, containerPort: 8080}]
           envFrom: [{configMapRef: {name: {{ include "dashboard.fullname" . }}-api}}]
-          {{- with .Values.api.existingSecret.name }}
+          {{- if eq .Values.clusterState.mode "central" }}
           env:
+            - {name: CLUSTER_STATE_MODE, value: central}
+            - {name: CLUSTER_STATE_CLUSTERS, value: {{ join "," .Values.clusterState.clusters | quote }}}
+            - {name: CLUSTER_STATE_REGISTRY_ENDPOINT, value: {{ .Values.clusterState.registryEndpoint | quote }}}
+            - {name: CLUSTER_STATE_REGISTRY_SERVER_NAME, value: {{ .Values.clusterState.registryServerName | quote }}}
+            - {name: CLUSTER_STATE_TRUST_DOMAIN, value: {{ .Values.clusterState.trustDomain | quote }}}
+            - {name: CLUSTER_STATE_TLS_CERT_FILE, value: /var/run/cluster-state-tls/tls.crt}
+            - {name: CLUSTER_STATE_TLS_KEY_FILE, value: /var/run/cluster-state-tls/tls.key}
+            - {name: CLUSTER_STATE_TLS_CA_FILE, value: /var/run/cluster-state-tls/ca.crt}
+          {{- end }}
+          {{- with .Values.api.existingSecret.name }}
+          {{- if ne $.Values.clusterState.mode "central" }}
+          env:
+          {{- end }}
             {{- range $env, $key := dict "GREPTIME_USERNAME" $.Values.api.existingSecret.keys.greptimeUsername "GREPTIME_PASSWORD" $.Values.api.existingSecret.keys.greptimePassword "QUICKWIT_USERNAME" $.Values.api.existingSecret.keys.quickwitUsername "QUICKWIT_PASSWORD" $.Values.api.existingSecret.keys.quickwitPassword }}
             - name: {{ $env }}
               valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $key }}, optional: true}}
@@ -146,3 +163,17 @@ spec:
           livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          {{- if eq .Values.clusterState.mode "central" }}
+          volumeMounts:
+            - {name: cluster-state-tls, mountPath: /var/run/cluster-state-tls, readOnly: true}
+          {{- end }}
+      {{- if eq .Values.clusterState.mode "central" }}
+      volumes:
+        - name: cluster-state-tls
+          secret:
+            secretName: {{ .Values.clusterState.tls.apiExistingSecret }}
+            items:
+              - {key: {{ .Values.clusterState.tls.certKey }}, path: tls.crt}
+              - {key: {{ .Values.clusterState.tls.privateKeyKey }}, path: tls.key}
+              - {key: {{ .Values.clusterState.tls.caKey }}, path: ca.crt}
+      {{- end }}

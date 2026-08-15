@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/cache"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
@@ -32,7 +33,8 @@ import (
 
 // Deps는 서버가 쓰는 바깥 세계 전부입니다. 테스트에서는 전부 대체할 수 있습니다.
 type Deps struct {
-	Store             *clusterstate.Store
+	Store             clusterstate.Provider
+	ProviderRegistry  clusterstate.ProviderRegistry
 	Metrics           datasource.Metrics
 	Logs              datasource.Logs
 	Alerts            datasource.Alerts
@@ -100,6 +102,9 @@ func NewServer(d Deps) *Server {
 		d.StreamMetrics = stream.NewMetrics()
 	}
 	d.StreamOptions.setDefaults()
+	if d.ProviderRegistry == nil {
+		d.ProviderRegistry = localProviderRegistry{provider: d.Store}
+	}
 	s := &Server{deps: d, mux: http.NewServeMux()}
 	s.routes()
 	return s
@@ -113,7 +118,7 @@ func (s *Server) routes() {
 	// readyz는 informer 캐시가 채워진 뒤에만 통과합니다.
 	// 동기화 전에 트래픽을 받으면 "Pod 0개"가 정상처럼 보입니다.
 	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !s.deps.Store.HasSynced() {
+		if !s.deps.ProviderRegistry.Ready() {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "syncing"})
 			return
 		}
@@ -136,7 +141,7 @@ func (s *Server) routes() {
 		if s.deps.StreamMetrics != nil {
 			_ = s.deps.StreamMetrics.WritePrometheus(w)
 		}
-		s.deps.Observability.SetInformerSynced(s.deps.Store.HasSynced())
+		s.deps.Observability.SetInformerSynced(s.deps.ProviderRegistry.Ready())
 		_ = s.deps.Observability.WritePrometheus(w)
 	})
 
@@ -151,13 +156,13 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/approve", s.handleDashboardApprove)
 	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/clone", s.handleDashboardClone)
 	m.HandleFunc("GET /api/v1/dashboard-drafts/{id}/export", s.handleDashboardExport)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.handleOverview)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces", s.handleNamespaceList)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces/{namespace}", s.handleNamespaceDetail)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/workloads/{kind}/{name}", s.handleWorkloadDetail)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/pods/{name}", s.handlePodDetail)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/logs", s.handleLogs)
-	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology", s.handleTopology)
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.withProvider("overview", s.handleOverview))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces", s.withProvider("namespace-list", s.handleNamespaceList))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces/{namespace}", s.withProvider("namespace", s.handleNamespaceDetail))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/workloads/{kind}/{name}", s.withProvider("workload", s.handleWorkloadDetail))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/pods/{name}", s.withProvider("pod", s.handlePodDetail))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology", s.withProvider("topology", s.handleTopology))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/logs", s.withProvider("logs", s.handleLogs))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series", s.handleEdgeSeries)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/alerts", s.handleAlerts)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
@@ -247,7 +252,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if user == "" {
 			user = "auth-none"
 		}
-		release, reason, retry := s.deps.Guard.Acquire(user, pattern)
+		clusterPartition := authorizedGuardPartition(sc, clusterIDFromPath(r.URL.Path))
+		release, reason, retry := s.deps.Guard.Acquire(clusterPartition+"\x00"+user, clusterPartition+"\x00"+pattern)
 		if reason != "" {
 			seconds := int((retry + time.Second - 1) / time.Second)
 			if seconds < 1 {
@@ -287,6 +293,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.deps.Logger.Warn("slow_api", args...)
 	}
 	s.audit(r, sc, rec.status, started)
+}
+
+// authorizedGuardPartition prevents untrusted path IDs from creating rate
+// limiter identities or resetting a caller's rate budget. Only a canonical,
+// accessible cluster from the resolved server-side scope gets its own bucket.
+func authorizedGuardPartition(sc scope.Scope, requested string) string {
+	if clusterid.Valid(requested) {
+		if cluster, ok := sc.Cluster(requested); ok && cluster.Accessible() {
+			return requested
+		}
+	}
+	return "denied"
+}
+func clusterIDFromPath(path string) string {
+	const marker = "/api/v1/clusters/"
+	if !strings.HasPrefix(path, marker) {
+		return "platform"
+	}
+	rest := strings.TrimPrefix(path, marker)
+	id, _, _ := strings.Cut(rest, "/")
+	if id == "" {
+		return "invalid"
+	}
+	return id
 }
 
 func registeredMethods(mux *http.ServeMux, r *http.Request) []string {
@@ -534,14 +564,23 @@ func namespaceFilter(c scope.Cluster, requested string) (clusterstate.NamespaceF
 // kubeSection은 informer 캐시에서 읽은 값을 섹션으로 감쌉니다.
 // 아직 동기화 중이면 0이 아니라 **degraded**를 내려보냅니다 —
 // "Pod 0개"는 정상처럼 보이지만 사실이 아닙니다.
-func kubeSection[T any](s *Server, v T, err error) contract.Section[T] {
+func kubeSection[T any](provider clusterstate.Provider, v T, err error) contract.Section[T] {
 	if err != nil {
 		return contract.Degraded[T](contract.SourceKubernetes, "클러스터 상태를 읽지 못했습니다", nil)
 	}
-	if !s.deps.Store.HasSynced() {
+	if provider == nil || !provider.HasSynced() {
+		if freshness, ok := provider.(interface{ ObservedAt() time.Time }); ok && !freshness.ObservedAt().IsZero() {
+			out := contract.Degraded(contract.SourceKubernetes, "cache is stale", &v)
+			out.ObservedAt = freshness.ObservedAt().UTC().Format(time.RFC3339)
+			return out
+		}
 		return contract.Degraded(contract.SourceKubernetes, "캐시 동기화 중 · 값이 최신이 아닐 수 있습니다", &v)
 	}
-	return contract.OK(v)
+	out := contract.OK(v)
+	if freshness, ok := provider.(interface{ ObservedAt() time.Time }); ok && !freshness.ObservedAt().IsZero() {
+		out.ObservedAt = freshness.ObservedAt().UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // dsSection은 외부 데이터소스 결과를 섹션으로 감쌉니다.

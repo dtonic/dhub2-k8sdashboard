@@ -10,7 +10,10 @@ import (
 //
 // 어댑터가 Pod 이름이나 UID를 지어내면 로그 한 줄에서 Pod 상세로 가는 링크가 404가 됩니다.
 // 신원의 출처는 항상 여기 하나입니다.
-func (s *Store) CatalogPods(namespace string, limit int) []datasource.CatalogPod {
+func (s *Store) CatalogPods(clusterID, namespace string, limit int) []datasource.CatalogPod {
+	if s == nil || clusterID != s.opts.ClusterID {
+		return nil
+	}
 	pods, err := s.listPods(namespace)
 	if err != nil {
 		return nil
@@ -46,7 +49,7 @@ func (s *Store) CatalogPods(namespace string, limit int) []datasource.CatalogPod
 // input and must never establish an SSE namespace boundary.
 func (s *Store) StreamEntityNamespaces() map[string]string {
 	out := make(map[string]string)
-	for _, p := range s.CatalogPods("", 0) {
+	for _, p := range s.CatalogPods(s.opts.ClusterID, "", 0) {
 		if p.UID != "" {
 			out["pod:"+p.UID] = p.Namespace
 		}

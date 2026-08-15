@@ -30,6 +30,8 @@ type Config struct {
 	// ClusterID·ClusterName은 역할 인자를 이 프로세스와 대조할 때 씁니다.
 	ClusterID   string
 	ClusterName string
+	Clusters    []scope.Cluster
+	Central     bool
 
 	// Now는 테스트에서 시간을 고정합니다.
 	Now func() time.Time
@@ -119,7 +121,12 @@ func (r *Resolver) Resolve(req *http.Request) (scope.Scope, error) {
 		r.logger.Warn("토큰 검증 실패", "reason", err.Error())
 		return scope.Scope{}, err
 	}
-	_, sc := ScopeFor(claims, r.cfg.ClusterID, r.cfg.ClusterName)
+	var sc scope.Scope
+	if r.cfg.Central {
+		_, sc = ScopeForCentral(claims, r.cfg.Clusters)
+	} else {
+		_, sc = ScopeFor(claims, r.cfg.ClusterID, r.cfg.ClusterName)
+	}
 	return sc, nil
 }
 

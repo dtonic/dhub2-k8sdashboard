@@ -1,0 +1,13 @@
+clusterID: cluster-a
+telemetryClusterName: cluster-a
+image:
+  repository: registry.example.invalid/observability-dashboard-api
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+registry:
+  endpoint: registry.platform.example:9443
+  serverName: registry.platform.example
+  trustDomain: platform.example
+  cidrs: [192.0.2.40/32]
+  port: 9443
+tls: {existingSecret: cluster-state-agent-mtls}
+kubernetesApiCidrs: [10.96.0.1/32]

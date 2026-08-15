@@ -10,10 +10,14 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 )
@@ -29,8 +33,9 @@ type Config struct {
 	// EventFieldSelector 기본값 `type=Warning`. Event는 대부분의 클러스터에서 가장 수가 많습니다.
 	EventFieldSelector string
 
-	ClusterID   string
-	ClusterName string
+	ClusterID    string
+	ClusterName  string
+	ClusterState ClusterStateConfig
 
 	// Namespaces는 이 프로세스가 노출할 범위입니다. "*"면 전체입니다.
 	// 실제 인증 연동 전까지의 정적 Scope입니다.
@@ -113,6 +118,16 @@ type AuthConfig struct {
 	MockAddr string
 }
 
+type ClusterStateConfig struct {
+	Mode                                                          string
+	RegistryEndpoint                                              string
+	RegistryServerName                                            string
+	Clusters                                                      []string
+	TrustDomain, CertFile, KeyFile, CAFile                        string
+	MaxClusters, MaxResources, MaxChunkResources, MaxMessageBytes int
+	StaleTTL, HeartbeatTimeout                                    time.Duration
+}
+
 type DashboardBuilderConfig struct {
 	Enabled        bool
 	DatabaseURL    string
@@ -158,6 +173,7 @@ func Load() Config {
 		EventFieldSelector:       env("K8S_EVENT_FIELD_SELECTOR", "type=Warning"),
 		ClusterID:                env("CLUSTER_ID", "default"),
 		ClusterName:              env("CLUSTER_NAME", ""),
+		ClusterState:             ClusterStateConfig{Mode: env("CLUSTER_STATE_MODE", "direct"), RegistryEndpoint: env("CLUSTER_STATE_REGISTRY_ENDPOINT", ""), RegistryServerName: env("CLUSTER_STATE_REGISTRY_SERVER_NAME", ""), Clusters: splitCSV(env("CLUSTER_STATE_CLUSTERS", "")), TrustDomain: env("CLUSTER_STATE_TRUST_DOMAIN", ""), CertFile: env("CLUSTER_STATE_TLS_CERT_FILE", ""), KeyFile: env("CLUSTER_STATE_TLS_KEY_FILE", ""), CAFile: env("CLUSTER_STATE_TLS_CA_FILE", ""), MaxClusters: strictEnvInt("CLUSTER_STATE_MAX_CLUSTERS", registry.MaxConfiguredClusters), MaxResources: strictEnvInt("CLUSTER_STATE_MAX_RESOURCES", registry.MaxProjectedResources), MaxChunkResources: strictEnvInt("CLUSTER_STATE_MAX_CHUNK_RESOURCES", registry.MaxSnapshotChunkResources), MaxMessageBytes: strictEnvInt("CLUSTER_STATE_MAX_MESSAGE_BYTES", registry.MaxProtocolMessageBytes), StaleTTL: strictEnvDuration("CLUSTER_STATE_STALE_TTL", 5*time.Minute), HeartbeatTimeout: strictEnvDuration("CLUSTER_STATE_HEARTBEAT_TIMEOUT", 45*time.Second)},
 		Namespaces:               nsList,
 		AllNS:                    all,
 		CacheTTL:                 envDuration("CACHE_TTL", 5*time.Second),
@@ -235,6 +251,50 @@ func Load() Config {
 // 형식이 틀린 선택적 튜닝 env는 Load()가 기본값으로 대체합니다.
 func (c Config) Validate() error {
 	var errs []error
+	if c.ClusterState.Mode != "direct" && c.ClusterState.Mode != "central" {
+		errs = append(errs, errors.New("CLUSTER_STATE_MODE must be direct or central"))
+	}
+	if c.ClusterState.Mode == "central" {
+		host, port, e := net.SplitHostPort(c.ClusterState.RegistryEndpoint)
+		pn, pe := strconv.Atoi(port)
+		if e != nil || pe != nil || host == "" || !clusterid.ValidHost(host) || pn < 1 || pn > 65535 {
+			errs = append(errs, errors.New("CLUSTER_STATE_REGISTRY_ENDPOINT must be host:port"))
+		}
+		if c.ClusterState.RegistryServerName == "" || strings.ContainsAny(c.ClusterState.RegistryServerName, "/: *\t\r\n") || !clusterid.ValidHost(c.ClusterState.RegistryServerName) {
+			errs = append(errs, errors.New("CLUSTER_STATE_REGISTRY_SERVER_NAME is required"))
+		}
+		if len(c.ClusterState.Clusters) == 0 || len(c.ClusterState.Clusters) > c.ClusterState.MaxClusters {
+			errs = append(errs, errors.New("CLUSTER_STATE_CLUSTERS count is invalid"))
+		}
+		seen := map[string]bool{}
+		for _, id := range c.ClusterState.Clusters {
+			if seen[id] || !clusterid.Valid(id) {
+				errs = append(errs, errors.New("CLUSTER_STATE_CLUSTERS contains duplicate or invalid ID"))
+			}
+			seen[id] = true
+		}
+		if c.Auth.Mode != "oidc" {
+			errs = append(errs, errors.New("central mode requires OIDC authentication"))
+		}
+		if c.UseDemoData {
+			errs = append(errs, errors.New("central mode forbids demo data sources"))
+		}
+		if c.Quickwit.URL != "" && c.Quickwit.Fields["cluster"] != "resource_attributes.k8s.cluster.name" {
+			errs = append(errs, errors.New("central Quickwit requires cluster=resource_attributes.k8s.cluster.name"))
+		}
+		if c.ClusterState.TrustDomain == "" || strings.ContainsAny(c.ClusterState.TrustDomain, "/: ") {
+			errs = append(errs, errors.New("central mode requires a valid trust domain"))
+		}
+		for _, v := range []string{c.ClusterState.CertFile, c.ClusterState.KeyFile, c.ClusterState.CAFile} {
+			if v == "" || !filepath.IsAbs(v) {
+				errs = append(errs, errors.New("central mode requires absolute existing TLS file paths"))
+				break
+			}
+		}
+	}
+	if c.ClusterState.Mode == "central" && (c.ClusterState.MaxClusters < 1 || c.ClusterState.MaxClusters > registry.MaxConfiguredClusters || c.ClusterState.MaxResources < 1 || c.ClusterState.MaxResources > registry.MaxProjectedResources || c.ClusterState.MaxChunkResources < 1 || c.ClusterState.MaxChunkResources > registry.MaxSnapshotChunkResources || c.ClusterState.MaxChunkResources > c.ClusterState.MaxResources || c.ClusterState.MaxMessageBytes < registry.MinProtocolMessageBytes || c.ClusterState.MaxMessageBytes > registry.MaxProtocolMessageBytes || c.ClusterState.StaleTTL <= 0 || c.ClusterState.StaleTTL > registry.MaxStaleTTL || c.ClusterState.HeartbeatTimeout <= 0 || c.ClusterState.HeartbeatTimeout > registry.MaxHeartbeatTimeout || c.ClusterState.HeartbeatTimeout > c.ClusterState.StaleTTL) {
+		errs = append(errs, errors.New("invalid cluster-state limits"))
+	}
 	if c.DashboardBuilder.Enabled {
 		if c.DashboardBuilder.DatabaseURL == "" {
 			errs = append(errs, errors.New("DATABASE_URL is required when dashboard builder is enabled"))
@@ -401,6 +461,17 @@ func env(k, def string) string {
 	return def
 }
 
+func splitCSV(v string) []string {
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		x = strings.TrimSpace(x)
+		if x != "" {
+			out = append(out, x)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 func envBool(k string, def bool) bool {
 	v := os.Getenv(k)
 	if v == "" {
@@ -421,6 +492,18 @@ func envInt(k string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil {
 		return def
+	}
+	return n
+}
+
+func strictEnvInt(k string, def int) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return -1
 	}
 	return n
 }
@@ -462,6 +545,18 @@ func envDuration(k string, def time.Duration) time.Duration {
 	d, err := time.ParseDuration(v)
 	if err != nil {
 		return def
+	}
+	return d
+}
+
+func strictEnvDuration(k string, def time.Duration) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return -1
 	}
 	return d
 }

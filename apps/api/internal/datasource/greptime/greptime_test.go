@@ -23,7 +23,7 @@ import (
 // 어댑터는 여기서 빌린 이름만 질의에 쓸 수 있습니다.
 type fakeCatalog []datasource.CatalogPod
 
-func (f fakeCatalog) CatalogPods(namespace string, limit int) []datasource.CatalogPod {
+func (f fakeCatalog) CatalogPods(_ string, namespace string, limit int) []datasource.CatalogPod {
 	out := []datasource.CatalogPod{}
 	for _, p := range f {
 		if namespace != "" && p.Namespace != namespace {
@@ -31,6 +31,21 @@ func (f fakeCatalog) CatalogPods(namespace string, limit int) []datasource.Catal
 		}
 		out = append(out, p)
 		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+type clusteredCatalog map[string][]datasource.CatalogPod
+
+func (c clusteredCatalog) CatalogPods(clusterID, namespace string, limit int) []datasource.CatalogPod {
+	var out []datasource.CatalogPod
+	for _, pod := range c[clusterID] {
+		if namespace == "" || pod.Namespace == namespace {
+			out = append(out, pod)
+		}
+		if limit > 0 && len(out) == limit {
 			break
 		}
 	}
@@ -92,7 +107,13 @@ func (f *fakeGreptime) handler() http.Handler {
 				})
 			}
 		} else {
-			results = []map[string]any{{"metric": map[string]string{}, key: values}}
+			metric := map[string]string{}
+			for _, cluster := range []string{"seoul", "a", "b"} {
+				if strings.Contains(q.Get("query"), `k8s_cluster_name="`+cluster+`"`) {
+					metric["k8s_cluster_name"] = cluster
+				}
+			}
+			results = []map[string]any{{"metric": metric, key: values}}
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"status": "success",
@@ -344,23 +365,47 @@ func TestUpstreamFailureIsClassifiedAndRetriedOnce(t *testing.T) {
 // timeout으로 취소되고 ErrUnavailable로 분류되며 1회만 재시도되는지 검증합니다.
 func TestTimeoutIsClassifiedAndRetriedOnce(t *testing.T) {
 	var hits atomic.Int32
+	started := make(chan struct{}, 2)
+	canceled := make(chan struct{}, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		started <- struct{}{}
 		<-r.Context().Done()
+		canceled <- struct{}{}
 	}))
 	t.Cleanup(srv.Close)
 	qc, err := querycatalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(Config{BaseURL: srv.URL, Timeout: 20 * time.Millisecond}, catalog, qc)
+	// Leave instrumentation-safe scheduling headroom. The handler barriers below
+	// prove that both real requests start and are canceled by their deadlines.
+	s, err := New(Config{BaseURL: srv.URL, Timeout: time.Second}, catalog, qc)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = s.Trends(context.Background(), datasource.Target{
-		ClusterID: "seoul", Namespace: "payments",
-	}, window(time.Minute, time.Hour), []string{"restarts"})
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := s.Trends(context.Background(), datasource.Target{
+			ClusterID: "seoul", Namespace: "payments",
+		}, window(time.Minute, time.Hour), []string{"restarts"})
+		done <- callErr
+	}()
+	deadline := time.After(2 * time.Second)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-deadline:
+			t.Fatalf("request %d did not start", i+1)
+		}
+		select {
+		case <-canceled:
+		case <-deadline:
+			t.Fatalf("request %d was not canceled", i+1)
+		}
+	}
+	err = <-done
 	if !errors.Is(err, datasource.ErrUnavailable) {
 		t.Fatalf("timeout은 ErrUnavailable이어야 합니다: %v", err)
 	}
@@ -423,5 +468,95 @@ func TestUsageKeysByPodUID(t *testing.T) {
 		if strings.Contains(key, "/") {
 			t.Fatalf("이름 기반 키가 남아 있습니다: %s", key)
 		}
+	}
+}
+
+func TestCentralUsageForcesClusterMatcherAndRejectsMislabeledResponse(t *testing.T) {
+	var wrongLabel atomic.Bool
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expr := r.URL.Query().Get("query")
+		cluster := ""
+		switch {
+		case strings.Contains(expr, `k8s_cluster_name="a"`):
+			cluster = "a"
+		case strings.Contains(expr, `k8s_cluster_name="b"`):
+			cluster = "b"
+		default:
+			http.Error(w, "missing cluster predicate", http.StatusBadRequest)
+			return
+		}
+		requests.Add(1)
+		label := cluster
+		if wrongLabel.Load() {
+			label = "wrong"
+		}
+		value := "10"
+		if cluster == "b" {
+			value = "200"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "vector", "result": []map[string]any{{"metric": map[string]string{"k8s_cluster_name": label, "namespace": "same", "pod": "same"}, "value": [2]any{float64(1000), value}}}}})
+	}))
+	defer srv.Close()
+	queries, err := querycatalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := New(Config{BaseURL: srv.URL, ClusterScoped: true}, clusteredCatalog{
+		"a": {{Namespace: "same", Name: "same", UID: "uid-a"}},
+		"b": {{Namespace: "same", Name: "same", UID: "uid-b"}},
+	}, queries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := source.Usage(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := source.Usage(context.Background(), "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a["uid-a"].CPUMilli != 10 || b["uid-b"].CPUMilli != 200 || len(a) != 1 || len(b) != 1 || requests.Load() != 4 {
+		t.Fatalf("cluster usage leaked: A=%v B=%v requests=%d", a, b, requests.Load())
+	}
+	wrongLabel.Store(true)
+	if _, err = source.Usage(context.Background(), "a"); err == nil || !strings.Contains(err.Error(), "cluster label mismatch") {
+		t.Fatalf("mislabeled response accepted: %v", err)
+	}
+	if _, err = source.Usage(context.Background(), "UNKNOWN!"); err == nil {
+		t.Fatal("invalid cluster scope accepted")
+	}
+}
+
+func TestCentralTrendsForcesAndValidatesClusterIdentity(t *testing.T) {
+	f := newFakeGreptime(func(string) [][2]any { return [][2]any{{float64(1000), "1"}} })
+	s := newSource(t, f, func(c *Config) { c.ClusterScoped = true })
+	panels, err := s.Trends(context.Background(), datasource.Target{ClusterID: "seoul", Namespace: "payments"}, window(time.Minute, time.Hour), []string{"restarts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(panels) != 1 {
+		t.Fatalf("panels=%v", panels)
+	}
+	f.mu <- struct{}{}
+	defer func() { <-f.mu }()
+	if len(f.requests) == 0 {
+		t.Fatal("no upstream query")
+	}
+	for _, request := range f.requests {
+		if expr := request.Get("query"); !strings.Contains(expr, `k8s_cluster_name="seoul"`) || !strings.Contains(expr, "sum by (k8s_cluster_name)") {
+			t.Fatalf("cluster predicate missing: %s", expr)
+		}
+	}
+}
+
+func TestCentralTrendsRejectsMismatchedResponseCluster(t *testing.T) {
+	f := newFakeGreptime(func(string) [][2]any { return [][2]any{{float64(1000), "1"}} })
+	s := newSource(t, f, func(c *Config) { c.ClusterScoped = true })
+	// No known fixture cluster is reflected by the fake, so the response label
+	// is empty and must fail closed after an otherwise correctly scoped query.
+	if _, err := s.Trends(context.Background(), datasource.Target{ClusterID: "unknown", Namespace: "payments"}, window(time.Minute, time.Hour), []string{"restarts"}); err == nil {
+		t.Fatal("mismatched central response cluster accepted")
 	}
 }

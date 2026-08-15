@@ -48,6 +48,10 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
@@ -66,6 +70,9 @@ func run(logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if cfg.ClusterState.Mode == "central" {
+		return runCentral(ctx, logger, cfg)
+	}
 
 	restCfg, err := clusterstate.RestConfig(clusterstate.ClientOptions{
 		Kubeconfig:      cfg.Kubeconfig,
@@ -117,7 +124,7 @@ func run(logger *slog.Logger) error {
 
 	syncCtx, cancelSync := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancelSync()
-	if err := store.Start(syncCtx); err != nil {
+	if err := store.StartAndWait(ctx, syncCtx); err != nil {
 		return err
 	}
 	logger.Info("informer 캐시 동기화 완료")
@@ -137,6 +144,10 @@ func run(logger *slog.Logger) error {
 	if dashboardStore != nil {
 		defer dashboardStore.Close()
 		logger.Info("dashboard builder metadata store ready")
+	}
+	var dashboardAPI dashboard.Store
+	if dashboardStore != nil {
+		dashboardAPI = dashboardStore
 	}
 
 	resolver, err := buildResolver(ctx, logger, cfg)
@@ -193,7 +204,7 @@ func run(logger *slog.Logger) error {
 		Stream:             hub,
 		StreamMetrics:      streamMetrics,
 		StreamOptions:      httpapi.StreamOptions{Heartbeat: cfg.StreamHeartbeat, WriteIdleTimeout: cfg.StreamWriteIdle},
-		DashboardStore:     dashboardStore,
+		DashboardStore:     dashboardAPI,
 		DashboardQueryRefs: queries.Refs(),
 		AllowedOrigin:      cfg.AllowedOrigin,
 		Version:            contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
@@ -266,6 +277,12 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 		return scope.Static{S: cfg.Scope()}, nil
 
 	case "oidc":
+		clusters := make([]scope.Cluster, 0, len(cfg.ClusterState.Clusters))
+		if cfg.ClusterState.Mode == "central" {
+			for _, id := range cfg.ClusterState.Clusters {
+				clusters = append(clusters, scope.Cluster{ID: id, Name: id})
+			}
+		}
 		r, err := auth.NewResolver(ctx, auth.Config{
 			IssuerURL:      cfg.Auth.Issuer,
 			Audience:       cfg.Auth.Audience,
@@ -274,6 +291,8 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 			JWKSMinRefresh: cfg.Auth.JWKSMinRefresh,
 			ClusterID:      cfg.ClusterID,
 			ClusterName:    cfg.ClusterName,
+			Clusters:       clusters,
+			Central:        cfg.ClusterState.Mode == "central",
 		}, logger)
 		if err != nil {
 			// 인증이 깨진 채로 뜨면 전부 401이 되어 장애처럼 보입니다. 여기서 멈춥니다.
@@ -321,12 +340,15 @@ func sources(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, 
 	return sourcesObserved(logger, cfg, store, queries, nil)
 }
 
-func sourcesObserved(logger *slog.Logger, cfg config.Config, store *clusterstate.Store, queries querycatalog.Catalog, observer upstream.Observer) (
+func sourcesObserved(logger *slog.Logger, cfg config.Config, catalog datasource.PodCatalog, queries querycatalog.Catalog, observer upstream.Observer) (
 	datasource.Metrics, datasource.Logs, datasource.Alerts, datasource.Topology,
 ) {
 	var d *demo.Source
 	if cfg.UseDemoData {
-		d = demo.New(store)
+		store, ok := catalog.(*clusterstate.Store)
+		if ok {
+			d = demo.New(store)
+		}
 	}
 
 	var metrics datasource.Metrics
@@ -339,8 +361,9 @@ func sourcesObserved(logger *slog.Logger, cfg config.Config, store *clusterstate
 			Password:      cfg.Greptime.Password,
 			Timeout:       cfg.Greptime.Timeout,
 			MaxDataPoints: cfg.Greptime.MaxDataPoints,
+			ClusterScoped: cfg.ClusterState.Mode == "central",
 			Observer:      observer,
-		}, store, queries)
+		}, catalog, queries)
 		if err != nil {
 			logger.Error("GreptimeDB 설정이 잘못되었습니다 · 메트릭 섹션은 degraded로 내려갑니다", "err", err)
 			metrics = datasource.Unavailable{Reason: "GreptimeDB 설정 오류"}
@@ -358,15 +381,16 @@ func sourcesObserved(logger *slog.Logger, cfg config.Config, store *clusterstate
 	switch {
 	case cfg.Quickwit.URL != "":
 		qcfg := quickwit.Config{
-			BaseURL:     cfg.Quickwit.URL,
-			Index:       cfg.Quickwit.Index,
-			Username:    cfg.Quickwit.Username,
-			Password:    cfg.Quickwit.Password,
-			Timeout:     cfg.Quickwit.Timeout,
-			MaxPageSize: cfg.Quickwit.MaxPageSize,
-			MaxLines:    cfg.Quickwit.MaxLines,
-			Fields:      quickwitFields(cfg.Quickwit.Fields),
-			Observer:    observer,
+			BaseURL:       cfg.Quickwit.URL,
+			Index:         cfg.Quickwit.Index,
+			Username:      cfg.Quickwit.Username,
+			Password:      cfg.Quickwit.Password,
+			Timeout:       cfg.Quickwit.Timeout,
+			MaxPageSize:   cfg.Quickwit.MaxPageSize,
+			MaxLines:      cfg.Quickwit.MaxLines,
+			Fields:        quickwitFields(cfg.Quickwit.Fields),
+			ClusterScoped: cfg.ClusterState.Mode == "central",
+			Observer:      observer,
 		}
 		// 로그 조회 한계는 Git의 쿼리 카탈로그가 선언한 값이 환경변수보다 우선입니다.
 		// 한계의 진실은 배포 설정이 아니라 카탈로그 한 곳이어야 합니다. (#9)
@@ -381,7 +405,7 @@ func sourcesObserved(logger *slog.Logger, cfg config.Config, store *clusterstate
 				qcfg.MaxLines = l.MaxLines
 			}
 		}
-		q, err := quickwit.New(qcfg, store)
+		q, err := quickwit.New(qcfg, catalog)
 		if err != nil {
 			logger.Error("Quickwit 설정이 잘못되었습니다 · 로그 섹션은 degraded로 내려갑니다", "err", err)
 			logs = datasource.Unavailable{Reason: "Quickwit 설정 오류"}
@@ -414,6 +438,7 @@ func quickwitFields(m map[string]string) quickwit.FieldMap {
 		"container": &f.Container, "workload_kind": &f.WorkloadKind,
 		"workload_name": &f.WorkloadName, "node": &f.Node,
 		"trace_id": &f.TraceID, "span_id": &f.SpanID, "event_id": &f.EventID,
+		"cluster": &f.Cluster,
 	}
 	for k, v := range m {
 		if p, ok := set[k]; ok {

@@ -13,11 +13,16 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 )
 
 // Scope는 서버가 확정한 조회 범위입니다. 어댑터가 Target·카탈로그(Pod 신원)에서
 // 만들어 넘깁니다. 여기 없는 것은 매처가 되지 않습니다.
 type Scope struct {
+	// ClusterName is the server-configured telemetry cluster identity. It is
+	// empty only for the explicit direct-mode compatibility path.
+	ClusterName string
 	// Namespace는 단일 namespace입니다. 비어 있으면 Namespaces를 봅니다.
 	Namespace string
 	// Namespaces는 허용 목록입니다. 비어 있으면 전체 허용입니다.
@@ -31,6 +36,9 @@ type Scope struct {
 // matchers는 Scope를 PromQL 라벨 매처 텍스트로 바꿉니다.
 func (s Scope) matchers() string {
 	var parts []string
+	if s.ClusterName != "" {
+		parts = append(parts, `k8s_cluster_name=`+quoteLabel(s.ClusterName))
+	}
 	switch {
 	case s.Namespace != "":
 		parts = append(parts, `namespace=`+quoteLabel(s.Namespace))
@@ -51,6 +59,9 @@ func (s Scope) matchers() string {
 // vars는 선언된 변수만 받습니다. 선언되지 않았거나 값 제한(values/pattern)을
 // 통과하지 못하면 오류입니다 — 조용히 빼고 실행하지 않습니다.
 func (q Query) Render(sc Scope, step time.Duration, vars map[string]string) (string, error) {
+	if sc.ClusterName != "" && !clusterid.Valid(sc.ClusterName) {
+		return "", fmt.Errorf("query %q: invalid cluster scope", q.Ref)
+	}
 	for name := range vars {
 		if !q.declares(name) {
 			return "", fmt.Errorf("query %q: 선언되지 않은 변수 %q", q.Ref, name)

@@ -32,6 +32,7 @@ type doc struct {
 	kind      string
 	eventID   string
 	container string
+	cluster   string
 	malformed bool
 }
 
@@ -180,6 +181,8 @@ func (f *fakeQuickwit) filter(body map[string]any) []doc {
 	keep := func(d doc) bool {
 		field := func(name string) string {
 			switch name {
+			case "resource_attributes.k8s.cluster.name":
+				return d.cluster
 			case "namespace":
 				return d.ns
 			case "pod_name":
@@ -328,8 +331,9 @@ func makeDocs(n int) []doc {
 		ts := testEnd.UnixMilli() - int64(i/7)*250
 		docs = append(docs, doc{
 			id: fmt.Sprintf("doc-%04d", i), ts: ts, ns: ns, pod: pod, uid: uid,
-			level: []string{"INFO", "warn", "ERROR"}[i%3],
-			msg:   fmt.Sprintf("request %d handled", i), workload: wl,
+			cluster: "seoul",
+			level:   []string{"INFO", "warn", "ERROR"}[i%3],
+			msg:     fmt.Sprintf("request %d handled", i), workload: wl,
 			kind: map[bool]string{true: "Deployment", false: "StatefulSet"}[ns == "payments"], container: "app",
 		})
 	}
@@ -338,11 +342,26 @@ func makeDocs(n int) []doc {
 
 type fakeCatalog []datasource.CatalogPod
 
-func (f fakeCatalog) CatalogPods(namespace string, limit int) []datasource.CatalogPod {
+func (f fakeCatalog) CatalogPods(_ string, namespace string, limit int) []datasource.CatalogPod {
 	out := []datasource.CatalogPod{}
 	for _, p := range f {
 		if namespace == "" || p.Namespace == namespace {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+type clusteredCatalog map[string][]datasource.CatalogPod
+
+func (c clusteredCatalog) CatalogPods(clusterID, namespace string, limit int) []datasource.CatalogPod {
+	var out []datasource.CatalogPod
+	for _, pod := range c[clusterID] {
+		if namespace == "" || pod.Namespace == namespace {
+			out = append(out, pod)
+		}
+		if limit > 0 && len(out) == limit {
+			break
 		}
 	}
 	return out
@@ -789,6 +808,74 @@ func TestScopeFilterIsAlwaysInjected(t *testing.T) {
 	// 검색어는 match 노드 값으로만 존재해야 합니다.
 	if strings.Contains(string(raw), `"query_string"`) {
 		t.Fatalf("query_string이 사용되었습니다 — 연산자 주입 가능: %s", raw)
+	}
+}
+
+func TestCentralClusterFilterIsForcedForSearchHistogramFacetsAndCursor(t *testing.T) {
+	f := &fakeQuickwit{docs: []doc{
+		{id: "a-1", ts: testEnd.UnixMilli(), cluster: "a", ns: "same", pod: "same", uid: "same", level: "ERROR", msg: "from-a-1", workload: "api", kind: "Deployment", container: "app"},
+		{id: "a-2", ts: testEnd.UnixMilli() - 1, cluster: "a", ns: "same", pod: "same", uid: "same", level: "INFO", msg: "from-a-2", workload: "api", kind: "Deployment", container: "app"},
+		{id: "b-1", ts: testEnd.UnixMilli(), cluster: "b", ns: "same", pod: "same", uid: "same", level: "ERROR", msg: "from-b-1", workload: "api", kind: "Deployment", container: "app"},
+		{id: "b-2", ts: testEnd.UnixMilli() - 1, cluster: "b", ns: "same", pod: "same", uid: "same", level: "INFO", msg: "from-b-2", workload: "api", kind: "Deployment", container: "app"},
+	}}
+	srv := httptest.NewServer(f.handler(t))
+	defer srv.Close()
+	source, err := New(Config{BaseURL: srv.URL, Index: "logs", ClusterScoped: true, MaxPageSize: 10, MaxLines: 10, Fields: FieldMap{Cluster: "resource_attributes.k8s.cluster.name"}}, clusteredCatalog{
+		"a": {{Namespace: "same", Name: "same", UID: "uid-a"}},
+		"b": {{Namespace: "same", Name: "same", UID: "uid-b"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := datasource.LogQuery{Target: datasource.Target{ClusterID: "a", Namespace: "same"}, Window: datasource.Window{From: testEnd.Add(-time.Hour), To: testEnd, Step: time.Minute}, PageSize: 1}
+	page, err := source.Search(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Lines) != 1 || !strings.Contains(page.Lines[0].Message, "from-a") || page.Next == "" {
+		t.Fatalf("search leakage/page=%+v", page)
+	}
+	q.Cursor = page.Next
+	q.Target.ClusterID = "b"
+	if _, err = source.Search(context.Background(), q); err == nil {
+		t.Fatal("A cursor reused for B")
+	}
+	q.Cursor, q.Target.ClusterID = "", "a"
+	histogram, err := source.Histogram(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, bucket := range histogram {
+		for _, value := range bucket.Counts {
+			count += value
+		}
+	}
+	if count != 2 {
+		t.Fatalf("histogram cross-cluster count=%d", count)
+	}
+	facets, err := source.Facets(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facets.Pods) != 1 || facets.Pods[0].Count != 2 || facets.Pods[0].UID != "uid-a" {
+		t.Fatalf("facets leakage=%+v", facets)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, body := range f.bodies {
+		raw, _ := json.Marshal(body)
+		if !strings.Contains(string(raw), `"term":{"resource_attributes.k8s.cluster.name":{"value":"a"}}`) {
+			t.Fatalf("cluster filter missing: %s", raw)
+		}
+	}
+}
+
+func TestCentralQuickwitClusterMappingFailsClosed(t *testing.T) {
+	for _, field := range []string{"", "cluster", "resource_attributes.other"} {
+		if _, err := New(Config{BaseURL: "http://quickwit", ClusterScoped: true, Fields: FieldMap{Cluster: field}}, catalog); err == nil {
+			t.Fatalf("mapping %q accepted", field)
+		}
 	}
 }
 

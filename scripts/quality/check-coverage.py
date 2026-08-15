@@ -8,6 +8,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 API = ROOT / "apps" / "api"
 BUDGETS = json.loads((ROOT / "quality" / "budgets.json").read_text(encoding="utf-8"))["goCoverage"]
+GENERATED_PROTO_PACKAGE = "github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 
 
 def coverage_failures(total, packages, budgets):
@@ -38,8 +39,18 @@ print("coverage negative mutations passed")
 
 with tempfile.TemporaryDirectory(prefix="dashboard-coverage-") as tmp:
     profile = pathlib.Path(tmp) / "merged.out"
+    # Generated protobuf accessors are verified by api-proto-check hashes and
+    # regeneration drift. Keep all handwritten registry/transport/provider/cmd
+    # packages in the merged denominator.
+    packages = subprocess.run(
+        ["go", "list", "./..."], cwd=API, check=True, text=True, stdout=subprocess.PIPE,
+    ).stdout.splitlines()
+    excluded = [package for package in packages if package == GENERATED_PROTO_PACKAGE]
+    if excluded != [GENERATED_PROTO_PACKAGE]:
+        raise SystemExit("generated protobuf coverage exclusion is missing or duplicated")
+    coverpkg = ",".join(package for package in packages if package != GENERATED_PROTO_PACKAGE)
     result = subprocess.run(
-        ["go", "test", "-coverpkg=./...", f"-coverprofile={profile}", "./..."], cwd=API, text=True,
+        ["go", "test", f"-coverpkg={coverpkg}", f"-coverprofile={profile}", "./..."], cwd=API, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
     print(result.stdout, end="")

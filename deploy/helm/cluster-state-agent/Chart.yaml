@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cluster-state-agent
+description: Outbound-only normalized Kubernetes state agent
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

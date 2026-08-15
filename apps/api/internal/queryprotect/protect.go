@@ -80,6 +80,14 @@ func New(cfg Config, metrics *Metrics) *Guard {
 func (g *Guard) Timeout() time.Duration       { return g.cfg.QueryTimeout }
 func (g *Guard) SlowThreshold() time.Duration { return g.cfg.SlowThreshold }
 
+// IdentityCounts exposes bounded cardinality for security regression tests and
+// low-cardinality operational diagnostics.
+func (g *Guard) IdentityCounts() (users, dashboards int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.users), len(g.dashboards)
+}
+
 // Acquire atomically applies per-user and per-dashboard rate and concurrency limits.
 func (g *Guard) Acquire(user, dashboard string) (release func(), reason string, retry time.Duration) {
 	now := g.cfg.Now()

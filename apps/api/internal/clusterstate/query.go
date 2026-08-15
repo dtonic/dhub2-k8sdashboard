@@ -254,7 +254,12 @@ func (s *Store) Events(f NamespaceFilter, since time.Time, limit int) ([]contrac
 		}
 		out = append(out, s.toClusterEvent(e, last))
 	}
-	sort.Slice(out, func(a, b int) bool { return out[a].LastSeen > out[b].LastSeen })
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].LastSeen != out[b].LastSeen {
+			return out[a].LastSeen > out[b].LastSeen
+		}
+		return out[a].ID < out[b].ID
+	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
@@ -279,7 +284,12 @@ func (s *Store) EventsForUID(uid string, since time.Time, limit int) ([]contract
 		}
 		out = append(out, s.toClusterEvent(e, last))
 	}
-	sort.Slice(out, func(a, b int) bool { return out[a].LastSeen > out[b].LastSeen })
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].LastSeen != out[b].LastSeen {
+			return out[a].LastSeen > out[b].LastSeen
+		}
+		return out[a].ID < out[b].ID
+	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

@@ -9,22 +9,39 @@ import time
 import zlib
 
 CADVISOR = b'''# TYPE container_cpu_usage_seconds_total counter
-container_cpu_usage_seconds_total{namespace="payments",pod="api-0",container="api",image="must_drop"} 10
+container_cpu_usage_seconds_total{namespace="payments",pod="api-0",container="api",image="must_drop",k8s_cluster_name="spoof"} 10
 # TYPE container_memory_working_set_bytes gauge
-container_memory_working_set_bytes{namespace="payments",pod="api-0",container="api",image="must_drop"} 1024
+container_memory_working_set_bytes{namespace="payments",pod="api-0",container="api",image="must_drop",k8s_cluster_name="spoof"} 1024
 # TYPE container_network_receive_bytes_total counter
-container_network_receive_bytes_total{namespace="payments",pod="api-0",container="api",interface="eth0",image="must_drop"} 20
+container_network_receive_bytes_total{namespace="payments",pod="api-0",container="api",interface="eth0",image="must_drop",k8s_cluster_name="spoof"} 20
 # TYPE container_network_transmit_bytes_total counter
-container_network_transmit_bytes_total{namespace="payments",pod="api-0",container="api",interface="eth0",image="must_drop"} 30
+container_network_transmit_bytes_total{namespace="payments",pod="api-0",container="api",interface="eth0",image="must_drop",k8s_cluster_name="spoof"} 30
 unbounded_not_catalogued{random_id="must_drop"} 1
 '''
 KSM = b'''# TYPE kube_pod_container_resource_requests gauge
-kube_pod_container_resource_requests{namespace="payments",pod="api-0",container="api",resource="cpu",unit="core",uid="must_drop"} 1
-kube_pod_container_resource_requests{namespace="payments",pod="api-0",container="api",resource="memory",unit="byte",uid="must_drop"} 1024
+kube_pod_container_resource_requests{namespace="payments",pod="api-0",container="api",resource="cpu",unit="core",uid="must_drop",k8s_cluster_name="spoof"} 1
+kube_pod_container_resource_requests{namespace="payments",pod="api-0",container="api",resource="memory",unit="byte",uid="must_drop",k8s_cluster_name="spoof"} 1024
 # TYPE kube_pod_container_status_restarts_total counter
-kube_pod_container_status_restarts_total{namespace="payments",pod="api-0",container="api",uid="must_drop"} 2
+kube_pod_container_status_restarts_total{namespace="payments",pod="api-0",container="api",uid="must_drop",k8s_cluster_name="spoof"} 2
 unbounded_not_catalogued{random_id="must_drop"} 1
 '''
+real_scrapes = {"a": 0, "b": 0}
+
+
+def real_cadvisor(cluster, tick):
+    factor = 1 if cluster == "a" else 10
+    return CADVISOR.replace(b'} 10\n', f'}} {10 + tick * factor}\n'.encode()).replace(
+        b'} 1024\n', f'}} {1024 * factor}\n'.encode()).replace(
+        b'} 20\n', f'}} {20 + tick * factor}\n'.encode()).replace(
+        b'} 30\n', f'}} {30 + tick * factor}\n'.encode())
+
+
+def real_ksm(cluster, tick):
+    factor = 1 if cluster == "a" else 4
+    restart_factor = 1 if cluster == "a" else 10
+    return KSM.replace(b'} 1\n', f'}} {factor}\n'.encode()).replace(
+        b'} 1024\n', f'}} {1024 * factor}\n'.encode()).replace(
+        b'} 2\n', f'}} {2 + tick * restart_factor}\n'.encode())
 MAX_BODY = 1_048_576
 MAX_ITEMS = 128
 MAX_TOTAL_BYTES = 8 * 1_048_576
@@ -59,10 +76,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 view["baseline_arrivals"] = list(state["baseline_arrivals"])
             self.send(200, json.dumps(view, separators=(",", ":")).encode(), "application/json")
             return
-        if self.path == "/cadvisor-real":
-            body = CADVISOR
-        elif self.path == "/ksm-real":
-            body = KSM
+        if self.path in ("/cadvisor-real", "/cadvisor-b-real", "/ksm-real", "/ksm-b-real"):
+            cluster = "b" if "-b-" in self.path else "a"
+            with lock:
+                tick = real_scrapes[cluster]
+                real_scrapes[cluster] += 1
+            body = real_ksm(cluster, tick) if self.path.startswith("/ksm") else real_cadvisor(cluster, tick)
         elif self.path in state["scrapes"]:
             with lock:
                 body = (CADVISOR if self.path == "/cadvisor" else KSM) if state["scrapes"][self.path] == 0 else b"# empty\n"

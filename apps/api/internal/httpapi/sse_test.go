@@ -295,6 +295,9 @@ func TestSSEScopeIsolationOverRealOIDC(t *testing.T) {
 		t.Fatalf("무토큰: got %d want 401", resp.StatusCode)
 	}
 	resp.Body.Close()
+	if connections, retained := f.hub.Stats(); connections != 0 || retained != 0 {
+		t.Fatalf("unauthorized request reached stream hub: connections=%d retained=%d", connections, retained)
+	}
 
 	adminConn, _ := dialSSE(t, f.ts.URL+streamPath, admin, "")
 	viewerConn, _ := dialSSE(t, f.ts.URL+streamPath, viewer, "")
@@ -313,7 +316,8 @@ func TestSSEScopeIsolationOverRealOIDC(t *testing.T) {
 	publish("media")
 	publish("payments") // 마커
 
-	if got := adminConn.nextEvent(t, 2*time.Second).Namespace; got != "payments" {
+	adminFirst := adminConn.nextEvent(t, 2*time.Second)
+	if got := adminFirst.Namespace; got != "payments" {
 		t.Fatalf("admin 1: %s", got)
 	}
 	if got := adminConn.nextEvent(t, 2*time.Second).Namespace; got != "media" {
@@ -330,7 +334,7 @@ func TestSSEScopeIsolationOverRealOIDC(t *testing.T) {
 	viewerConn.Close()
 	waitConnections(t, f.hub, 0)
 
-	adminConn2, _ := dialSSE(t, f.ts.URL+streamPath, admin, lastID)
+	adminConn2, _ := dialSSE(t, f.ts.URL+streamPath, admin, adminFirst.ID)
 	viewerConn2, _ := dialSSE(t, f.ts.URL+streamPath, viewer, lastID)
 	defer adminConn2.Close()
 	defer viewerConn2.Close()
@@ -393,7 +397,7 @@ func TestSSEReconnectReplayExactOrder(t *testing.T) {
 // 조용한 재생 주장 대신 reset 신호를 받습니다.
 func TestSSEResetOnUnknownInstance(t *testing.T) {
 	f := newSSEFixture(t, stream.Config{}, httpapi.StreamOptions{}, nil, nil, nil)
-	for _, id := range []string{"deadbeefdeadbeefdeadbeefdeadbeef-3", f.hub.InstanceID() + "-999"} {
+	for _, id := range []string{"deadbeefdeadbeefdeadbeef.0000000000000000-3"} {
 		conn, resp := dialSSE(t, f.ts.URL+streamPath, "", id)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s: got %d", id, resp.StatusCode)

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package dashboard.clusterstate.v1;
+option go_package = "github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1";
+
+// The schema deliberately cannot represent Secret/ConfigMap data, kubeconfig,
+// container env/envFrom, commands, args, volumes, or service-account tokens.
+service ClusterState {
+  rpc Sync(stream AgentFrame) returns (stream ServerFrame);
+  rpc Query(ScreenQuery) returns (ScreenReply);
+  rpc Watch(WatchRequest) returns (stream WatchFrame);
+}
+
+message AgentFrame {
+  oneof frame {
+    Hello hello = 1;
+    BeginSnapshot begin_snapshot = 2;
+    SnapshotChunk snapshot_chunk = 3;
+    CommitSnapshot commit_snapshot = 4;
+    Delta delta = 5;
+    Heartbeat heartbeat = 6;
+  }
+}
+message ServerFrame { oneof frame { Ack ack = 1; Nack nack = 2; } }
+message Hello { string cluster_id = 1; uint32 protocol_version = 2; }
+message BeginSnapshot { uint64 epoch = 1; uint64 base_seq = 2; }
+message SnapshotChunk { repeated Resource resources = 1; }
+message CommitSnapshot { uint64 epoch = 1; }
+message Delta { uint64 epoch = 1; uint64 seq = 2; Resource resource = 3; bool deleted = 4; }
+message Heartbeat { uint64 epoch = 1; uint64 seq = 2; }
+message Ack { uint64 epoch = 1; uint64 applied_seq = 2; bool duplicate = 3; }
+message Nack { string code = 1; bool full_resync = 2; }
+
+message Resource {
+  string kind = 1;
+  string uid = 2;
+  string namespace = 3;
+  string name = 4;
+  repeated OwnerRef owners = 5;
+  PodProjection pod = 6;
+  WorkloadProjection workload = 7;
+  NodeProjection node = 8;
+  EventProjection event = 9;
+}
+message OwnerRef { string uid = 1; string kind = 2; string name = 3; string revision = 4; }
+message PodProjection {
+  string phase = 1; string reason = 2; int64 created_unix_ms = 3;
+  repeated ContainerStatus containers = 4;
+  string node_name = 5; int64 started_unix_ms = 6;
+  int64 deleted_unix_ms = 7;
+  int64 cpu_request_milli = 8; int64 memory_request_bytes = 9;
+  int64 cpu_limit_milli = 10; bool has_cpu_limit = 11;
+  int64 memory_limit_bytes = 12; bool has_memory_limit = 13;
+}
+message ContainerStatus {
+  string name = 1; bool ready = 2; int32 restarts = 3;
+  string state = 4; string reason = 5; string masked_message = 6;
+  string last_termination_reason = 7; int32 last_exit_code = 8;
+  int64 last_finished_unix_ms = 9; string image = 10; string image_id = 11;
+  bool started = 12; bool liveness_probe = 13; bool readiness_probe = 14;
+}
+message WorkloadProjection { int32 desired = 1; int32 ready = 2; int32 available = 3; int32 updated = 4; string rollout_status = 5; string rollout_reason = 6; repeated string images = 7; int64 created_unix_ms = 8; }
+message NodeProjection { bool ready = 1; bool pressure = 2; bool unschedulable = 3; }
+message EventProjection { string involved_uid = 1; string reason = 2; string masked_message = 3; string type = 4; int64 last_seen_unix_ms = 5; int32 count = 6; string involved_kind = 7; string involved_name = 8; }
+
+// One query carries all data needed to build one existing HTTP screen. The
+// registry never receives widget-level queries.
+message NamespaceScope { bool all = 1; repeated string namespaces = 2; }
+message ScreenQuery {
+  string cluster_id = 1;
+  string screen = 2;
+  NamespaceScope scope = 3;
+  string requested_namespace = 4;
+  string entity_uid = 5;
+  int64 from_unix_ms = 6;
+  uint32 event_limit = 7;
+  string kind = 8;
+  string name = 9;
+  uint32 unhealthy_limit = 10;
+}
+message ScreenReply {
+  bytes canonical_json = 1;
+  bool stale = 2;
+  int64 observed_unix_ms = 3;
+  ScreenQuery accepted = 4;
+}
+
+// Watch is an API-replica feed used for the bounded local Pod catalog and SSE.
+// Snapshot chunks are followed by deltas; RESET requires a full reconnect.
+message WatchRequest { repeated string cluster_ids = 1; uint32 protocol_version = 2; }
+enum WatchFrameType {
+  WATCH_FRAME_UNSPECIFIED = 0;
+  WATCH_SNAPSHOT_BEGIN = 1;
+  WATCH_SNAPSHOT_CHUNK = 2;
+  WATCH_SNAPSHOT_COMMIT = 3;
+  WATCH_DELTA = 4;
+  WATCH_RESET = 5;
+  WATCH_HEARTBEAT = 6;
+  WATCH_EXPIRED = 7;
+}
+message WatchFrame {
+  string cluster_id = 1;
+  uint64 epoch = 2;
+  uint64 seq = 3;
+  WatchFrameType type = 4;
+  repeated CatalogResource resources = 5;
+  CatalogChange change = 6;
+  int64 observed_unix_ms = 7;
+}
+message CatalogResource {
+  string kind = 1;
+  string uid = 2;
+  string namespace = 3;
+  string name = 4;
+  repeated CatalogOwner owners = 5;
+  string node_name = 6;
+}
+message CatalogOwner { string uid = 1; string kind = 2; string name = 3; }
+enum CatalogAction { CATALOG_ACTION_UNSPECIFIED = 0; CATALOG_CREATED = 1; CATALOG_UPDATED = 2; CATALOG_DELETED = 3; }
+message CatalogChange { uint64 epoch = 1; uint64 seq = 2; CatalogResource resource = 3; CatalogAction action = 4; }
