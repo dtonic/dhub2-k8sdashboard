@@ -212,8 +212,8 @@ func TestUnknownPodReturnsEmptySeriesWithoutQuerying(t *testing.T) {
 	if f.hits.Load() != 0 {
 		t.Fatalf("카탈로그에 없는 Pod인데 질의가 나갔습니다: %d회", f.hits.Load())
 	}
-	if len(panels) != 4 {
-		t.Fatalf("패널 골격은 유지되어야 합니다: %d", len(panels))
+	if len(panels) != 5 {
+		t.Fatalf("패널 골격은 유지되어야 합니다(cpu·memory·network·io·restarts): %d", len(panels))
 	}
 	for _, p := range panels {
 		for _, ser := range p.Series {

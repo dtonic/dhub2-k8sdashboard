@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import type { TrendSeries } from "@k8s-dashboard/contracts";
-import { axisTime, clock, dayClock, num, unitFormat } from "@/lib/format";
+import { axisTime, clock, dayClock, humanBytes, humanCores, num, unitFormat } from "@/lib/format";
 
 /**
  * 시계열 라인 차트.
@@ -30,11 +30,23 @@ function niceMax(v: number) {
   return (Math.ceil((v / p) * 2) / 2) * p;
 }
 
-/** 눈금 라벨: 단위 기호 없이 숫자만. 축이 좁아지고 값 비교가 쉬워집니다. */
+/** 눈금 라벨. byte류는 원시 값이 수십억 단위이므로 자동 환산 없이는 읽을 수 없습니다. (#31) */
 function tickLabel(unit: TrendSeries["unit"], v: number) {
-  if (unit === "percent") return `${Math.round(v)}%`;
-  if (v >= 100 || Number.isInteger(v)) return num(v);
-  return v.toFixed(1);
+  switch (unit) {
+    case "percent":
+      return `${Math.round(v)}%`;
+    case "bytes":
+      return humanBytes(v, 0);
+    case "bytes_per_sec":
+      return humanBytes(v, 0);
+    case "mebibytes":
+      return humanBytes(v * 1024 * 1024, 0);
+    case "cores":
+      return humanCores(v);
+    default:
+      if (v >= 100 || Number.isInteger(v)) return num(v);
+      return v.toFixed(1);
+  }
 }
 
 export function LineChart({

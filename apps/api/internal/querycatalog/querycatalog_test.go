@@ -17,8 +17,8 @@ func TestDefaultCatalogIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("기본 카탈로그가 깨져 있습니다: %v", err)
 	}
-	if len(cat.Panels()) != 4 {
-		t.Fatalf("기본 패널은 4개여야 합니다: %d", len(cat.Panels()))
+	if len(cat.Panels()) != 5 {
+		t.Fatalf("기본 패널은 5개여야 합니다(cpu·memory·network·io·restarts): %d", len(cat.Panels()))
 	}
 	for _, want := range []string{"metrics.cpu.used", "metrics.usage.cpu_milli"} {
 		if _, ok := cat.Query(want); !ok {

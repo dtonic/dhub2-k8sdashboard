@@ -47,23 +47,12 @@ const EDGE_LANE_OFFSET = 14;
 
 type PodNodeData = { name: string; namespace: string; severity: Severity; external: boolean };
 
-/* 상태 색은 예약된 상태 토큰만 씁니다 — severity마다 전용 토큰이 있습니다. */
-function severityVar(s: Severity): string {
-  switch (s) {
-    case "critical":
-      return "var(--status-critical)";
-    case "warning":
-      return "var(--status-warning)";
-    case "degraded":
-      return "var(--status-degraded)";
-    case "progressing":
-      return "var(--status-progressing)";
-    case "healthy":
-      return "var(--status-healthy)";
-    default:
-      return "var(--status-unknown)";
-  }
-}
+/* 선 색 규칙 (#31, 사용자 결정): 기본 선은 중립색 하나로 통일해 화면을 차분하게
+   유지하고, **선택한 선만** 주황~빨강 계열 강조 토큰으로 집중시킵니다.
+   상태(severity)는 노드 카드의 왼쪽 테두리·상태 점과 방향 상세의 뱃지가 전달합니다.
+   (design-system의 "선 색=상태" 규칙을 사용자 지시로 대체한 결정 — Issue #31) */
+const EDGE_COLOR_DEFAULT = "var(--color-border-strong)";
+const EDGE_COLOR_SELECTED = "var(--color-status-serious, var(--status-critical))";
 
 function PodNode({ data }: NodeProps) {
   const d = data as PodNodeData;
@@ -113,7 +102,7 @@ function TrafficEdge(props: EdgeProps) {
     targetPosition,
     curvature: 0.4,
   });
-  const color = severityVar(d.severity);
+  const color = d.selected ? EDGE_COLOR_SELECTED : EDGE_COLOR_DEFAULT;
   return (
     <>
       <BaseEdge
@@ -121,7 +110,7 @@ function TrafficEdge(props: EdgeProps) {
         path={path}
         markerEnd={markerEnd}
         className={d.selected ? "topo-edge topo-edge--selected" : "topo-edge"}
-        style={{ stroke: color, strokeWidth: d.selected ? d.width + 1.2 : d.width }}
+        style={{ stroke: color, strokeWidth: d.selected ? d.width + 0.8 : d.width }}
       />
       <EdgeLabelRenderer>
         <button
@@ -254,17 +243,25 @@ export function TopologyGraph({
     setEdges(
       graphEdges.map((e, i) => {
         const severity = e.severity;
+        const selected = e.id === selectedEdgeId;
         return {
           id: e.id,
           source: e.from,
           target: e.to,
           type: "traffic",
-          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: severityVar(severity) },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 13,
+            height: 13,
+            color: selected ? "var(--color-status-serious, var(--status-critical))" : "var(--color-border-strong)",
+          },
           data: {
             proto: e.protocols.join("/"),
             total: e.totalCount,
             severity,
-            width: 1.5 + 3.5 * (e.totalCount / maxCount),
+            /* 두께 = 트래픽 양. 선형 스케일은 최대 5px까지 굵어져 난잡했다 —
+               sqrt로 눌러 1~2.2px 범위에 둔다. (#31) */
+            width: 1 + 1.2 * Math.sqrt(e.totalCount / maxCount),
             lane: (e.from < e.to ? 1 : -1) as 1 | -1,
             stagger: ((i % 5) - 2) * 30,
             fromName: byId.get(e.from)?.name ?? e.from,

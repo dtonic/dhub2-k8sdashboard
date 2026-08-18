@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { RANGE_LABEL, type TopologyNodePosition } from "@k8s-dashboard/contracts";
 import { topoKeys, useEdgeSeries, useSaveTopologyLayout, useTopology } from "@/api/queries";
@@ -10,6 +10,23 @@ import { Breadcrumb, logsPath, refPath, withSearch } from "@/components/drill";
 import { duration, num } from "@/lib/format";
 import { PageError, PageHeader, useDrillControls, useInvalidate } from "@/features/drill/common";
 import { TopologyGraph } from "./TopologyGraph";
+
+/** hex 문자열을 16바이트/행 offset·hex·ASCII 덤프로 렌더합니다. (#31) */
+function HexDump({ hex }: { hex: string }) {
+  const bytes = hex.match(/.{2}/g) ?? [];
+  const rows: string[] = [];
+  for (let o = 0; o < bytes.length; o += 16) {
+    const chunk = bytes.slice(o, o + 16);
+    const ascii = chunk
+      .map((b) => {
+        const c = parseInt(b, 16);
+        return c >= 32 && c < 127 ? String.fromCharCode(c) : ".";
+      })
+      .join("");
+    rows.push(`${o.toString(16).padStart(4, "0")}  ${chunk.join(" ").padEnd(47)}  ${ascii}`);
+  }
+  return <pre className="topo-hex">{rows.join("\n")}</pre>;
+}
 
 /**
  * Pod Topology 화면
@@ -64,6 +81,10 @@ export function TopologyView() {
   const nodeName = (id?: string) => graph?.nodes.find((n) => n.id === id)?.name ?? id ?? "";
   const reverse = edge && graph?.edges.some((e) => e.from === edge.to && e.to === edge.from);
   const pods = q.data?.pods.data;
+
+  /* Route 행을 열면 payload 표본(hex)이 펼쳐집니다. 선택한 선이 바뀌면 접습니다. (#31) */
+  const [openRoute, setOpenRoute] = useState<string | null>(null);
+  useEffect(() => setOpenRoute(null), [selectedEdgeId]);
 
   return (
     <div className="page">
@@ -165,15 +186,12 @@ export function TopologyView() {
                   />
                   <ul className="ds-topology__legend" style={{ marginTop: "var(--space-4)" }}>
                     <li>
-                      <i style={{ ["--_c" as string]: "var(--status-healthy)" }} /> 정상
+                      <i style={{ ["--_c" as string]: "var(--color-status-serious, var(--status-critical))" }} /> 선택한 경로
                     </li>
                     <li>
-                      <i style={{ ["--_c" as string]: "var(--status-warning)" }} /> 지연/에러 증가
+                      <i style={{ ["--_c" as string]: "var(--color-border-strong)" }} /> 그 외 경로
                     </li>
-                    <li>
-                      <i style={{ ["--_c" as string]: "var(--status-critical)" }} /> 심각
-                    </li>
-                    <li>선 두께 = 트래픽 양 · 색 = 상태(프로토콜 아님) · 캡슐 텍스트 = 프로토콜과 누적 요청</li>
+                    <li>선 두께 = 트래픽 양 · 캡슐 텍스트 = 프로토콜과 누적 요청 · 상태는 노드 카드 테두리 색과 상세 뱃지로 표시</li>
                   </ul>
                 </>
               )}
@@ -246,14 +264,47 @@ export function TopologyView() {
                       </tr>
                     </thead>
                     <tbody>
-                      {edge.routes.map((r) => (
-                        <tr key={`${r.protocol}-${r.route}`}>
-                          <td>{r.protocol}</td>
-                          <td className="ds-ident">{r.route}</td>
-                          <td className="ds-num">{num(r.count)}</td>
-                          <td className="ds-num">{num(r.errorCount)}</td>
-                        </tr>
-                      ))}
+                      {edge.routes.map((r) => {
+                        const routeKey = `${r.protocol}-${r.route}`;
+                        const open = openRoute === routeKey;
+                        return (
+                          <Fragment key={routeKey}>
+                            <tr>
+                              <td>{r.protocol}</td>
+                              <td className="ds-ident">
+                                {r.sample ? (
+                                  <button
+                                    type="button"
+                                    className="linkish topo-route-toggle"
+                                    aria-expanded={open}
+                                    onClick={() => setOpenRoute(open ? null : routeKey)}
+                                    title="최근 송수신 payload 표본 보기"
+                                  >
+                                    {r.route}
+                                  </button>
+                                ) : (
+                                  r.route
+                                )}
+                              </td>
+                              <td className="ds-num">{num(r.count)}</td>
+                              <td className="ds-num">{num(r.errorCount)}</td>
+                            </tr>
+                            {open && r.sample && (
+                              <tr className="topo-route-sample">
+                                <td colSpan={4}>
+                                  <div className="topo-route-sample__meta muted">
+                                    최근 payload 표본 · <strong>demo 생성값 — 실측 캡처 아님</strong> · 기준 {r.sample.capturedAt}
+                                  </div>
+                                  <div className="topo-route-sample__label">송신</div>
+                                  <HexDump hex={r.sample.sentHex} />
+                                  <div className="topo-route-sample__label">수신</div>
+                                  <HexDump hex={r.sample.receivedHex} />
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
                       <tr>
                         <td colSpan={2} style={{ font: "var(--type-label)", color: "var(--color-text-secondary)" }}>
                           합계

@@ -40,8 +40,8 @@ func TestTrendsAreDeterministic(t *testing.T) {
 	}
 	b, _ := d.Trends(context.Background(), target("payments"), window(), nil)
 
-	if len(a) != 4 {
-		t.Fatalf("기본 패널 4개: %d", len(a))
+	if len(a) != 5 {
+		t.Fatalf("기본 패널 5개(cpu·memory·network·io·restarts): %d", len(a))
 	}
 	for i := range a {
 		if a[i].ID != b[i].ID || len(a[i].Series) != len(b[i].Series) {

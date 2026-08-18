@@ -8,6 +8,7 @@ package demo
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -37,6 +38,15 @@ func New(c datasource.PodCatalog) *Source { return &Source{Catalog: c} }
 /* ── 결정적 잡음 ────────────────────────────────────────────────────────── */
 
 // noise는 키와 인덱스로 0~1 값을 만듭니다. 난수를 쓰지 않아 재실행해도 같습니다.
+// sampleHex는 결정적 데모 payload입니다. 같은 route는 항상 같은 표본을 돌려줍니다.
+func sampleHex(key string, n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(noise(key, i) * 256)
+	}
+	return hex.EncodeToString(b)
+}
+
 func noise(key string, i int) float64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(key))
@@ -79,16 +89,18 @@ var panelTitles = map[string]struct {
 	"cpu":      {"CPU 사용률", "percent", []string{"used", "requested"}},
 	"memory":   {"메모리 사용률", "percent", []string{"used", "requested"}},
 	"network":  {"네트워크", "bytes_per_sec", []string{"rx", "tx"}},
+	"io":       {"디스크 I/O", "bytes_per_sec", []string{"read", "write"}},
 	"restarts": {"컨테이너 재시작", "count", []string{"restarts"}},
 }
 
 var seriesLabel = map[string]string{
-	"used": "사용", "requested": "Request", "rx": "수신", "tx": "송신", "restarts": "재시작",
+	"used": "사용", "requested": "Request", "rx": "수신", "tx": "송신",
+	"read": "읽기", "write": "쓰기", "restarts": "재시작",
 }
 
 func (s *Source) Trends(_ context.Context, t datasource.Target, w datasource.Window, panels []string) ([]contract.TrendPanel, error) {
 	if len(panels) == 0 {
-		panels = []string{"cpu", "memory", "network", "restarts"}
+		panels = []string{"cpu", "memory", "network", "io", "restarts"}
 	}
 	out := make([]contract.TrendPanel, 0, len(panels))
 	for _, id := range panels {
@@ -142,6 +154,11 @@ func points(key string, w datasource.Window, panel, series string) []contract.Tr
 			v = base * 400 * 1024 * 1024
 			if series == "tx" {
 				v *= 0.6
+			}
+		case "io":
+			v = base * 60 * 1024 * 1024
+			if series == "write" {
+				v *= 0.4
 			}
 		case "restarts":
 			v = math.Floor(noise(key, bi) * 3)
@@ -556,7 +573,16 @@ func (s *Source) edge(clusterID string, from, to contract.TopologyNode, w dataso
 		e := int(float64(c) * noise(clusterID+r+"err", j) * 0.08)
 		total += c
 		errs += e
-		routes = append(routes, contract.TopologyRoute{Protocol: proto, Route: r, Count: c, ErrorCount: e})
+		routes = append(routes, contract.TopologyRoute{
+			Protocol: proto, Route: r, Count: c, ErrorCount: e,
+			// payload는 데모 표본입니다 — 실측 캡처 스택이 없으므로 결정적 생성값을
+			// 내려보내고 UI가 "실측 아님"을 표기합니다. (#31)
+			Sample: &contract.TopologyRouteSample{
+				SentHex:     sampleHex(clusterID+from.ID+to.ID+r+"sent", 64),
+				ReceivedHex: sampleHex(clusterID+from.ID+to.ID+r+"recv", 64),
+				CapturedAt:  w.To.UTC().Format(time.RFC3339),
+			},
+		})
 	}
 	sort.Slice(routes, func(a, b int) bool { return routes[a].Count > routes[b].Count })
 

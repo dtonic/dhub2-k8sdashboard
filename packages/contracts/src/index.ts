@@ -131,11 +131,8 @@ export interface TrendPoint {
 export interface TrendSeries {
   key: string;
   label: string;
-  /**
-   * 레거시 화면 DTO의 단위 부분집합입니다. 정본 텔레메트리 계약의 통합 단위는
-   * MetricUnit(telemetry.ts)이며, Query Catalog의 cores/millicores/mebibytes를 포함합니다.
-   */
-  unit: "percent" | "bytes" | "bytes_per_sec" | "count";
+  /** Query Catalog의 unit 값과 1:1입니다. 값은 원시 단위이며 표시는 UI가 자동 환산합니다. (#31) */
+  unit: "percent" | "bytes" | "bytes_per_sec" | "count" | "cores" | "millicores" | "mebibytes";
   points: TrendPoint[];
 }
 
@@ -579,6 +576,13 @@ export interface TopologyNode {
   external?: boolean;
 }
 
+/** Route의 최근 송수신 payload — **demo 표본**이며 실측 캡처가 아닙니다. (#31) */
+export interface TopologyRouteSample {
+  sentHex: string;
+  receivedHex: string;
+  capturedAt: string;
+}
+
 export interface TopologyRoute {
   protocol: Protocol;
   /** HTTP/gRPC는 API 경로, TCP/UDP는 라우트 식별자 */
@@ -586,6 +590,7 @@ export interface TopologyRoute {
   /** 선택된 시간 범위 누적 요청 수 */
   count: number;
   errorCount: number;
+  sample?: TopologyRouteSample;
 }
 
 export interface TopologyEdge {

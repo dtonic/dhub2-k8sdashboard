@@ -96,14 +96,14 @@
 /* ── 엣지: 흐름 애니메이션 ─────────────────────────────────────────────── */
 
 .topo-edge {
-  stroke-dasharray: 7 5;
-  animation: topo-dash 1.1s linear infinite;
-  opacity: 0.75;
+  stroke-dasharray: 6 6;
+  animation: topo-dash 1.8s linear infinite;
+  opacity: 0.5;
 }
 
 .topo-edge--selected {
   opacity: 1;
-  animation-duration: 0.7s;
+  animation-duration: 0.8s;
 }
 
 @keyframes topo-dash {
@@ -176,6 +176,38 @@
 
 .topo-canvas__bg {
   color: var(--color-border-subtle);
+}
+
+/* ── Route payload 표본 (hex 덤프) ─────────────────────────────────────── */
+
+.topo-route-toggle {
+  font: inherit;
+}
+
+.topo-route-sample td {
+  background: var(--color-surface-sunken);
+}
+
+.topo-route-sample__meta {
+  font: var(--type-meta);
+  margin-bottom: var(--space-2);
+}
+
+.topo-route-sample__label {
+  font: var(--type-label);
+  color: var(--color-text-secondary);
+  margin: var(--space-2) 0 var(--space-1);
+}
+
+.topo-hex {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
+  font: var(--type-code);
+  overflow-x: auto;
+  white-space: pre;
 }
 
 /* ── 편집 도구줄 ───────────────────────────────────────────────────────── */

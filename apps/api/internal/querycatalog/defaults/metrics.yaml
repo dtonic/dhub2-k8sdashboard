@@ -66,6 +66,24 @@ queries:
     timeout: 10s
     maxRange: 720h
 
+  - ref: metrics.io.read
+    type: promql_range
+    unit: bytes_per_sec
+    expr: sum by (k8s_cluster_name) (rate(container_fs_reads_bytes_total{$__scope}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
+  - ref: metrics.io.write
+    type: promql_range
+    unit: bytes_per_sec
+    expr: sum by (k8s_cluster_name) (rate(container_fs_writes_bytes_total{$__scope}[$__rate]))
+    minStep: 60s
+    maxDataPoints: 1000
+    timeout: 10s
+    maxRange: 720h
+
   - ref: metrics.restarts
     type: promql_range
     unit: count
@@ -109,6 +127,11 @@ panels:
     series:
       - { key: rx, label: 수신, query: metrics.network.rx }
       - { key: tx, label: 송신, query: metrics.network.tx }
+  - id: io
+    title: 디스크 I/O
+    series:
+      - { key: read, label: 읽기, query: metrics.io.read }
+      - { key: write, label: 쓰기, query: metrics.io.write }
   - id: restarts
     title: 컨테이너 재시작
     series:
