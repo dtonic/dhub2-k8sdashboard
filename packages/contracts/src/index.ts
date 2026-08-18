@@ -575,6 +575,8 @@ export interface TopologyNode {
   /** 레이아웃 열(0부터). 서버가 의존 방향으로 위상 정렬해 내려줍니다. */
   column: number;
   row: number;
+  /** 클러스터 밖 엔티티(Ingress Gateway·External Client 등). Pod 상세로 연결하지 않습니다. (#29) */
+  external?: boolean;
 }
 
 export interface TopologyRoute {

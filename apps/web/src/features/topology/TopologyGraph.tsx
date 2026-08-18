@@ -45,7 +45,7 @@ const COL_W = 320;
 const ROW_H = 132;
 const EDGE_LANE_OFFSET = 14;
 
-type PodNodeData = { name: string; namespace: string; severity: Severity };
+type PodNodeData = { name: string; namespace: string; severity: Severity; external: boolean };
 
 /* 상태 색은 예약된 상태 토큰만 씁니다 — severity마다 전용 토큰이 있습니다. */
 function severityVar(s: Severity): string {
@@ -68,7 +68,7 @@ function severityVar(s: Severity): string {
 function PodNode({ data }: NodeProps) {
   const d = data as PodNodeData;
   return (
-    <div className={`topo-node topo-node--${d.severity}`}>
+    <div className={`topo-node topo-node--${d.severity}${d.external ? " topo-node--external" : ""}`}>
       <Handle type="target" position={Position.Left} className="topo-node__handle" />
       <span className="topo-node__status">
         <StatusDot severity={d.severity} />
@@ -79,6 +79,7 @@ function PodNode({ data }: NodeProps) {
         </span>
         <span className="topo-node__ns muted">{d.namespace}</span>
       </span>
+      {d.external && <span className="topo-node__external-badge">외부</span>}
       <Handle type="source" position={Position.Right} className="topo-node__handle" />
     </div>
   );
@@ -161,15 +162,23 @@ function defaultPositions(nodes: TopologyNode[]): Map<string, { x: number; y: nu
     byFamily.get(family)!.push(n);
   }
   const pos = new Map<string, { x: number; y: number }>();
+  /* 외부 엔티티(Client·Gateway·External API)는 맨 왼쪽 전용 열에 세로로 쌓습니다.
+     내부 워크로드 열은 한 칸 오른쪽부터 시작합니다. (#29) */
+  const externals = nodes.filter((n) => n.external);
+  externals.forEach((n, row) => pos.set(n.id, { x: 0, y: row * (ROW_H + GROUP_GAP) }));
+
   const colHeights = Array.from({ length: MAX_COLS }, () => 0);
-  families.forEach((family, i) => {
-    const col = i % MAX_COLS;
-    const members = byFamily.get(family)!;
+  let col = 0;
+  for (const family of families) {
+    const members = byFamily.get(family)!.filter((n) => !n.external);
+    if (members.length === 0) continue;
+    const c = col % MAX_COLS;
     members.forEach((n, row) => {
-      pos.set(n.id, { x: col * COL_W, y: colHeights[col]! + row * ROW_H });
+      pos.set(n.id, { x: (1 + c) * COL_W, y: colHeights[c]! + row * ROW_H });
     });
-    colHeights[col]! += members.length * ROW_H + GROUP_GAP;
-  });
+    colHeights[c]! += members.length * ROW_H + GROUP_GAP;
+    col++;
+  }
   return pos;
 }
 
@@ -227,7 +236,7 @@ export function TopologyGraph({
           (editRef.current ? prevPos.get(n.id) : undefined) ??
           saved.get(n.id) ??
           defaults.get(n.id) ?? { x: 0, y: 0 },
-        data: { name: n.name, namespace: n.namespace, severity: n.severity } satisfies PodNodeData,
+        data: { name: n.name, namespace: n.namespace, severity: n.severity, external: n.external ?? false } satisfies PodNodeData,
         draggable: editMode,
         connectable: false,
       }));
@@ -283,7 +292,8 @@ export function TopologyGraph({
         onNodeClick={(_, node) => {
           if (editMode) return;
           const n = byId.get(node.id);
-          if (n) onSelectNode(n);
+          /* 외부 엔티티는 Pod 신원이 없으므로 상세 화면으로 보내지 않습니다. (#29) */
+          if (n && !n.external) onSelectNode(n);
         }}
         onEdgeClick={(_, edge) => onSelectEdge(edge.id)}
         nodesDraggable={editMode}

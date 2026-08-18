@@ -646,6 +646,9 @@ type TopologyNode struct {
 	Severity  Severity  `json:"severity"`
 	Column    int       `json:"column"`
 	Row       int       `json:"row"`
+	// External은 클러스터 밖 엔티티(Ingress Gateway·External Client 등)입니다.
+	// Pod 신원이 없으므로 상세 화면으로 연결하지 않습니다. (#29)
+	External bool `json:"external,omitempty"`
 }
 
 type TopologyRoute struct {

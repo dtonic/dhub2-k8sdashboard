@@ -463,8 +463,8 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 		order = append(order, k)
 	}
 	sort.Strings(order)
-	if len(order) > 12 {
-		order = order[:12]
+	if len(order) > 20 {
+		order = order[:20]
 	}
 
 	g := contract.TopologyGraph{}
@@ -479,22 +479,71 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			Severity:  contract.SeverityHealthy,
-			Column:    i % columns,
+			Column:    1 + i%columns,
 			Row:       i / columns,
 		})
 	}
+	internal := g.Nodes
 
-	// A→B와 B→A를 **각각 별도의 엣지**로 만듭니다. 하나로 합치면 방향별 수치를 볼 수 없습니다.
-	for i := 0; i+1 < len(g.Nodes); i++ {
-		a, b := g.Nodes[i], g.Nodes[i+1]
-		g.Edges = append(g.Edges, s.edge(t.ClusterID, a, b, w, i))
-		g.Edges = append(g.Edges, s.edge(t.ClusterID, b, a, w, i+100))
+	// 외부 엔티티 — 클러스터 밖 존재이므로 Pod 신원을 빌리지 않고 external로 표시합니다.
+	// 유입(Client→Gateway→진입 서비스)과 유출(내부→External API)을 모두 그립니다. (#29)
+	client := contract.TopologyNode{ID: "external-client", Ref: contract.EntityRef{ClusterID: t.ClusterID}, Name: "External Client", Namespace: "클러스터 외부", Severity: contract.SeverityHealthy, External: true, Column: 0, Row: 0}
+	gateway := contract.TopologyNode{ID: "ingress-gateway", Ref: contract.EntityRef{ClusterID: t.ClusterID}, Name: "Ingress Gateway", Namespace: "클러스터 경계", Severity: contract.SeverityHealthy, External: true, Column: 0, Row: 1}
+	externalAPI := contract.TopologyNode{ID: "external-api", Ref: contract.EntityRef{ClusterID: t.ClusterID}, Name: "External API", Namespace: "클러스터 외부", Severity: contract.SeverityHealthy, External: true, Column: 0, Row: 2}
+	g.Nodes = append(g.Nodes, client, gateway, externalAPI)
+
+	// 중복 방지 — edge ID가 from->to이므로 같은 방향을 두 번 만들면 화면 key가 깨집니다.
+	added := map[string]bool{}
+	add := func(from, to contract.TopologyNode, i int) {
+		key := from.ID + "->" + to.ID
+		if from.ID == to.ID || added[key] {
+			return
+		}
+		added[key] = true
+		g.Edges = append(g.Edges, s.edge(t.ClusterID, from, to, w, i))
 	}
-	// 한 칸 건너뛰는 호출 경로도 둡니다. 실제 그래프는 사슬 모양이 아닙니다.
-	for i := 0; i+2 < len(g.Nodes); i += 2 {
-		g.Edges = append(g.Edges, s.edge(t.ClusterID, g.Nodes[i], g.Nodes[i+2], w, i+200))
+
+	// 유입 경로: Client → Gateway → 진입 서비스 2~4개.
+	add(client, gateway, 300)
+	entries := minInt(2+int(noise(t.ClusterID+"entries", 0)*3), len(internal))
+	for k := 0; k < entries; k++ {
+		add(gateway, internal[k], 310+k)
+	}
+	// 유출 경로: 내부 서비스 일부가 External API를 호출합니다.
+	if n := len(internal); n > 0 {
+		add(internal[n-1], externalAPI, 330)
+		if n > 2 {
+			add(internal[n/2], externalAPI, 331)
+		}
+	}
+
+	// 내부는 부분 메시입니다 — 각 노드가 결정적 노이즈로 1~2개의 다른 노드를 호출하고,
+	// 절반가량은 응답 경로(B→A)도 별도 엣지로 둡니다. 사슬 모양은 실제 그래프가 아닙니다.
+	for i := range internal {
+		outs := 1 + int(noise(t.ClusterID+"deg", i)*2)
+		for k := 0; k < outs; k++ {
+			if len(internal) < 2 {
+				break
+			}
+			j := int(noise(t.ClusterID+"dst", i*7+k) * float64(len(internal)-1))
+			if j >= i {
+				j++
+			}
+			add(internal[i], internal[j], i*10+k)
+			// 첫 메시 엣지는 항상 왕복을 보장합니다 — 방향별 별도 선 규칙의 검증 대상입니다.
+			if (i == 0 && k == 0) || noise(t.ClusterID+"rev", i*10+k) > 0.5 {
+				add(internal[j], internal[i], i*10+k+500)
+			}
+		}
 	}
 	return g, nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *Source) edge(clusterID string, from, to contract.TopologyNode, w datasource.Window, i int) contract.TopologyEdge {

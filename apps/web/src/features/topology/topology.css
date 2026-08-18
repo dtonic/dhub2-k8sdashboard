@@ -53,6 +53,22 @@
   border-left-color: var(--status-unknown);
 }
 
+/* 외부 엔티티(Client·Gateway·External API) — 클러스터 밖임을 점선으로 구분합니다. */
+.topo-node--external {
+  border-style: dashed;
+  background: var(--color-surface-sunken);
+}
+
+.topo-node__external-badge {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
 .topo-node__body {
   display: flex;
   flex-direction: column;
