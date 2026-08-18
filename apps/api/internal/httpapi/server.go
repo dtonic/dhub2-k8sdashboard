@@ -28,6 +28,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
 )
@@ -57,6 +58,8 @@ type Deps struct {
 	StreamOptions      StreamOptions
 	DashboardStore     dashboard.Store
 	DashboardQueryRefs []string
+	// TopologyLayout은 공유 토폴로지 배치 저장소입니다. nil이면 배치 저장이 503입니다. (#28)
+	TopologyLayout *topologylayout.Store
 	// AllowedOrigin이 있으면 CORS 헤더를 붙입니다. 개발 중 Vite 오리진용입니다.
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
@@ -169,6 +172,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology", s.withProvider("topology", s.handleTopology))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/logs", s.withProvider("logs", s.handleLogs))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series", s.handleEdgeSeries)
+	m.HandleFunc("PUT /api/v1/clusters/{clusterId}/topology/layout", s.handleTopologyLayoutPut)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/alerts", s.handleAlerts)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
 }
@@ -433,6 +437,8 @@ func routeName(mux *http.ServeMux, r *http.Request) string {
 		return "topology"
 	case "GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series":
 		return "edge_series"
+	case "PUT /api/v1/clusters/{clusterId}/topology/layout":
+		return "topology_layout_put"
 	case "GET /api/v1/clusters/{clusterId}/alerts":
 		return "alerts"
 	case streamRoute:
@@ -528,7 +534,7 @@ func cacheKey(r *http.Request) string {
 		params = append(params, cache.Param{Name: k, Values: append([]string(nil), q[k]...)})
 	}
 	sc := scope.From(r.Context())
-	identScope := cache.ScopeIdentity{}
+	identScope := cache.ScopeIdentity{TopologyEditor: sc.CanEditTopology}
 	for _, c := range sc.Clusters {
 		identScope.Clusters = append(identScope.Clusters, cache.ClusterIdentity{ID: c.ID, All: c.All, Namespaces: append([]string(nil), c.Namespaces...)})
 	}

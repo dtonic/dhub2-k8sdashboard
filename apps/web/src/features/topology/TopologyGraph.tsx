@@ -1,209 +1,305 @@
-import { useMemo } from "react";
-import type { TopologyEdge, TopologyNode } from "@k8s-dashboard/contracts";
-import { compact, num } from "@/lib/format";
+import { useEffect, useMemo, useRef } from "react";
+import {
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  EdgeLabelRenderer,
+  getBezierPath,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import "./topology.css";
+import type { Severity, TopologyEdge, TopologyNode, TopologyNodePosition } from "@k8s-dashboard/contracts";
+import { StatusDot } from "@/components/primitives";
+import { compact } from "@/lib/format";
 
 /**
- * Pod Topology 그래프 (design-system `components/topology` 규칙을 그대로 구현)
+ * Pod Topology 그래프 — React Flow 기반. (#28)
  * --------------------------------------------------------------------------
- * - `A→B`와 `B→A`는 **서로 다른 선**입니다. 노드 중심선에서 각각 10px씩 반대편으로
- *   밀어 평행하게 그립니다(총 20px 분리). 방향마다 클릭 타겟과 상세 데이터가 다릅니다.
- * - 라벨(방향 캡슐)은 선보다 폭이 넓어 오프셋만으로는 겹칩니다. 선 위 후보 지점 중
- *   빈 자리를 골라 배치하고, 캡슐만 별도 레이어로 모든 선 위에 그립니다.
- * - 색은 **상태**, 두께는 트래픽 양, 프로토콜은 캡슐 텍스트입니다.
- *   색상 채널을 상태에 예약해야 "빨간 선 = 문제 경로"가 화면 어디서나 참이 됩니다.
- * - 각 선은 tabindex를 가진 버튼입니다. 키보드로 순회하고 Enter로 선택합니다.
+ * design-system topology 규칙은 렌더러가 바뀌어도 그대로입니다:
+ * - `A→B`와 `B→A`는 **서로 다른 선**입니다. 방향별로 곡선을 반대편으로 offset해
+ *   두 개의 평행한 베지어로 그립니다.
+ * - 선 색 = 상태(예약된 상태 토큰), 두께 = 트래픽 양, 프로토콜 = 캡슐 텍스트.
+ * - 캡슐과 선은 클릭/키보드로 선택할 수 있고 선택된 방향의 상세가 열립니다.
+ *
+ * 기본 배치는 **Pod 명칭(워크로드) 그룹별 세로 열**입니다 — 같은 워크로드의
+ * Pod들이 한 열을 이루고, 열과 열 사이를 곡선이 잇습니다. 관리자가 저장한
+ * 공유 배치(layout)가 있으면 그 좌표가 기본값을 덮습니다.
+ *
+ * 자동 갱신은 데이터만 바꿉니다 — 편집 중 드래그한 좌표는 서버 갱신이
+ * 지우지 않습니다. (CLAUDE.md: 사용자 상태를 갱신이 지우지 않습니다)
  */
 
-const NODE_W = 200;
-const NODE_H = 56;
-const EDGE_OFFSET = 10;
-const ARROW = 9;
-const VB_W = 1280;
-const VB_H = 470;
+const COL_W = 320;
+const ROW_H = 132;
+const EDGE_LANE_OFFSET = 14;
 
-const CAP_FRACTIONS = [0.38, 0.3, 0.46, 0.24, 0.54, 0.18, 0.62, 0.12];
+type PodNodeData = { name: string; namespace: string; severity: Severity };
 
-type Box = { x1: number; y1: number; x2: number; y2: number };
+/* 상태 색은 예약된 상태 토큰만 씁니다 — severity마다 전용 토큰이 있습니다. */
+function severityVar(s: Severity): string {
+  switch (s) {
+    case "critical":
+      return "var(--status-critical)";
+    case "warning":
+      return "var(--status-warning)";
+    case "degraded":
+      return "var(--status-degraded)";
+    case "progressing":
+      return "var(--status-progressing)";
+    case "healthy":
+      return "var(--status-healthy)";
+    default:
+      return "var(--status-unknown)";
+  }
+}
 
-/* 열 간격은 노드 폭 + 캡슐이 들어갈 여유(120px)를 확보합니다.
-   여유가 없으면 캡슐이 노드 위로 밀려 이름을 가립니다. */
-const posOf = (n: TopologyNode) => ({ x: 120 + n.column * 320, y: 95 + n.row * 145 });
+function PodNode({ data }: NodeProps) {
+  const d = data as PodNodeData;
+  return (
+    <div className={`topo-node topo-node--${d.severity}`}>
+      <Handle type="target" position={Position.Left} className="topo-node__handle" />
+      <span className="topo-node__status">
+        <StatusDot severity={d.severity} />
+      </span>
+      <span className="topo-node__body">
+        <span className="topo-node__name ds-ident" title={d.name}>
+          {d.name}
+        </span>
+        <span className="topo-node__ns muted">{d.namespace}</span>
+      </span>
+      <Handle type="source" position={Position.Right} className="topo-node__handle" />
+    </div>
+  );
+}
+
+type TrafficEdgeData = {
+  proto: string;
+  total: number;
+  severity: Severity;
+  width: number;
+  lane: 1 | -1;
+  /** 캡슐이 서로 겹치지 않도록 곡선 위 위치를 흩뿌리는 지수. */
+  stagger: number;
+  fromName: string;
+  toName: string;
+  selected: boolean;
+  onSelect: (id: string) => void;
+};
+
+function TrafficEdge(props: EdgeProps) {
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd } = props;
+  const d = props.data as TrafficEdgeData;
+  /* 방향별 lane offset — 같은 두 노드 사이의 왕복이 한 선으로 겹치지 않습니다. */
+  const off = EDGE_LANE_OFFSET * d.lane;
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY: sourceY + off,
+    targetX,
+    targetY: targetY + off,
+    sourcePosition,
+    targetPosition,
+    curvature: 0.4,
+  });
+  const color = severityVar(d.severity);
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        className={d.selected ? "topo-edge topo-edge--selected" : "topo-edge"}
+        style={{ stroke: color, strokeWidth: d.selected ? d.width + 1.2 : d.width }}
+      />
+      <EdgeLabelRenderer>
+        <button
+          type="button"
+          className={d.selected ? "topo-edge__cap topo-edge__cap--selected" : "topo-edge__cap"}
+          style={{ transform: `translate(-50%, -50%) translate(${labelX + d.stagger}px, ${labelY}px)` }}
+          onClick={() => d.onSelect(id)}
+          aria-pressed={d.selected}
+          aria-label={`${d.fromName}에서 ${d.toName}로 가는 ${d.proto} 경로 선택 · 누적 ${d.total}건`}
+        >
+          {d.proto} {compact(d.total)}
+        </button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const nodeTypes = { pod: PodNode };
+const edgeTypes = { traffic: TrafficEdge };
+
+/**
+ * 워크로드(Pod 명칭 그룹) 기준 열 배치를 계산합니다.
+ * 같은 그룹의 Pod들은 **한 열에 연속으로** 쌓이고, 그룹이 많으면 4개 열에
+ * 순환 배치해 화면이 한 줄로 길어지지 않게 합니다(서버 기본 열 수와 동일).
+ */
+const MAX_COLS = 4;
+const GROUP_GAP = 60;
+
+function defaultPositions(nodes: TopologyNode[]): Map<string, { x: number; y: number }> {
+  const families: string[] = [];
+  const byFamily = new Map<string, TopologyNode[]>();
+  for (const n of nodes) {
+    const family = `${n.namespace}/${n.ref.workloadName || n.name}`;
+    if (!byFamily.has(family)) {
+      byFamily.set(family, []);
+      families.push(family);
+    }
+    byFamily.get(family)!.push(n);
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  const colHeights = Array.from({ length: MAX_COLS }, () => 0);
+  families.forEach((family, i) => {
+    const col = i % MAX_COLS;
+    const members = byFamily.get(family)!;
+    members.forEach((n, row) => {
+      pos.set(n.id, { x: col * COL_W, y: colHeights[col]! + row * ROW_H });
+    });
+    colHeights[col]! += members.length * ROW_H + GROUP_GAP;
+  });
+  return pos;
+}
 
 export function TopologyGraph({
-  nodes,
-  edges,
+  nodes: graphNodes,
+  edges: graphEdges,
+  savedPositions,
   selectedEdgeId,
+  editMode,
+  editSession,
   onSelectEdge,
   onSelectNode,
+  onPositionsChange,
 }: {
   nodes: TopologyNode[];
   edges: TopologyEdge[];
+  /** 서버에 저장된 공유 배치. 기본 열 배치보다 우선합니다. */
+  savedPositions: TopologyNodePosition[] | null;
   selectedEdgeId: string | null;
+  /** true면 노드를 드래그할 수 있고, 서버 갱신이 좌표를 덮지 않습니다. */
+  editMode: boolean;
+  /** 값이 바뀌면 편집 중 좌표를 버리고 저장/기본 배치로 되돌립니다(취소). */
+  editSession: number;
   onSelectEdge: (id: string) => void;
   onSelectNode: (node: TopologyNode) => void;
+  onPositionsChange?: (positions: TopologyNodePosition[]) => void;
 }) {
-  const layout = useMemo(() => {
-    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
-    /* 노드 박스를 먼저 점유 목록에 넣습니다. 캡슐이 노드 위에 얹히면 이름을 가립니다. */
-    const placed: Box[] = nodes.map((n) => {
-      const p = posOf(n);
-      return { x1: p.x - NODE_W / 2 - 4, y1: p.y - NODE_H / 2 - 4, x2: p.x + NODE_W / 2 + 4, y2: p.y + NODE_H / 2 + 4 };
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges] = useEdgesState<Edge>([]);
+  const byId = useMemo(() => new Map(graphNodes.map((n) => [n.id, n])), [graphNodes]);
+  const editRef = useRef(editMode);
+  editRef.current = editMode;
+  /* 현재 좌표의 사본 — 저장 시점에 부모가 최신 좌표를 받도록 drag stop마다 갱신합니다. */
+  const posRef = useRef(new Map<string, { x: number; y: number }>());
+
+  const savedKey = useMemo(() => JSON.stringify(savedPositions ?? []), [savedPositions]);
+
+  const emitPositions = () => {
+    onPositionsChange?.(
+      Array.from(posRef.current, ([id, p]) => ({ id, x: Math.round(p.x), y: Math.round(p.y) })),
+    );
+  };
+
+  /* 노드 동기화 — 편집 중에는 기존 좌표를 유지하고, 조회 모드에서는
+     저장 배치 → 기본 열 배치 순서로 서버가 이깁니다. */
+  useEffect(() => {
+    const saved = new Map((savedPositions ?? []).map((p) => [p.id, { x: p.x, y: p.y }]));
+    const defaults = defaultPositions(graphNodes);
+    setNodes((prev) => {
+      const prevPos = new Map(prev.map((p) => [p.id, p.position]));
+      const next = graphNodes.map((n) => ({
+        id: n.id,
+        type: "pod",
+        position:
+          (editRef.current ? prevPos.get(n.id) : undefined) ??
+          saved.get(n.id) ??
+          defaults.get(n.id) ?? { x: 0, y: 0 },
+        data: { name: n.name, namespace: n.namespace, severity: n.severity } satisfies PodNodeData,
+        draggable: editMode,
+        connectable: false,
+      }));
+      posRef.current = new Map(next.map((n) => [n.id, n.position]));
+      return next;
     });
+    /* 편집 모드에서는 드래그 전에도 부모가 현재 좌표를 알아야 "저장"이 가능합니다. */
+    if (editRef.current) emitPositions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savedPositions는 savedKey로 비교합니다.
+  }, [graphNodes, savedKey, editMode, editSession, setNodes]);
 
-    const items = edges.map((e) => {
-      const a = posOf(byId[e.from]!);
-      const b = posOf(byId[e.to]!);
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.max(1, Math.hypot(dx, dy));
-      const ux = dx / len;
-      const uy = dy / len;
-      const px = -uy;
-      const py = ux;
-      const hw = NODE_W / 2 + 8;
-      const hh = NODE_H / 2 + 8;
-      const t = Math.min(
-        Math.abs(ux) < 1e-6 ? Infinity : hw / Math.abs(ux),
-        Math.abs(uy) < 1e-6 ? Infinity : hh / Math.abs(uy),
-      );
-      const ox = px * EDGE_OFFSET;
-      const oy = py * EDGE_OFFSET;
-      const x1 = a.x + ux * t + ox;
-      const y1 = a.y + uy * t + oy;
-      const x2 = b.x - ux * (t + ARROW) + ox;
-      const y2 = b.y - uy * (t + ARROW) + oy;
-      const tipX = b.x - ux * t + ox;
-      const tipY = b.y - uy * t + oy;
-
-      const proto = e.protocols.join("/");
-      /* 캡슐은 좁습니다. 정확한 수치는 아래 상세 표에 있으므로 축약합니다. */
-      const capText = `${proto} ${compact(e.totalCount)}`;
-      const capW = capText.length * 5.6 + 14;
-
-      /* 라벨 충돌 회피 — 빈 자리를 찾고, 없으면 **가장 덜 겹치는** 자리를 고릅니다.
-         첫 후보로 되돌아가면 짧은 수평 선에서 라벨이 노드 이름을 가립니다. */
-      let cap = { cx: x1 + (x2 - x1) * 0.38, cy: y1 + (y2 - y1) * 0.38 };
-      let capBox: Box | null = null;
-      let bestArea = Infinity;
-      for (const f of CAP_FRACTIONS) {
-        const cx = x1 + (x2 - x1) * f;
-        const cy = y1 + (y2 - y1) * f;
-        const box: Box = { x1: cx - capW / 2 - 4, y1: cy - 13, x2: cx + capW / 2 + 4, y2: cy + 13 };
-        const area = placed.reduce((sum, q) => {
-          const w = Math.min(box.x2, q.x2) - Math.max(box.x1, q.x1);
-          const h = Math.min(box.y2, q.y2) - Math.max(box.y1, q.y1);
-          return sum + (w > 0 && h > 0 ? w * h : 0);
-        }, 0);
-        if (area < bestArea) {
-          bestArea = area;
-          cap = { cx, cy };
-          capBox = box;
-        }
-        if (area === 0) break;
-      }
-      if (capBox) placed.push(capBox);
-
-      const w = 4.5;
-      const bx = tipX - ux * ARROW;
-      const by = tipY - uy * ARROW;
-      const arrow = `M ${tipX} ${tipY} L ${bx + px * w} ${by + py * w} L ${bx - px * w} ${by - py * w} Z`;
-      const stroke = Math.max(2, Math.min(6, 2 + Math.log10(e.totalCount / 40000 + 1) * 3));
-
-      return { e, x1, y1, x2, y2, arrow, cap, capText, capW, stroke, proto };
-    });
-
-    return items;
-  }, [nodes, edges]);
-
-  const selected = edges.find((e) => e.id === selectedEdgeId) ?? null;
-  const active = new Set(selected ? [selected.from, selected.to] : []);
+  /* 엣지 동기화 — 두께는 트래픽 양을 최댓값 대비로 정규화합니다. */
+  useEffect(() => {
+    const maxCount = Math.max(1, ...graphEdges.map((e) => e.totalCount));
+    setEdges(
+      graphEdges.map((e, i) => {
+        const severity = e.severity;
+        return {
+          id: e.id,
+          source: e.from,
+          target: e.to,
+          type: "traffic",
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: severityVar(severity) },
+          data: {
+            proto: e.protocols.join("/"),
+            total: e.totalCount,
+            severity,
+            width: 1.5 + 3.5 * (e.totalCount / maxCount),
+            lane: (e.from < e.to ? 1 : -1) as 1 | -1,
+            stagger: ((i % 5) - 2) * 30,
+            fromName: byId.get(e.from)?.name ?? e.from,
+            toName: byId.get(e.to)?.name ?? e.to,
+            selected: e.id === selectedEdgeId,
+            onSelect: onSelectEdge,
+          } satisfies TrafficEdgeData,
+        };
+      }),
+    );
+  }, [graphEdges, byId, selectedEdgeId, onSelectEdge, setEdges]);
 
   return (
-    <div className="ds-topology__canvas">
-      <svg
-        className="ds-topology__svg"
-        viewBox={`0 0 ${VB_W} ${VB_H}`}
-        role="application"
-        aria-label="Pod 간 통신 토폴로지. 선을 선택하면 방향별 요청 상세를 볼 수 있습니다."
+    <div className={editMode ? "topo-canvas topo-canvas--edit" : "topo-canvas"}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={(_, __, dragged) => {
+          for (const n of dragged) posRef.current.set(n.id, n.position);
+          emitPositions();
+        }}
+        onNodeClick={(_, node) => {
+          if (editMode) return;
+          const n = byId.get(node.id);
+          if (n) onSelectNode(n);
+        }}
+        onEdgeClick={(_, edge) => onSelectEdge(edge.id)}
+        nodesDraggable={editMode}
+        nodesConnectable={false}
+        elementsSelectable
+        fitView
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+        minZoom={0.2}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+        aria-label="Pod 통신 그래프. 선을 클릭하면 방향별 상세가 열립니다."
       >
-        {/* 선 레이어 */}
-        {layout.map((l) => {
-          const dim = selected && l.e.id !== selected.id ? " ds-topo-edge--dimmed" : "";
-          const on = selected && l.e.id === selected.id ? " ds-topo-edge--selected" : "";
-          return (
-            <g
-              key={l.e.id}
-              className={`ds-topo-edge ds-topo-edge--${l.e.severity}${dim}${on}`}
-              tabIndex={0}
-              role="button"
-              aria-label={`${l.e.from}에서 ${l.e.to}로 ${l.proto} 요청 ${num(l.e.totalCount)}건, 에러율 ${(l.e.errorRate * 100).toFixed(1)}%`}
-              onClick={() => onSelectEdge(l.e.id)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" || ev.key === " ") {
-                  ev.preventDefault();
-                  onSelectEdge(l.e.id);
-                }
-              }}
-            >
-              <line className="ds-topo-edge__hit" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} />
-              <line className="ds-topo-edge__line" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} strokeWidth={l.stroke} />
-              <path className="ds-topo-edge__arrow" d={l.arrow} />
-            </g>
-          );
-        })}
-
-        {/* 캡슐 레이어 — 모든 선 위에 그립니다 */}
-        {layout.map((l) => {
-          const dim = selected && l.e.id !== selected.id ? " ds-topo-edge--dimmed" : "";
-          return (
-            <g
-              key={`cap-${l.e.id}`}
-              className={`ds-topo-cap ds-topo-edge--${l.e.severity}${dim}`}
-              aria-hidden="true"
-              onClick={() => onSelectEdge(l.e.id)}
-            >
-              <rect className="ds-topo-edge__cap" x={l.cap.cx - l.capW / 2} y={l.cap.cy - 9} width={l.capW} height={18} />
-              <text className="ds-topo-edge__cap-text" x={l.cap.cx} y={l.cap.cy + 3.5} textAnchor="middle">
-                {l.capText}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* 노드 레이어 */}
-        {nodes.map((n) => {
-          const p = posOf(n);
-          const x = p.x - NODE_W / 2;
-          const y = p.y - NODE_H / 2;
-          const dim = selected && !active.has(n.id) ? " ds-topo-node--dimmed" : "";
-          return (
-            <g
-              key={n.id}
-              className={`ds-topo-node ds-topo-node--${n.severity}${dim}`}
-              tabIndex={0}
-              role="button"
-              aria-label={`${n.name}, 상태 ${n.severity}. Pod 상세로 이동`}
-              onClick={() => onSelectNode(n)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" || ev.key === " ") {
-                  ev.preventDefault();
-                  onSelectNode(n);
-                }
-              }}
-            >
-              <rect className="ds-topo-node__box" x={x} y={y} width={NODE_W} height={NODE_H} rx={8} />
-              <rect className="ds-topo-node__rail" x={x + 5} y={y + 10} width={4} height={NODE_H - 20} rx={2} />
-              <text className="ds-topo-node__name" x={x + 18} y={y + 24}>
-                {n.name.length > 27 ? `${n.name.slice(0, 26)}…` : n.name}
-                <title>{n.name}</title>
-              </text>
-              <text className="ds-topo-node__meta" x={x + 18} y={y + 41}>
-                {n.namespace} · {n.severity}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} className="topo-canvas__bg" />
+        <Controls showInteractive={false} position="bottom-left" />
+        <MiniMap pannable zoomable position="bottom-right" nodeStrokeWidth={2} className="topo-canvas__minimap" />
+      </ReactFlow>
     </div>
   );
 }

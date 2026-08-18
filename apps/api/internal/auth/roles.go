@@ -68,6 +68,7 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 	}
 
 	all := false
+	admin := false
 	nsSet := map[string]bool{}
 
 	for _, role := range claims.Roles {
@@ -76,6 +77,7 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 		case RolePlatformAdmin:
 			if !hasArg {
 				all = true
+				admin = true
 				p.CanPublish = true
 			}
 		case RoleDashboardEditor:
@@ -112,7 +114,8 @@ func ScopeFor(claims Claims, clusterID, clusterName string) (Principal, scope.Sc
 		sort.Strings(c.Namespaces)
 	}
 	// 보안 주체와 감사 식별자는 변경 가능한 표시용 클레임이 아니라 OIDC sub입니다.
-	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, Clusters: []scope.Cluster{c}}
+	// 토폴로지 공유 배치 편집은 platform.admin에서만 파생합니다. (#28)
+	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, CanEditTopology: admin, Clusters: []scope.Cluster{c}}
 }
 
 // ScopeForCentral is fail-closed for multi-cluster deployments: only explicit
@@ -126,6 +129,7 @@ func ScopeForCentral(claims Claims, configured []scope.Cluster) (Principal, scop
 		}
 		known[c.ID] = c
 	}
+	admin := false
 	access := map[string]*scope.Cluster{}
 	get := func(id string) *scope.Cluster {
 		if c := access[id]; c != nil {
@@ -148,6 +152,7 @@ func ScopeForCentral(claims Claims, configured []scope.Cluster) (Principal, scop
 				for id := range known {
 					get(id).All = true
 				}
+				admin = true
 				p.CanPublish = true
 			}
 		case RoleDashboardEditor:
@@ -179,7 +184,7 @@ func ScopeForCentral(claims Claims, configured []scope.Cluster) (Principal, scop
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, Clusters: out}
+	return p, scope.Scope{Subject: p.Subject, CanEditDashboard: p.CanEdit, CanPublishDashboard: p.CanPublish, CanEditTopology: admin, Clusters: out}
 }
 func unique(in []string) []string {
 	if len(in) < 2 {

@@ -615,6 +615,47 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/topology/layout:
+    put:
+      operationId: putTopologyLayout
+      summary: Topology 공유 배치 저장 (platform.admin 전용)
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positions:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TopologyNodePosition"
+      responses:
+        "200":
+          description: "TopologyLayout — 원본: packages/contracts/src/index.ts. 빈 positions는 배치 초기화입니다."
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopologyLayout"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/InternalError"
   /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series:
     get:
       operationId: getTopologyEdgeSeries
@@ -1196,6 +1237,12 @@ components:
     TopologyEdgeSeriesResponse:
       type: object
       description: "원본: src/index.ts의 TopologyEdgeSeriesResponse"
+    TopologyNodePosition:
+      type: object
+      description: "원본: src/index.ts의 TopologyNodePosition"
+    TopologyLayout:
+      type: object
+      description: "원본: src/index.ts의 TopologyLayout"
     AlertListResponse:
       type: object
       description: "원본: src/index.ts의 AlertListResponse"

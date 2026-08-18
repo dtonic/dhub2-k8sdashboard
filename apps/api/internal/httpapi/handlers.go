@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
 )
 
 // eventLimit은 화면에 싣는 이벤트 수 상한입니다. 전부 내려보내면 응답이 수 MB가 됩니다.
@@ -405,8 +407,62 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 
 		graph, err := s.deps.Topology.Graph(ctx, dsTarget(c, f), dsWindow(win))
 		out.Graph = dsSection(graph, err, contract.SourceGreptimeDB, "GreptimeDB")
+
+		// 공유 배치는 표시 편의 데이터입니다 — 조회 실패는 화면을 degrade하지 않고
+		// 기본 배치(null)로 내려갑니다. (#28)
+		out.CanEditLayout = scope.From(ctx).CanEditTopology && s.deps.TopologyLayout != nil
+		if s.deps.TopologyLayout != nil {
+			if l, lerr := s.deps.TopologyLayout.Get(ctx, c.ID); lerr == nil {
+				out.Layout = l
+			}
+		}
 		return out, nil
 	})
+}
+
+// handleTopologyLayoutPut은 공유 배치 저장입니다. platform.admin(또는 AUTH_MODE=none)만
+// 허용하며, Scope 검증은 요청 파라미터가 아니라 서버가 해석한 Scope로만 합니다. (#28)
+func (s *Server) handleTopologyLayoutPut(w http.ResponseWriter, r *http.Request) {
+	sc := scope.From(r.Context())
+	clusterID := r.PathValue("clusterId")
+	var target *scope.Cluster
+	for i := range sc.Clusters {
+		if sc.Clusters[i].ID == clusterID {
+			target = &sc.Clusters[i]
+			break
+		}
+	}
+	if target == nil || !target.Accessible() {
+		writeError(w, r, http.StatusForbidden, "cluster_access_denied", "이 클러스터에 대한 권한이 없습니다.")
+		return
+	}
+	if !sc.CanEditTopology {
+		writeError(w, r, http.StatusForbidden, "forbidden", "토폴로지 배치를 저장할 권한이 없습니다.")
+		return
+	}
+	if s.deps.TopologyLayout == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "layout_store_unavailable", "배치 저장소를 사용할 수 없습니다.")
+		return
+	}
+	var body struct {
+		Positions []contract.TopologyNodePosition `json:"positions"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_body", "요청 본문이 올바르지 않습니다.")
+		return
+	}
+	layout, err := s.deps.TopologyLayout.Put(r.Context(), clusterID, body.Positions)
+	if err != nil {
+		if errors.Is(err, topologylayout.ErrInvalid) {
+			writeError(w, r, http.StatusBadRequest, "invalid_layout", "배치 값이 허용 범위를 벗어났습니다.")
+			return
+		}
+		writeError(w, r, http.StatusInternalServerError, "layout_store_error", "배치를 저장하지 못했습니다.")
+		return
+	}
+	writeJSON(w, http.StatusOK, layout)
 }
 
 func (s *Server) handleEdgeSeries(w http.ResponseWriter, r *http.Request) {

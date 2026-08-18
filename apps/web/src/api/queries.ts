@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AlertListResponse,
   ClusterOverviewResponse,
@@ -9,10 +9,12 @@ import type {
   RangeKey,
   ScopeResponse,
   TopologyEdgeSeriesResponse,
+  TopologyLayout,
+  TopologyNodePosition,
   TopologyResponse,
   WorkloadDetailResponse,
 } from "@k8s-dashboard/contracts";
-import { apiGet, HttpError } from "./client";
+import { apiGet, apiRequest, HttpError } from "./client";
 
 export const queryKeys = {
   scope: ["scope"] as const,
@@ -244,6 +246,23 @@ export function useTopology(clusterId: string, ns: string, range: RangeKey, refr
         signal,
       ),
     refetchInterval: refreshMs > 0 ? refreshMs : false,
+  });
+}
+
+/**
+ * 공유 배치 저장 (관리자 전용). 성공하면 topology 화면을 다시 조회해
+ * 모든 패널이 같은 저장본을 보게 합니다. 빈 positions는 기본 배치로 초기화합니다. (#28)
+ */
+export function useSaveTopologyLayout(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (positions: TopologyNodePosition[]) =>
+      apiRequest<TopologyLayout>(`/api/v1/clusters/${encodeURIComponent(clusterId)}/topology/layout`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positions }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["topology", clusterId] }),
   });
 }
 

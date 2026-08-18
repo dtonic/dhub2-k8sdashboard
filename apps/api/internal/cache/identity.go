@@ -10,6 +10,9 @@ import (
 
 type ScopeIdentity struct {
 	Clusters []ClusterIdentity `json:"clusters"`
+	// TopologyEditor는 응답에 편집 capability가 실리는 화면에서 admin과 viewer가
+	// 캐시를 공유하지 않도록 키를 가릅니다. (#28)
+	TopologyEditor bool `json:"topologyEditor,omitempty"`
 }
 type ClusterIdentity struct {
 	ID         string   `json:"id"`

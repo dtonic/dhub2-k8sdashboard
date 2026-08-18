@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { RANGE_LABEL } from "@k8s-dashboard/contracts";
-import { topoKeys, useEdgeSeries, useTopology } from "@/api/queries";
+import { RANGE_LABEL, type TopologyNodePosition } from "@k8s-dashboard/contracts";
+import { topoKeys, useEdgeSeries, useSaveTopologyLayout, useTopology } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { LineChart } from "@/components/LineChart";
 import { Panel, StatTile, StatusBadge } from "@/components/primitives";
@@ -33,6 +33,33 @@ export function TopologyView() {
   const edge = graph?.edges.find((e) => e.id === selectedEdgeId) ?? null;
   const [mode, setMode] = useState<"table" | "chart">("table");
   const series = useEdgeSeries(clusterId, mode === "chart" ? selectedEdgeId : null, range);
+
+  /* 공유 배치 편집 (#28) — Edit 모드는 조회 상태가 아니라 도구 상태이므로 URL이 아닌
+     로컬 state에 둡니다. 드래그 좌표는 렌더와 무관하므로 ref로 받습니다. */
+  const [editMode, setEditMode] = useState(false);
+  const [editSession, setEditSession] = useState(0);
+  const pendingPositions = useRef<TopologyNodePosition[] | null>(null);
+  const saveLayout = useSaveTopologyLayout(clusterId);
+  const canEdit = q.data?.canEditLayout ?? false;
+
+  const exitEdit = () => {
+    setEditMode(false);
+    setEditSession((v) => v + 1); // 편집 중 좌표를 버리고 저장/기본 배치로 되돌립니다.
+    pendingPositions.current = null;
+  };
+  const save = () => {
+    const positions = pendingPositions.current;
+    if (!positions) return setEditMode(false);
+    saveLayout.mutate(positions, {
+      onSuccess: () => {
+        setEditMode(false);
+        pendingPositions.current = null;
+      },
+    });
+  };
+  const resetLayout = () => {
+    saveLayout.mutate([], { onSuccess: () => exitEdit() });
+  };
 
   const nodeName = (id?: string) => graph?.nodes.find((n) => n.id === id)?.name ?? id ?? "";
   const reverse = edge && graph?.edges.some((e) => e.from === edge.to && e.to === edge.from);
@@ -74,9 +101,37 @@ export function TopologyView() {
 
           <Panel
             title="통신 그래프"
-            subtitle="선을 클릭하면 방향별 상세가 열립니다 · A→B와 B→A는 20px 떨어진 별도 선입니다"
+            subtitle={
+              editMode
+                ? "편집 모드 — 노드를 드래그해 배치를 바꾼 뒤 저장하세요. 저장된 배치는 모든 사용자에게 적용됩니다."
+                : "선을 클릭하면 방향별 상세가 열립니다 · A→B와 B→A는 방향별 별도 선입니다"
+            }
             section={q.data?.graph}
             referenceIso={q.data?.generatedAt}
+            actions={
+              canEdit && (
+                <span className="topo-toolbar">
+                  {editMode ? (
+                    <>
+                      {saveLayout.isError && <span className="topo-toolbar__hint" role="alert">저장 실패 — 다시 시도하세요</span>}
+                      <button type="button" className="linkish" onClick={resetLayout} disabled={saveLayout.isPending}>
+                        기본 배치로
+                      </button>
+                      <button type="button" className="linkish" onClick={exitEdit} disabled={saveLayout.isPending}>
+                        취소
+                      </button>
+                      <button type="button" onClick={save} disabled={saveLayout.isPending}>
+                        {saveLayout.isPending ? "저장 중…" : "배치 저장"}
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setEditMode(true)}>
+                      배치 편집
+                    </button>
+                  )}
+                </span>
+              )
+            }
           >
             <SectionView
               section={q.data?.graph}
@@ -89,7 +144,13 @@ export function TopologyView() {
                   <TopologyGraph
                     nodes={g.nodes}
                     edges={g.edges}
+                    savedPositions={q.data?.layout?.positions ?? null}
                     selectedEdgeId={selectedEdgeId}
+                    editMode={editMode}
+                    editSession={editSession}
+                    onPositionsChange={(positions) => {
+                      pendingPositions.current = positions;
+                    }}
                     onSelectEdge={(id) =>
                       setParams(
                         (prev) => {

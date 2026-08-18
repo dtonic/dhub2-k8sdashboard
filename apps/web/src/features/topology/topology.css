@@ -1,0 +1,176 @@
+/* Pod Topology (React Flow) — 색은 전부 역할 토큰만 씁니다. (#28) */
+
+.topo-canvas {
+  height: 520px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  overflow: hidden;
+}
+
+.topo-canvas--edit {
+  border-color: var(--color-border-focus);
+  border-style: dashed;
+}
+
+.topo-canvas .react-flow__attribution {
+  display: none;
+}
+
+/* ── 노드 카드 ─────────────────────────────────────────────────────────── */
+
+.topo-node {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 220px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--status-healthy);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  font: var(--type-body);
+  color: var(--color-text-primary);
+}
+
+.topo-node--warning {
+  border-left-color: var(--status-warning);
+}
+
+.topo-node--degraded {
+  border-left-color: var(--status-degraded);
+}
+
+.topo-node--progressing {
+  border-left-color: var(--status-progressing);
+}
+
+.topo-node--critical {
+  border-left-color: var(--status-critical);
+}
+
+.topo-node--unknown {
+  border-left-color: var(--status-unknown);
+}
+
+.topo-node__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topo-node__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 168px;
+}
+
+.topo-node__ns {
+  font: var(--type-meta);
+}
+
+.topo-node__handle {
+  width: 6px;
+  height: 6px;
+  background: var(--color-border-strong);
+  border: none;
+}
+
+/* ── 엣지: 흐름 애니메이션 ─────────────────────────────────────────────── */
+
+.topo-edge {
+  stroke-dasharray: 7 5;
+  animation: topo-dash 1.1s linear infinite;
+  opacity: 0.75;
+}
+
+.topo-edge--selected {
+  opacity: 1;
+  animation-duration: 0.7s;
+}
+
+@keyframes topo-dash {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topo-edge {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+/* ── 방향 캡슐 ─────────────────────────────────────────────────────────── */
+
+.topo-edge__cap {
+  position: absolute;
+  pointer-events: all;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font: var(--type-meta);
+  cursor: pointer;
+}
+
+.topo-edge__cap:hover,
+.topo-edge__cap--selected {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+/* ── React Flow 부속(컨트롤·미니맵)을 토큰에 맞춥니다 ─────────────────── */
+
+.topo-canvas .react-flow__controls {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.topo-canvas .react-flow__controls-button {
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  fill: var(--color-text-primary);
+}
+
+.topo-canvas .react-flow__controls-button:hover {
+  background: var(--color-surface-hover);
+}
+
+.topo-canvas__minimap {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+
+.topo-canvas .react-flow__minimap-mask {
+  fill: var(--color-border-subtle);
+  fill-opacity: 0.4;
+}
+
+.topo-canvas .react-flow__minimap-node {
+  fill: var(--color-text-muted);
+  fill-opacity: 0.5;
+}
+
+.topo-canvas__bg {
+  color: var(--color-border-subtle);
+}
+
+/* ── 편집 도구줄 ───────────────────────────────────────────────────────── */
+
+.topo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.topo-toolbar__hint {
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}

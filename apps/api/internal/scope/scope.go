@@ -20,6 +20,9 @@ type Scope struct {
 	// Dashboard 권한은 인식된 OIDC 역할에서만 파생합니다.
 	CanEditDashboard    bool
 	CanPublishDashboard bool
+	// CanEditTopology는 Pod Topology의 공유 배치를 저장할 수 있는 권한입니다.
+	// OIDC에서는 platform.admin에서만 파생하고, AUTH_MODE=none(개발·데모)은 허용합니다. (#28)
+	CanEditTopology bool
 	// Clusters는 접근 가능한 클러스터입니다.
 	Clusters []Cluster
 }

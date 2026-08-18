@@ -678,6 +678,19 @@ type TopologyGraph struct {
 	Edges []TopologyEdge `json:"edges"`
 }
 
+// TopologyNodePosition은 관리자가 저장한 노드 좌표입니다. (#28)
+type TopologyNodePosition struct {
+	ID string  `json:"id"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+}
+
+// TopologyLayout은 모든 사용자가 공유하는 저장 배치입니다.
+type TopologyLayout struct {
+	Positions []TopologyNodePosition `json:"positions"`
+	UpdatedAt string                 `json:"updatedAt"`
+}
+
 type TopologyResponse struct {
 	ClusterID   string                 `json:"clusterId"`
 	Namespace   *string                `json:"namespace"`
@@ -685,6 +698,10 @@ type TopologyResponse struct {
 	GeneratedAt string                 `json:"generatedAt"`
 	Pods        Section[TopologyPods]  `json:"pods"`
 	Graph       Section[TopologyGraph] `json:"graph"`
+	// Layout은 관리자가 저장한 공유 배치입니다. null이면 기본 배치를 씁니다. (#28)
+	Layout *TopologyLayout `json:"layout"`
+	// CanEditLayout은 이 요청 사용자가 배치를 저장할 수 있는지입니다.
+	CanEditLayout bool `json:"canEditLayout"`
 }
 
 type TopologyEdgeSeriesResponse struct {

@@ -598,6 +598,19 @@ export interface TopologyEdge {
   routes: TopologyRoute[];
 }
 
+/** 관리자가 저장한 노드 좌표. (#28) */
+export interface TopologyNodePosition {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/** 모든 사용자가 공유하는 저장 배치. null이면 기본 배치를 씁니다. */
+export interface TopologyLayout {
+  positions: TopologyNodePosition[];
+  updatedAt: string;
+}
+
 export interface TopologyResponse {
   clusterId: string;
   namespace: string | null;
@@ -605,6 +618,8 @@ export interface TopologyResponse {
   generatedAt: string;
   pods: Section<{ total: number; healthy: number; unhealthy: number; unhealthyList: UnhealthyEntity[] }>;
   graph: Section<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>;
+  layout: TopologyLayout | null;
+  canEditLayout: boolean;
 }
 
 /** 엣지 하나의 시계열. 라인 클릭 후 차트로 전환할 때만 별도 조회합니다. */

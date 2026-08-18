@@ -38,6 +38,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
 )
 
 // 빌드 정보 — GET /version이 그대로 돌려줍니다. 릴리스 빌드는 ldflags로 덮어씁니다:
@@ -215,6 +216,8 @@ func run(logger *slog.Logger) error {
 	guardCfg.DashboardConcurrent = cfg.QueryDashboardConcurrent
 	guardCfg.QueryTimeout = cfg.QueryTimeout
 	guardCfg.SlowThreshold = cfg.QuerySlowThreshold
+	topoLayout := topologylayout.New(topologylayout.Config{RedisAddr: cfg.RedisAddr, OpTimeout: cfg.RedisOpTimeout, Logger: logger})
+	defer func() { _ = topoLayout.Close() }()
 	srv := httpapi.NewServer(httpapi.Deps{
 		Store:              store,
 		Metrics:            metrics,
@@ -234,6 +237,7 @@ func run(logger *slog.Logger) error {
 		StreamOptions:      httpapi.StreamOptions{Heartbeat: cfg.StreamHeartbeat, WriteIdleTimeout: cfg.StreamWriteIdle},
 		DashboardStore:     dashboardAPI,
 		DashboardQueryRefs: queries.Refs(),
+		TopologyLayout:     topoLayout,
 		AllowedOrigin:      cfg.AllowedOrigin,
 		Version:            contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})

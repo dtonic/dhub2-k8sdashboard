@@ -19,6 +19,8 @@ import type {
   RangeKey,
   Section,
   TopologyEdgeSeriesResponse,
+  TopologyLayout,
+  TopologyNodePosition,
   TopologyResponse,
   WorkloadDetailResponse,
   WorkloadKind,
@@ -74,6 +76,18 @@ function meta(clusterId: string, range: RangeKey) {
 
 const eventsFor = (predicate: (name: string, ns: string) => boolean) =>
   EVENTS.filter((e) => predicate(e.involvedName, e.namespace));
+
+/* 공유 토폴로지 배치의 mock 저장소 — 실서버의 Redis 저장을 흉내 냅니다. (#28)
+   reload를 넘어 유지되어야 "모든 사용자가 같은 배치를 본다"를 mock에서도 검증할 수
+   있으므로 localStorage(브라우저에서만)에 백업합니다. */
+const LAYOUT_KEY = "mock-topology-layouts";
+const canPersist = typeof localStorage !== "undefined";
+const mockLayouts = new Map<string, TopologyLayout>(
+  canPersist ? (JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "[]") as [string, TopologyLayout][]) : [],
+);
+function persistLayouts() {
+  if (canPersist) localStorage.setItem(LAYOUT_KEY, JSON.stringify([...mockLayouts]));
+}
 
 export const handlers = [
   ...dashboardBuilderHandlers,
@@ -346,6 +360,23 @@ export const handlers = [
   }),
 
   /* ── Pod Topology ─────────────────────────────────────────────────────── */
+  http.put("/api/v1/clusters/:clusterId/topology/layout", async ({ request, params }) => {
+    const clusterId = String(params.clusterId);
+    const auth = authorize(clusterId);
+    if (!auth.ok) {
+      await delay(40);
+      return denied(auth.message);
+    }
+    const body = (await request.json()) as { positions?: TopologyNodePosition[] };
+    const positions = body.positions ?? [];
+    const layout: TopologyLayout = { positions, updatedAt: new Date(NOW_MS).toISOString() };
+    if (positions.length === 0) mockLayouts.delete(clusterId);
+    else mockLayouts.set(clusterId, layout);
+    persistLayouts();
+    await delay(80);
+    return HttpResponse.json(layout);
+  }),
+
   http.get("/api/v1/clusters/:clusterId/topology", async ({ request, params }) => {
     const clusterId = String(params.clusterId);
     const url = new URL(request.url);
@@ -383,6 +414,8 @@ export const handlers = [
               data: { nodes, edges },
             }
           : ok({ nodes, edges }),
+      layout: mockLayouts.get(clusterId) ?? null,
+      canEditLayout: true,
     };
     return HttpResponse.json(body);
   }),
