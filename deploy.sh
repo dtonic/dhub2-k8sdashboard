@@ -20,6 +20,10 @@
 #   RELEASE_NAMESPACE  설치 namespace             (기본: observability)
 #   IMAGE_TAG          이미지 tag                 (기본: dev-<git short sha>)
 #   SKIP_BUILD         1이면 빌드/push 생략하고 기존 tag로 helm만 실행
+#   AUTO_DATASOURCES   1(기본)이면 클러스터 안의 GreptimeDB/Quickwit을 자동 발견해
+#                      실데이터로 연결합니다. 0이면 demo 데이터로 배포합니다.
+#   GREPTIME_URL_OVERRIDE / GREPTIME_DB_OVERRIDE / QUICKWIT_URL_OVERRIDE /
+#   QUICKWIT_INDEX_OVERRIDE  자동 발견 대신 수동 지정합니다.
 #   ROUTE_HOST         OpenShift/OKD에서 UI를 노출할 Route 호스트명
 #                      (예: k8sdashboard.apps.okd.dtonic.io). 비우면 Route를 만들지
 #                      않습니다. 현재 dev 모드는 AUTH_MODE=none이므로 이 URL은
@@ -94,6 +98,65 @@ IS_OPENSHIFT=0
 KC api-versions | grep -q '^security.openshift.io/' && IS_OPENSHIFT=1
 echo "   apiserver: svc=$API_SVC_IP endpoints=[$API_EP_IPS]:$API_EP_PORT openshift=$IS_OPENSHIFT"
 
+# 데이터소스 자동 발견 — 클러스터 안의 GreptimeDB/Quickwit이 있으면 실데이터로
+# 연결하고, 없으면 demo로 남습니다(fail-open). 대시보드는 조회 계층이므로
+# 이 연결은 env와 NetworkPolicy egress로만 이루어집니다. (#30)
+AUTO_DATASOURCES="${AUTO_DATASOURCES:-1}"
+GREPTIME_URL_VAL="${GREPTIME_URL_OVERRIDE:-}"
+GREPTIME_DB_VAL="${GREPTIME_DB_OVERRIDE:-public}"
+QUICKWIT_URL_VAL="${QUICKWIT_URL_OVERRIDE:-}"
+QUICKWIT_INDEX_VAL="${QUICKWIT_INDEX_OVERRIDE:-}"
+GREPTIME_NS="" QUICKWIT_NS=""
+
+# discover_svc <이름 패턴(소문자 regex)> <포트> → "namespace name" (첫 번째 일치)
+discover_svc() {
+  KC get svc -A --no-headers 2>/dev/null \
+    | awk -v pat="$1" -v port="$2" 'tolower($2) ~ pat && index($6, port"/") > 0 {print $1, $2; exit}'
+}
+
+# svc_selector <ns> <svc> → 서비스의 spec.selector를 JSON 한 줄로. NetworkPolicy의
+# podSelector로 그대로 씁니다 — 서비스가 고르는 Pod가 곧 egress 대상입니다.
+svc_selector() {
+  KC -n "$1" get svc "$2" -o json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["spec"].get("selector") or {}))'
+}
+
+if [ "$AUTO_DATASOURCES" = "1" ]; then
+  if [ -z "$GREPTIME_URL_VAL" ]; then
+    read -r GREPTIME_NS GREPTIME_SVC <<< "$(discover_svc 'greptime' 4000)" || true
+    if [ -n "${GREPTIME_SVC:-}" ]; then
+      GREPTIME_URL_VAL="http://$GREPTIME_SVC.$GREPTIME_NS.svc.cluster.local:4000"
+    fi
+  fi
+  if [ -z "$QUICKWIT_URL_VAL" ]; then
+    # 검색 API를 받는 서비스를 우선합니다: searcher → control-plane 순.
+    read -r QUICKWIT_NS QUICKWIT_SVC <<< "$(discover_svc 'quickwit.*searcher' 7280)" || true
+    if [ -z "${QUICKWIT_SVC:-}" ]; then
+      read -r QUICKWIT_NS QUICKWIT_SVC <<< "$(discover_svc 'quickwit.*control' 7280)" || true
+    fi
+    if [ -n "${QUICKWIT_SVC:-}" ]; then
+      QUICKWIT_URL_VAL="http://$QUICKWIT_SVC.$QUICKWIT_NS.svc.cluster.local:7280"
+      if [ -z "$QUICKWIT_INDEX_VAL" ]; then
+        # 로그 인덱스 자동 감지 — otel-logs-v* 중 사전순 마지막(최신 스키마 버전).
+        KC -n "$QUICKWIT_NS" port-forward "svc/$QUICKWIT_SVC" 17280:7280 >/dev/null 2>&1 &
+        PF_PID=$!
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+          curl -sf http://localhost:17280/api/v1/version >/dev/null 2>&1 && break
+          sleep 1
+        done
+        QUICKWIT_INDEX_VAL="$(curl -sf http://localhost:17280/api/v1/indexes 2>/dev/null \
+          | python3 -c 'import json,sys; ids=sorted(i["index_config"]["index_id"] for i in json.load(sys.stdin)); c=[x for x in ids if x.startswith("otel-logs-v")]; print(c[-1] if c else "")' 2>/dev/null || true)"
+        kill "$PF_PID" 2>/dev/null || true
+        if [ -z "$QUICKWIT_INDEX_VAL" ]; then
+          echo "   quickwit: otel-logs-v* 인덱스를 찾지 못해 로그 연결을 건너뜁니다"
+          QUICKWIT_URL_VAL=""
+        fi
+      fi
+    fi
+  fi
+fi
+echo "   greptime: ${GREPTIME_URL_VAL:-(미발견 · demo)}  quickwit: ${QUICKWIT_URL_VAL:-(미발견 · demo)} index=${QUICKWIT_INDEX_VAL:-—}"
+
 # 3) namespace + SCC + 보완 NetworkPolicy 선적용
 echo "== [4/5] namespace/SCC/NetworkPolicy 준비"
 KC get ns "$RELEASE_NAMESPACE" >/dev/null 2>&1 || KC create ns "$RELEASE_NAMESPACE"
@@ -160,6 +223,10 @@ EOF
 # 4) helm 설치/업그레이드 — 동적 값은 overlay values로 주입
 OVERLAY="$(mktemp)"
 trap 'rm -f "$OVERLAY"' EXIT
+# OTel 표준 로그 인덱스(otel-logs-v*)의 필드 경로 매핑입니다. 나머지 키는 어댑터
+# 기본값을 씁니다. workload_kind는 OTel 표준 속성에 없어 매핑하지 않습니다.
+OTEL_QUICKWIT_FIELDS="timestamp=timestamp_nanos,level=severity_text,message=body.message,namespace=resource_attributes.k8s.namespace.name,pod_name=resource_attributes.k8s.pod.name,pod_uid=resource_attributes.k8s.pod.uid,container=resource_attributes.k8s.container.name,workload_name=resource_attributes.k8s.deployment.name,node=resource_attributes.k8s.node.name,trace_id=trace_id,span_id=span_id"
+
 {
   cat <<EOF
 fullnameOverride: $RELEASE_NAME
@@ -171,6 +238,21 @@ api:
     CLUSTER_ID: "$CLUSTER"
     CLUSTER_NAME: "$CLUSTER"
     SCOPE_NAMESPACES: "$SCOPE"
+EOF
+  if [ -n "$GREPTIME_URL_VAL" ]; then
+    cat <<EOF
+    GREPTIME_URL: "$GREPTIME_URL_VAL"
+    GREPTIME_DB: "$GREPTIME_DB_VAL"
+EOF
+  fi
+  if [ -n "$QUICKWIT_URL_VAL" ]; then
+    cat <<EOF
+    QUICKWIT_URL: "$QUICKWIT_URL_VAL"
+    QUICKWIT_INDEX: "$QUICKWIT_INDEX_VAL"
+    QUICKWIT_FIELDS: "$OTEL_QUICKWIT_FIELDS"
+EOF
+  fi
+  cat <<EOF
 redis:
   # OKD cri-o는 short name을 거부하므로 fully-qualified 경로를 씁니다.
   image: {repository: docker.io/library/redis}
@@ -181,6 +263,25 @@ networkPolicy:
     - $API_SVC_IP/32
 EOF
   for ip in $API_EP_IPS; do echo "    - $ip/32"; done
+  # 발견된 데이터소스로의 egress만 엽니다. namespace를 아는 자동 발견 경로에서만
+  # 규칙을 만들 수 있습니다(URL 수동 지정 시에는 NetworkPolicy를 직접 관리하세요).
+  if [ -n "$GREPTIME_NS$QUICKWIT_NS" ]; then
+    echo "  internal:"
+    if [ -n "$GREPTIME_NS" ]; then
+      cat <<EOF
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: $GREPTIME_NS}}
+      podSelector: {matchLabels: $(svc_selector "$GREPTIME_NS" "$GREPTIME_SVC")}
+      port: 4000
+EOF
+    fi
+    if [ -n "$QUICKWIT_NS" ]; then
+      cat <<EOF
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: $QUICKWIT_NS}}
+      podSelector: {matchLabels: $(svc_selector "$QUICKWIT_NS" "$QUICKWIT_SVC")}
+      port: 7280
+EOF
+    fi
+  fi
   if [ "$IS_OPENSHIFT" = "1" ]; then
     cat <<'EOF'
   dns:
