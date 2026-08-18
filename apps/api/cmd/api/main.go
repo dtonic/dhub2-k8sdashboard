@@ -177,7 +177,13 @@ func run(logger *slog.Logger) error {
 		}
 		configuredAlerts.SetObserver(platformMetrics)
 	}
-	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, store, queries, platformMetrics, configuredAlerts)
+	// nil *alertmanager.Source를 인터페이스에 그대로 담으면 non-nil 인터페이스가 되어
+	// demo/Unavailable 분기 대신 nil 리시버 호출로 panic합니다. 비활성이면 untyped nil을 넘깁니다.
+	var alertSource datasource.Alerts
+	if configuredAlerts != nil {
+		alertSource = configuredAlerts
+	}
+	metrics, logs, alerts, topo := sourcesObserved(logger, cfg, store, queries, platformMetrics, alertSource)
 
 	// 사용량은 메트릭 데이터소스에서 옵니다. 주기적으로 스냅숏만 갱신합니다 —
 	// 요청마다 조회하면 화면 하나가 데이터소스에 수십 번 나갑니다.
