@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type {
   AlertSummary,
   ClusterEvent,
@@ -7,25 +7,27 @@ import type {
   UnhealthyEntity,
 } from "@k8s-dashboard/contracts";
 import { StatusBadge, StatusDot } from "@/components/primitives";
+import { withSearch } from "@/components/drill";
 import { duration, num, since } from "@/lib/format";
 
 /**
  * 이상 엔티티까지 **2회 이내 클릭**으로 도달해야 합니다. (이슈 #14 완료 기준)
  * 그래서 목록의 이름 자체가 상세 화면 링크입니다. 별도의 "자세히" 단계를 두지 않습니다.
+ * 현재 URL의 cluster·range·refresh를 유지해야 이동한 화면이 같은 Scope를 봅니다. (#27)
  */
-export function detailPath(ref: EntityRef): string {
-  const p = new URLSearchParams();
-  if (ref.namespace && ref.namespace !== "—") p.set("ns", ref.namespace);
-  if (ref.podUid) p.set("uid", ref.podUid);
+export function detailPath(ref: EntityRef, search: string): string {
+  const extra: Record<string, string> = {};
+  if (ref.namespace && ref.namespace !== "—") extra.ns = ref.namespace;
+  if (ref.podUid) extra.uid = ref.podUid;
   if (ref.podName && ref.namespace && ref.namespace !== "—") {
-    return `/pods/${encodeURIComponent(ref.podName)}?${p}`;
+    return withSearch(`/pods/${encodeURIComponent(ref.podName)}`, search, extra);
   }
   if (ref.workloadName && ref.workloadKind) {
-    return `/workloads/${ref.workloadKind}/${encodeURIComponent(ref.workloadName)}?${p}`;
+    return withSearch(`/workloads/${ref.workloadKind}/${encodeURIComponent(ref.workloadName)}`, search, extra);
   }
   /* Node는 아직 상세 화면이 없습니다. Namespace로 보내지 않고 목록으로 되돌립니다. */
-  if (!ref.namespace || ref.namespace === "—") return "/namespaces";
-  return `/namespaces/${encodeURIComponent(ref.namespace)}`;
+  if (!ref.namespace || ref.namespace === "—") return withSearch("/namespaces", search);
+  return withSearch(`/namespaces/${encodeURIComponent(ref.namespace)}`, search);
 }
 
 /* ── Unhealthy Top N ─────────────────────────────────────────────────────── */
@@ -33,6 +35,7 @@ export function detailPath(ref: EntityRef): string {
 const SEVERITY_ORDER = { critical: 0, degraded: 1, warning: 2, progressing: 3, unknown: 4, healthy: 5 } as const;
 
 export function UnhealthyTable({ items, referenceIso }: { items: UnhealthyEntity[]; referenceIso: string }) {
+  const { search } = useLocation();
   const sorted = [...items].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
   return (
     <div className="panel__scroll">
@@ -53,7 +56,7 @@ export function UnhealthyTable({ items, referenceIso }: { items: UnhealthyEntity
           {sorted.map((u) => (
             <tr key={`${u.kind}-${u.name}`}>
               <td className="ds-ident">
-                <Link to={detailPath(u.ref)}>{u.name}</Link>
+                <Link to={detailPath(u.ref, search)}>{u.name}</Link>
               </td>
               <td>{u.kind}</td>
               <td>{u.namespace}</td>
@@ -74,6 +77,7 @@ export function UnhealthyTable({ items, referenceIso }: { items: UnhealthyEntity
 /* ── Event feed ──────────────────────────────────────────────────────────── */
 
 export function EventFeed({ events, referenceIso }: { events: ClusterEvent[]; referenceIso: string }) {
+  const { search } = useLocation();
   return (
     <div className="panel__scroll">
       <table className="ds-data-table ds-data-table--compact">
@@ -96,7 +100,7 @@ export function EventFeed({ events, referenceIso }: { events: ClusterEvent[]; re
               </td>
               <td>{e.reason}</td>
               <td className="ds-ident" style={{ maxWidth: 460 }} title={e.message}>
-                <Link to={detailPath(e.involved)}>{e.involvedName}</Link> <span className="muted">{e.message}</span>
+                <Link to={detailPath(e.involved, search)}>{e.involvedName}</Link> <span className="muted">{e.message}</span>
               </td>
               <td className="ds-num">{e.count}</td>
               <td className="num muted">{since(e.lastSeen, referenceIso)}</td>
@@ -164,6 +168,7 @@ export function AlertSummaryCard({ alerts, referenceIso }: { alerts: AlertSummar
  * 여기서 그래프를 다 그리면 Overview의 "한 화면에서 판단한다"는 목적이 흐려집니다.
  */
 export function TopologySummaryCard({ topology }: { topology: TopologySummary }) {
+  const { search } = useLocation();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       <div className="row row--wrap muted" style={{ font: "var(--type-meta)" }}>
@@ -210,7 +215,7 @@ export function TopologySummaryCard({ topology }: { topology: TopologySummary })
           </tbody>
         </table>
       )}
-      <Link to="/topology">전체 토폴로지 열기 →</Link>
+      <Link to={withSearch("/topology", search)}>전체 토폴로지 열기 →</Link>
     </div>
   );
 }
