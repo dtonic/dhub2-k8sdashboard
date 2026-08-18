@@ -114,13 +114,23 @@ func (s *Source) Trends(_ context.Context, t datasource.Target, w datasource.Win
 	return out, nil
 }
 
+// timeBucket은 절대 시각 기반 버킷 번호입니다. 같은 시각은 항상 같은 값(결정성)을
+// 유지하면서, 창이 미끄러지면 오른쪽에서 새 버킷이 들어와 갱신마다 곡선이 흐릅니다. (#27)
+func timeBucket(ts time.Time, step time.Duration) int {
+	if step < time.Second {
+		step = time.Minute
+	}
+	return int(ts.Unix() / int64(step/time.Second))
+}
+
 func points(key string, w datasource.Window, panel, series string) []contract.TrendPoint {
 	n := buckets(w)
 	out := make([]contract.TrendPoint, 0, n)
 	for i := 0; i < n; i++ {
 		ts := w.From.Add(time.Duration(i) * w.Step)
-		wave := math.Sin(float64(i)/float64(maxInt(n/6, 1))) * 0.5
-		base := 0.5 + wave*0.3 + noise(key, i)*0.2
+		bi := timeBucket(ts, w.Step)
+		wave := math.Sin(float64(bi)/float64(maxInt(n/6, 1))) * 0.5
+		base := 0.5 + wave*0.3 + noise(key, bi)*0.2
 		var v float64
 		switch panel {
 		case "cpu", "memory":
@@ -134,7 +144,7 @@ func points(key string, w datasource.Window, panel, series string) []contract.Tr
 				v *= 0.6
 			}
 		case "restarts":
-			v = math.Floor(noise(key, i) * 3)
+			v = math.Floor(noise(key, bi) * 3)
 		}
 		out = append(out, contract.TrendPoint{T: ts.UnixMilli(), V: round2(v)})
 	}
@@ -531,10 +541,11 @@ func (s *Source) EdgeSeries(_ context.Context, clusterID, edgeID string, w datas
 	total := make([]contract.TrendPoint, 0, n)
 	errs := make([]contract.TrendPoint, 0, n)
 	for i := 0; i < n; i++ {
-		ts := w.From.Add(time.Duration(i) * w.Step).UnixMilli()
-		v := 40 + noise(clusterID+edgeID, i)*260
-		total = append(total, contract.TrendPoint{T: ts, V: round2(v)})
-		errs = append(errs, contract.TrendPoint{T: ts, V: round2(v * noise(clusterID+edgeID+"e", i) * 0.06)})
+		t := w.From.Add(time.Duration(i) * w.Step)
+		bi := timeBucket(t, w.Step)
+		v := 40 + noise(clusterID+edgeID, bi)*260
+		total = append(total, contract.TrendPoint{T: t.UnixMilli(), V: round2(v)})
+		errs = append(errs, contract.TrendPoint{T: t.UnixMilli(), V: round2(v * noise(clusterID+edgeID+"e", bi) * 0.06)})
 	}
 	return []contract.TrendSeries{
 		{Key: "requests", Label: "요청", Unit: "count", Points: total},
