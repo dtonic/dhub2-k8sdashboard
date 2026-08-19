@@ -1,6 +1,6 @@
 import { Link, useLocation, useParams } from "react-router-dom";
-import { ISSUE_LABEL, RANGE_LABEL, type ContainerStatus } from "@k8s-dashboard/contracts";
-import { drillKeys, usePodDetail } from "@/api/queries";
+import { ISSUE_LABEL, RANGE_LABEL, type ContainerStatus, type OwnerRef } from "@k8s-dashboard/contracts";
+import { drillKeys, useManagedDeployment, useManagedSecret, usePodDetail, useScope } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { LineChart } from "@/components/LineChart";
 import { Panel, StatTile, StatusBadge } from "@/components/primitives";
@@ -165,6 +165,16 @@ export function PodDetail() {
             </div>
           </div>
 
+          {pod && (
+            <PodManagedCards
+              clusterId={clusterId}
+              namespace={ns}
+              search={search}
+              deploymentName={ownerDeploymentName(q.data?.ownerChain.data)}
+              secretRefs={q.data?.secretRefs ?? []}
+            />
+          )}
+
           <SectionView section={q.data?.trends} loading={q.isLoading} emptyTitle="추세 데이터가 없습니다">
             {(panels) => (
               <div className="grid grid--trends">
@@ -241,6 +251,110 @@ function ContainerTable({ containers }: { containers: ContainerStatus[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ── Secret/Deployment 조회 카드 (#33) ─────────────────────────────────────
+   pod 상세에서 연결된 Deployment/Secret을 순수 조회하고, details 버튼으로 각
+   관리 탭의 해당 항목으로 이동합니다. 관리 권한이 있을 때만 노출합니다. */
+
+function ownerDeploymentName(chain?: OwnerRef[]): string {
+  return chain?.find((o) => o.kind === "Deployment")?.name ?? "";
+}
+
+function PodManagedCards({
+  clusterId,
+  namespace,
+  search,
+  deploymentName,
+  secretRefs,
+}: {
+  clusterId: string;
+  namespace: string;
+  search: string;
+  deploymentName: string;
+  secretRefs: string[];
+}) {
+  const scope = useScope();
+  if (!scope.data?.canManageWorkloads) return null;
+  const dep = useManagedDeployment(clusterId, namespace, deploymentName, Boolean(deploymentName));
+  const secretName = secretRefs[0] ?? "";
+  const sec = useManagedSecret(clusterId, namespace, secretName, Boolean(secretName));
+
+  return (
+    <div className="grid grid--split">
+      <Panel
+        title="Deployment"
+        subtitle="이 Pod의 상위 Deployment (조회)"
+        actions={
+          deploymentName ? (
+            <Link to={withSearch("/deployments", search, { item: `${namespace}/${deploymentName}` })}>details →</Link>
+          ) : undefined
+        }
+      >
+        {!deploymentName ? (
+          <p className="muted">Deployment 소유자가 없습니다.</p>
+        ) : dep.isLoading ? (
+          <p className="muted">불러오는 중…</p>
+        ) : dep.data ? (
+          <div className="facts">
+            <div className="fact">
+              <span className="fact__label">이름</span>
+              <span className="fact__value ds-ident">{dep.data.name}</span>
+            </div>
+            <div className="fact">
+              <span className="fact__label">Ready</span>
+              <span className="fact__value">{dep.data.ready}/{dep.data.desired}</span>
+            </div>
+            <div className="fact">
+              <span className="fact__label">Pod 수</span>
+              <span className="fact__value">{dep.data.pods.length}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="muted">조회할 수 없습니다.</p>
+        )}
+      </Panel>
+
+      <Panel
+        title="Secret"
+        subtitle={secretRefs.length > 1 ? `이 Pod가 참조하는 Secret ${secretRefs.length}개 중 첫 번째` : "이 Pod가 참조하는 Secret (조회)"}
+        actions={
+          secretName ? (
+            <Link to={withSearch("/secrets", search, { item: `${namespace}/${secretName}` })}>details →</Link>
+          ) : undefined
+        }
+      >
+        {!secretName ? (
+          <p className="muted">참조하는 Secret이 없습니다.</p>
+        ) : sec.isLoading ? (
+          <p className="muted">불러오는 중…</p>
+        ) : sec.data ? (
+          <div className="facts">
+            <div className="fact">
+              <span className="fact__label">이름</span>
+              <span className="fact__value ds-ident">{sec.data.name}</span>
+            </div>
+            <div className="fact">
+              <span className="fact__label">타입</span>
+              <span className="fact__value">{sec.data.secretType}</span>
+            </div>
+            <div className="fact">
+              <span className="fact__label">키 수</span>
+              <span className="fact__value">{Object.keys(sec.data.data).length}</span>
+            </div>
+            {secretRefs.length > 1 && (
+              <div className="fact">
+                <span className="fact__label">기타 참조</span>
+                <span className="fact__value muted">{secretRefs.slice(1).join(", ")}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="muted">조회할 수 없습니다.</p>
+        )}
+      </Panel>
     </div>
   );
 }

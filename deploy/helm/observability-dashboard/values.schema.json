@@ -45,6 +45,10 @@
       }
     },
     "clusterState": {"type":"object","required":["mode","clusters","trustDomain","registryEndpoint","registryServerName","tls","registry","limits"],"properties":{"mode":{"enum":["direct","central"]},"clusters":{"type":"array","maxItems":64,"uniqueItems":true,"items":{"type":"string","maxLength":63,"pattern":"^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$"}},"trustDomain":{"type":"string"},"registryEndpoint":{"type":"string"},"registryServerName":{"type":"string","maxLength":253,"pattern":"^$|^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"},"tls":{"type":"object"},"registry":{"type":"object","properties":{"agentService":{"type":"object","properties":{"sourceCidrs":{"type":"array","items":{"$ref":"#/definitions/ipv4Cidr"}}}}}},"limits":{"type":"object","properties":{"ingressFrameRate":{"type":"number","minimum":1,"maximum":100000},"ingressByteRate":{"type":"number","minimum":1024,"maximum":1073741824},"ingressFrameBurst":{"type":"integer","minimum":1,"maximum":100000},"ingressByteBurst":{"type":"integer","minimum":1024,"maximum":1073741824},"staleTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"heartbeatTimeout":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"}}}}},
+    "manageWorkloads": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean"}}
+    },
     "redis": {
       "type": "object", "required": ["enabled", "image", "persistence", "resources"],
       "properties": {

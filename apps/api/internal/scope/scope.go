@@ -23,6 +23,9 @@ type Scope struct {
 	// CanEditTopology는 Pod Topology의 공유 배치를 저장할 수 있는 권한입니다.
 	// OIDC에서는 platform.admin에서만 파생하고, AUTH_MODE=none(개발·데모)은 허용합니다. (#28)
 	CanEditTopology bool
+	// CanManageWorkloads는 Deployment/Secret 조회·수정·재배포 권한입니다.
+	// platform.admin에서만 파생하고 AUTH_MODE=none은 허용합니다. (ADR 0014, #32)
+	CanManageWorkloads bool
 	// Clusters는 접근 가능한 클러스터입니다.
 	Clusters []Cluster
 }

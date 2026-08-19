@@ -219,6 +219,63 @@ export interface ClusterOverviewResponse {
 }
 
 /** Scope Selector가 쓰는 목록. 사용자가 볼 수 있는 범위만 내려옵니다. */
+/* ── Workload/Secret 관리 (ADR 0014, #32) ─────────────────────────────── */
+
+export interface ManagedWorkload {
+  namespace: string;
+  name: string;
+  kind: "Deployment" | "Secret";
+  ready: number;
+  desired: number;
+  secretType?: string;
+  updatedAt: string;
+}
+
+export interface ManagedWorkloadListResponse {
+  clusterId: string;
+  generatedAt: string;
+  items: ManagedWorkload[];
+}
+
+export interface ManagedPod {
+  name: string;
+  uid: string;
+  namespace: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+  severity: Severity;
+}
+
+export interface ManagedDeploymentDetail {
+  clusterId: string;
+  namespace: string;
+  name: string;
+  generatedAt: string;
+  ready: number;
+  desired: number;
+  /** managedFields·status를 제거한 관리자용 JSON 매니페스트 문자열. */
+  manifest: string;
+  pods: ManagedPod[];
+}
+
+export interface ManagedSecretDetail {
+  clusterId: string;
+  namespace: string;
+  name: string;
+  generatedAt: string;
+  secretType: string;
+  /** key → 평문 값(서버가 base64 디코딩). ADR 0014 — admin 전용 노출. */
+  data: Record<string, string>;
+  pods: ManagedPod[];
+}
+
+export interface ManagedActionResult {
+  ok: boolean;
+  message: string;
+  affected?: string[];
+}
+
 export interface ScopeResponse {
   clusters: Array<{
     id: string;
@@ -228,6 +285,8 @@ export interface ScopeResponse {
     /** 접근 가능한 namespace가 하나도 없으면 false. 목록에는 보이되 선택 불가 */
     accessible: boolean;
   }>;
+  /** Deployment/Secret 관리 탭·버튼 노출 여부(platform.admin + 관리 기능 활성). (ADR 0014) */
+  canManageWorkloads?: boolean;
 }
 
 export type AuthSessionResponse =
@@ -443,6 +502,8 @@ export interface PodDetailResponse {
   containers: Section<ContainerStatus[]>;
   trends: Section<TrendPanel[]>;
   events: Section<ClusterEvent[]>;
+  /** 이 Pod가 참조하는 Secret 이름(값 아님). Secret 조회 카드에 씁니다. (#33) */
+  secretRefs: string[];
 }
 
 export const ISSUE_LABEL: Record<IssueReason, string> = {

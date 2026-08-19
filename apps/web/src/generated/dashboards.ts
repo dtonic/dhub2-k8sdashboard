@@ -120,6 +120,16 @@ export const embeddedDashboardBindings = [
     "seriesKey": "used"
   },
   {
+    "queryRef": "metrics.io.read",
+    "panelId": "io",
+    "seriesKey": "read"
+  },
+  {
+    "queryRef": "metrics.io.write",
+    "panelId": "io",
+    "seriesKey": "write"
+  },
+  {
     "queryRef": "metrics.memory.requested",
     "panelId": "memory",
     "seriesKey": "requested"

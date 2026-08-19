@@ -251,8 +251,76 @@ export const handlers = [
       containers: ok(containersOf(found, owner)),
       trends: ok(scopedTrends(range, `pod/${found.uid}`)),
       events: ok(eventsFor((n, e) => e === ns && n === found!.name)),
+      secretRefs: [`${found.name.split("-")[0]}-config`, `${found.name.split("-")[0]}-tls`],
     };
     return HttpResponse.json(body);
+  }),
+
+  /* ── Deployment/Secret 관리 (ADR 0014, #32·#33) — mock ────────────────── */
+  http.get("/api/v1/clusters/:clusterId/deployments", async ({ params }) => {
+    await delay(120);
+    return HttpResponse.json({
+      clusterId: String(params.clusterId),
+      generatedAt: new Date(NOW_MS).toISOString(),
+      items: [
+        { namespace: "payments", name: "payments-api", kind: "Deployment", ready: 3, desired: 3, updatedAt: new Date(NOW_MS).toISOString() },
+        { namespace: "search", name: "indexer", kind: "Deployment", ready: 1, desired: 2, updatedAt: new Date(NOW_MS).toISOString() },
+      ],
+    });
+  }),
+  http.get("/api/v1/clusters/:clusterId/deployments/:namespace/:name", async ({ params }) => {
+    await delay(120);
+    const { namespace, name } = params as Record<string, string>;
+    const manifest = JSON.stringify(
+      { apiVersion: "apps/v1", kind: "Deployment", metadata: { name, namespace }, spec: { replicas: 3, selector: { matchLabels: { app: name } } } },
+      null,
+      2,
+    );
+    return HttpResponse.json({
+      clusterId: String(params.clusterId), namespace, name, generatedAt: new Date(NOW_MS).toISOString(),
+      ready: 3, desired: 3, manifest,
+      pods: [
+        { name: `${name}-abc`, uid: "u-abc", namespace, phase: "Running", ready: true, restarts: 0, severity: "healthy" },
+        { name: `${name}-def`, uid: "u-def", namespace, phase: "Running", ready: true, restarts: 2, severity: "warning" },
+      ],
+    });
+  }),
+  http.put("/api/v1/clusters/:clusterId/deployments/:namespace/:name", async () => {
+    await delay(200);
+    return HttpResponse.json({ ok: true, message: "Deployment를 수정했습니다." });
+  }),
+  http.post("/api/v1/clusters/:clusterId/deployments/:namespace/:name/restart", async ({ params }) => {
+    await delay(200);
+    return HttpResponse.json({ ok: true, message: "재배포를 시작했습니다.", affected: [String((params as Record<string, string>).name)] });
+  }),
+  http.get("/api/v1/clusters/:clusterId/secrets", async ({ params }) => {
+    await delay(120);
+    return HttpResponse.json({
+      clusterId: String(params.clusterId),
+      generatedAt: new Date(NOW_MS).toISOString(),
+      items: [
+        { namespace: "payments", name: "payments-config", kind: "Secret", ready: 0, desired: 0, secretType: "Opaque", updatedAt: new Date(NOW_MS).toISOString() },
+        { namespace: "payments", name: "payments-tls", kind: "Secret", ready: 0, desired: 0, secretType: "kubernetes.io/tls", updatedAt: new Date(NOW_MS).toISOString() },
+      ],
+    });
+  }),
+  http.get("/api/v1/clusters/:clusterId/secrets/:namespace/:name", async ({ params }) => {
+    await delay(120);
+    const { namespace, name } = params as Record<string, string>;
+    return HttpResponse.json({
+      clusterId: String(params.clusterId), namespace, name, generatedAt: new Date(NOW_MS).toISOString(),
+      secretType: "Opaque",
+      data: { API_KEY: "mock-value-1234", DB_PASSWORD: "mock-secret-pw" },
+      pods: [{ name: `${name.split("-")[0]}-api-abc`, uid: "u-abc", namespace, phase: "Running", ready: true, restarts: 0, severity: "healthy" }],
+    });
+  }),
+  http.put("/api/v1/clusters/:clusterId/secrets/:namespace/:name", async () => {
+    await delay(200);
+    return HttpResponse.json({ ok: true, message: "Secret을 수정했습니다." });
+  }),
+  http.post("/api/v1/clusters/:clusterId/secrets/:namespace/:name/restart", async () => {
+    await delay(200);
+    return HttpResponse.json({ ok: true, message: "재배포를 시작했습니다.", affected: ["payments-api"] });
   }),
 
   /* ── Logs Explorer (이슈 #16) ─────────────────────────────────────────── */

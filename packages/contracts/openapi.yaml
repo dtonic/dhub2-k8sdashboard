@@ -656,6 +656,104 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/deployments:
+    get:
+      operationId: listManagedDeployments
+      summary: "Deployment 관리 목록 (platform.admin 전용, ADR 0014)"
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+      responses:
+        "200":
+          description: ManagedWorkloadListResponse
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/InternalError" }
+  /api/v1/clusters/{clusterId}/deployments/{namespace}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ClusterId"
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getManagedDeployment
+      summary: "Deployment 관리 상세(매니페스트+pod)"
+      responses:
+        "200":
+          description: ManagedDeploymentDetail
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateManagedDeployment
+      summary: "Deployment 수정"
+      responses:
+        "200":
+          description: ManagedActionResult
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/InternalError" }
+  /api/v1/clusters/{clusterId}/deployments/{namespace}/{name}/restart:
+    post:
+      operationId: restartManagedDeployment
+      summary: "Deployment 재배포(rollout restart)"
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ManagedActionResult
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/clusters/{clusterId}/secrets:
+    get:
+      operationId: listManagedSecrets
+      summary: "Secret 관리 목록(메타만, platform.admin 전용)"
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+      responses:
+        "200":
+          description: ManagedWorkloadListResponse
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/InternalError" }
+  /api/v1/clusters/{clusterId}/secrets/{namespace}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ClusterId"
+      - { name: namespace, in: path, required: true, schema: { type: string } }
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getManagedSecret
+      summary: "Secret 관리 상세(값 포함, 감사 대상)"
+      responses:
+        "200":
+          description: ManagedSecretDetail
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateManagedSecret
+      summary: "Secret 수정"
+      responses:
+        "200":
+          description: ManagedActionResult
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/clusters/{clusterId}/secrets/{namespace}/{name}/restart:
+    post:
+      operationId: restartSecretReferrers
+      summary: "Secret 참조 워크로드 재배포"
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ManagedActionResult
+          headers: { X-Request-ID: { $ref: "#/components/headers/XRequestID" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series:
     get:
       operationId: getTopologyEdgeSeries

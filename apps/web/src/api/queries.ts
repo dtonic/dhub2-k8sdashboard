@@ -5,6 +5,10 @@ import type {
   NamespaceDetailResponse,
   NamespaceListResponse,
   LogSearchResponse,
+  ManagedActionResult,
+  ManagedDeploymentDetail,
+  ManagedSecretDetail,
+  ManagedWorkloadListResponse,
   PodDetailResponse,
   RangeKey,
   ScopeResponse,
@@ -27,6 +31,68 @@ export function useScope() {
     queryKey: queryKeys.scope,
     queryFn: ({ signal }) => apiGet<ScopeResponse>("/api/v1/scope", {}, signal),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/* ── Deployment/Secret 관리 (ADR 0014, #32) ───────────────────────────── */
+
+export const manageKeys = {
+  list: (clusterId: string, kind: "deployments" | "secrets", ns: string) =>
+    ["manage-list", clusterId, kind, ns] as const,
+  detail: (clusterId: string, kind: "deployments" | "secrets", ns: string, name: string) =>
+    ["manage-detail", clusterId, kind, ns, name] as const,
+};
+
+export function useManagedList(clusterId: string, kind: "deployments" | "secrets", ns: string, enabled: boolean) {
+  return useQuery({
+    queryKey: manageKeys.list(clusterId, kind, ns),
+    queryFn: ({ signal }) =>
+      apiGet<ManagedWorkloadListResponse>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/${kind}`,
+        ns && ns !== "all" ? { ns } : {},
+        signal,
+      ),
+    enabled: enabled && Boolean(clusterId),
+    retry: retryPolicy,
+  });
+}
+
+export function useManagedDeployment(clusterId: string, ns: string, name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: manageKeys.detail(clusterId, "deployments", ns, name),
+    queryFn: ({ signal }) =>
+      apiGet<ManagedDeploymentDetail>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/deployments/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
+        {},
+        signal,
+      ),
+    enabled: enabled && Boolean(clusterId && ns && name),
+  });
+}
+
+export function useManagedSecret(clusterId: string, ns: string, name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: manageKeys.detail(clusterId, "secrets", ns, name),
+    queryFn: ({ signal }) =>
+      apiGet<ManagedSecretDetail>(
+        `/api/v1/clusters/${encodeURIComponent(clusterId)}/secrets/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
+        {},
+        signal,
+      ),
+    enabled: enabled && Boolean(clusterId && ns && name),
+  });
+}
+
+/** 관리 write(수정·재배포) 공통 mutation. 성공 시 관련 쿼리를 무효화합니다. */
+export function useManageAction(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: { method: "PUT" | "POST"; path: string; body?: unknown }) =>
+      apiRequest<ManagedActionResult>(`/api/v1/clusters/${encodeURIComponent(clusterId)}/${a.path}`, {
+        method: a.method,
+        ...(a.body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(a.body) } : {}),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["manage-detail", clusterId] }),
   });
 }
 

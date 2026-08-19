@@ -419,6 +419,7 @@ export const SCOPE = {
     { id: "stage", name: "stage", namespaces: "all" as const, accessible: true },
     { id: "prod-frankfurt", name: "prod-frankfurt", namespaces: [], accessible: false },
   ],
+  canManageWorkloads: true,
 };
 
 export const NAMESPACES = ["payments", "search", "media", "platform", "ingress", "observability"];

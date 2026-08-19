@@ -305,6 +305,77 @@ type ScopeCluster struct {
 
 type ScopeResponse struct {
 	Clusters []ScopeCluster `json:"clusters"`
+	// CanManageWorkloads는 Deployment/Secret 관리 탭·버튼 노출 여부입니다. (ADR 0014)
+	CanManageWorkloads bool `json:"canManageWorkloads"`
+}
+
+/* ── Workload/Secret 관리 (ADR 0014, #32) ─────────────────────────────────
+   관리 API는 조회 경로와 분리되어 요청 시점에 clientset을 직접 호출합니다.
+   Secret 값은 캐시에 상주시키지 않고 관리 응답으로만 흘립니다. */
+
+// WorkloadRef는 관리 목록의 한 항목입니다(Deployment/Secret 공용).
+type ManagedWorkload struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// Kind는 "Deployment" 또는 "Secret"입니다.
+	Kind string `json:"kind"`
+	// Ready/Desired는 Deployment 전용(레플리카). Secret은 0.
+	Ready   int32 `json:"ready"`
+	Desired int32 `json:"desired"`
+	// SecretType은 Secret 전용(kubernetes.io/tls 등).
+	SecretType string `json:"secretType,omitempty"`
+	UpdatedAt  string `json:"updatedAt"`
+}
+
+type ManagedWorkloadListResponse struct {
+	ClusterID   string            `json:"clusterId"`
+	GeneratedAt string            `json:"generatedAt"`
+	Items       []ManagedWorkload `json:"items"`
+}
+
+// ManagedPod는 관리 상세의 소속/참조 pod 한 줄입니다.
+type ManagedPod struct {
+	Name      string   `json:"name"`
+	UID       string   `json:"uid"`
+	Namespace string   `json:"namespace"`
+	Phase     string   `json:"phase"`
+	Ready     bool     `json:"ready"`
+	Restarts  int32    `json:"restarts"`
+	Severity  Severity `json:"severity"`
+}
+
+// ManagedDeploymentDetail은 Deployment 관리 상세입니다.
+type ManagedDeploymentDetail struct {
+	ClusterID   string       `json:"clusterId"`
+	Namespace   string       `json:"namespace"`
+	Name        string       `json:"name"`
+	GeneratedAt string       `json:"generatedAt"`
+	Ready       int32        `json:"ready"`
+	Desired     int32        `json:"desired"`
+	// Manifest는 관리자용 정제 매니페스트(JSON 문자열). managedFields·status는 제거됩니다.
+	Manifest string       `json:"manifest"`
+	Pods     []ManagedPod `json:"pods"`
+}
+
+// ManagedSecretDetail은 Secret 관리 상세입니다. 값은 평문(디코딩)으로 내려갑니다.
+type ManagedSecretDetail struct {
+	ClusterID   string            `json:"clusterId"`
+	Namespace   string            `json:"namespace"`
+	Name        string            `json:"name"`
+	GeneratedAt string            `json:"generatedAt"`
+	SecretType  string            `json:"secretType"`
+	// Data는 key → 평문 값입니다. base64는 서버에서 디코딩합니다. (ADR 0014)
+	Data map[string]string `json:"data"`
+	// Pods는 이 Secret을 참조(envFrom·volume·env)하는 pod입니다.
+	Pods []ManagedPod `json:"pods"`
+}
+
+// ManagedActionResult는 수정·재배포 결과입니다.
+type ManagedActionResult struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+	// Affected는 재배포로 롤아웃된 워크로드 이름들입니다.
+	Affected []string `json:"affected,omitempty"`
 }
 
 // APIError는 화면 전체가 실패했을 때만 씁니다. 섹션 단위 실패는 Section으로 표현합니다.
@@ -543,6 +614,9 @@ type PodDetailResponse struct {
 	Containers  Section[[]ContainerStatus] `json:"containers"`
 	Trends      Section[[]TrendPanel]      `json:"trends"`
 	Events      Section[[]ClusterEvent]    `json:"events"`
+	// SecretRefs는 이 Pod가 참조하는 Secret 이름입니다(값 아님, pod spec에서 추출).
+	// pod 상세의 Secret 조회 카드에 씁니다. (#33)
+	SecretRefs []string `json:"secretRefs"`
 }
 
 /* ── Logs ───────────────────────────────────────────────────────────────── */

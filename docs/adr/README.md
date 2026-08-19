@@ -19,6 +19,7 @@
 | [0011](./0011-server-side-oidc-browser-session.md) | 서버 측 OIDC 브라우저 세션 | Proposed | 2026-08-15 |
 | [0012](./0012-alertmanager-current-alerts-and-history-boundary.md) | Alertmanager 현재 알림과 해소 이력의 경계를 분리한다 | Proposed | 2026-08-15 |
 | [0013](./0013-dhub2-ansible-role-deployment.md) | dhub2 Ansible role로 대시보드 배포와 모니터링 연결을 선언적으로 자동화한다 | Proposed | 2026-08-18 |
+| [0014](./0014-admin-gated-workload-secret-management.md) | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | 2026-08-19 |
 
 ## 상태 값
 

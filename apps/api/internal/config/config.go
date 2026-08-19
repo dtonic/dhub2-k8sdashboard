@@ -524,8 +524,8 @@ func (c Config) Scope() scope.Scope {
 	if name == "" {
 		name = c.ClusterID
 	}
-	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 배치 편집을 허용합니다. (#28)
-	return scope.Scope{CanEditTopology: true, Clusters: []scope.Cluster{{
+	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 편집·워크로드 관리를 허용합니다. (#28, #32)
+	return scope.Scope{CanEditTopology: true, CanManageWorkloads: true, Clusters: []scope.Cluster{{
 		ID:         c.ClusterID,
 		Name:       name,
 		Namespaces: c.Namespaces,

@@ -112,7 +112,7 @@ export function PageHeader({
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
-  controls: ReactNode;
+  controls?: ReactNode;
   crumbs?: ReactNode;
   actions?: ReactNode;
 }) {

@@ -126,6 +126,12 @@ dashboardBuilder:
     cidrs: []
     port: 5432
 
+# 관리 기능(ADR 0014, #32) — Deployment/Secret 조회·수정·재배포. 명시적 opt-in입니다.
+# 켜면 대시보드 SA에 secrets get/list/update, deployments update/patch 권한이 붙습니다.
+# 끄면(기본) 관리 엔드포인트는 권한 부재로 fail-closed(403)됩니다.
+manageWorkloads:
+  enabled: false
+
 redis:
   enabled: true
   image: {repository: redis, tag: 8.2.6-alpine, digest: ""}

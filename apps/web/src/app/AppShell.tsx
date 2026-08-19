@@ -41,6 +41,7 @@ export function AppShell() {
   const { search } = useLocation();
   const navSearch = useMemo(() => sharedSearch(search), [search]);
   const scope = useScope();
+  const canManage = scope.data?.canManageWorkloads ?? false;
   const { clusterId } = useDashboardParams();
   const cluster = scope.data?.clusters.find((c) => c.id === clusterId);
   const auth = useAuth();
@@ -101,6 +102,13 @@ export function AppShell() {
           ))}
           <NavLink to={{ pathname: "/dashboard-builder", search: navSearch }} className="app__nav-link">Dashboard Builder</NavLink>
         </div>
+        {canManage && (
+          <div className="app__nav-group">
+            <div className="app__nav-title">관리</div>
+            <NavLink to={{ pathname: "/deployments", search: navSearch }} className="app__nav-link">Deployments</NavLink>
+            <NavLink to={{ pathname: "/secrets", search: navSearch }} className="app__nav-link">Secrets</NavLink>
+          </div>
+        )}
       </nav>
 
       <main className="app__main" id="main">

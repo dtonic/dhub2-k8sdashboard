@@ -238,6 +238,8 @@ func run(logger *slog.Logger) error {
 		DashboardStore:     dashboardAPI,
 		DashboardQueryRefs: queries.Refs(),
 		TopologyLayout:     topoLayout,
+		// 관리(ADR 0014)는 direct 모드에서만 — clientset을 직접 씁니다. central은 nil.
+		KubeClient: clients.Typed,
 		AllowedOrigin:      cfg.AllowedOrigin,
 		Version:            contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})

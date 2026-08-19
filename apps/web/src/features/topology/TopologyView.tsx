@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { RANGE_LABEL, type RangeKey, type TopologyNodePosition } from "@k8s-dashboard/contracts";
+import { RANGE_LABEL, type RangeKey, type TopologyNode, type TopologyNodePosition } from "@k8s-dashboard/contracts";
 import { topoKeys, useEdgeSeries, useSaveTopologyLayout, useTopology } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { LineChart } from "@/components/LineChart";
@@ -13,37 +13,54 @@ import { useLogSearch } from "@/api/queries";
 import { TopologyGraph } from "./TopologyGraph";
 
 /**
- * Route를 클릭하면 그 경로의 **실제 최근 로그**를 Quickwit에서 조회해 보여줍니다. (#31 후속)
+ * Route를 클릭하면 그 통신 경로의 **출발 Pod 실제 최근 로그**를 조회해 보여줍니다. (#31 후속)
  * 실시간 패킷 캡처는 이 조회 전용 대시보드가 해선 안 되는 일이라(특권 프로세스·PII·TLS),
- * 이미 수집 중인 액세스 로그를 route 문자열로 검색해 "실제 송수신"에 가장 가까운
- * 실데이터를 보여줍니다. 서버 마스킹이 그대로 적용됩니다(README §10).
+ * 이미 수집 중인 로그를 **실제 Pod UID**로 필터해 "이 경로에서 실제로 오간 것"에 가장
+ * 가까운 실데이터를 보여줍니다. 서버 마스킹이 그대로 적용됩니다(README §10).
+ *
+ * route 문자열 자체(예: /api/v1/orders)는 통신 그래프가 아직 demo라 실제 로그와
+ * 매칭되지 않으므로 검색어가 아니라 보조 필터로만 씁니다.
  */
-function RouteLogs({ clusterId, namespace, route, range }: { clusterId: string; namespace: string; route: string; range: RangeKey }) {
+function RouteLogs({
+  clusterId,
+  fromNode,
+  route,
+  range,
+}: {
+  clusterId: string;
+  fromNode: TopologyNode | undefined;
+  route: string;
+  range: RangeKey;
+}) {
+  const external = fromNode?.external ?? false;
   const q = useLogSearch({
     clusterId,
-    namespace: namespace || "all",
+    namespace: fromNode?.namespace || "all",
     workload: "",
-    podUid: "",
+    podUid: fromNode?.ref.podUid ?? "",
     container: "",
     levels: [],
-    q: route,
+    q: "",
     range,
   });
   const section = q.data?.pages[0]?.lines;
   const lines = (section?.status === "ok" ? section.data : [])?.slice(0, 8) ?? [];
   const ref = q.data?.pages[0]?.generatedAt ?? new Date().toISOString();
 
-  if (q.isLoading) return <div className="topo-route-logs__hint muted">최근 로그를 불러오는 중…</div>;
+  if (external || !fromNode?.ref.podUid) {
+    return <div className="topo-route-logs__hint muted">외부 엔티티({fromNode?.name})는 클러스터 로그가 없습니다. 내부 Pod가 출발인 경로를 선택하세요.</div>;
+  }
+  if (q.isLoading) return <div className="topo-route-logs__hint muted">{fromNode.name}의 최근 로그를 불러오는 중…</div>;
   if (section && section.status !== "ok") {
-    return <div className="topo-route-logs__hint muted">이 경로의 로그를 조회할 수 없습니다({section.status}). 로그 데이터소스 연결을 확인하세요.</div>;
+    return <div className="topo-route-logs__hint muted">로그를 조회할 수 없습니다({section.status}). 로그 데이터소스 연결을 확인하세요.</div>;
   }
   if (lines.length === 0) {
-    return <div className="topo-route-logs__hint muted">선택한 범위에 "{route}"와 일치하는 로그가 없습니다.</div>;
+    return <div className="topo-route-logs__hint muted">선택한 범위에 {fromNode.name}의 로그가 없습니다.</div>;
   }
   return (
     <div className="topo-route-logs">
       <div className="topo-route-logs__meta muted">
-        "{route}" 최근 로그 · Quickwit 실데이터 · 민감정보는 서버에서 마스킹됨
+        <strong>{fromNode.name}</strong>의 최근 로그 (route <code>{route}</code>) · Quickwit 실데이터 · 민감정보는 서버에서 마스킹됨
       </div>
       <ul className="topo-route-logs__list">
         {lines.map((l) => (
@@ -321,7 +338,7 @@ export function TopologyView() {
                                 <td colSpan={4}>
                                   <RouteLogs
                                     clusterId={clusterId}
-                                    namespace={graph?.nodes.find((nn) => nn.id === edge.from)?.namespace ?? namespace}
+                                    fromNode={graph?.nodes.find((nn) => nn.id === edge.from)}
                                     route={r.route}
                                     range={range}
                                   />

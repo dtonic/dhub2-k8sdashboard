@@ -469,3 +469,66 @@ a:hover { text-decoration: underline; }
 .logline__fields div { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .logline__fields dt { font: var(--type-label); color: var(--color-text-muted); }
 .logline__fields dd { margin: 0; font: var(--type-code); overflow-wrap: anywhere; }
+
+/* ── 관리(Deployment/Secret) UI — ADR 0014, #33 ───────────────────────── */
+
+.btn {
+  font: var(--type-body-strong);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn--warning { border-color: var(--status-warning); color: var(--status-warning); }
+.btn--critical { border-color: var(--status-critical); color: var(--color-text-inverse); background: var(--status-critical); }
+
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-4);
+}
+.confirm-dialog {
+  width: min(480px, 100%);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-lg, 0 10px 40px rgba(0, 0, 0, 0.3));
+}
+.confirm-dialog__title { font: var(--type-section-title); margin: 0 0 var(--space-3); }
+.confirm-dialog__message { font: var(--type-body); color: var(--color-text-secondary); margin: 0 0 var(--space-6); }
+.confirm-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-4); align-items: center; }
+
+.manifest-editor__toolbar { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-2); }
+.manifest-editor__error { color: var(--status-critical); font: var(--type-meta); }
+.manifest-editor__area {
+  width: 100%; min-height: 320px; resize: vertical;
+  font: var(--type-code);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  white-space: pre; overflow-wrap: normal; overflow-x: auto;
+}
+
+.manage-detail__heading { font: var(--type-label); color: var(--color-text-secondary); margin: var(--space-5) 0 var(--space-2); }
+.manage-detail__warn { font: var(--type-meta); padding: var(--space-2) 0; }
+
+.secret-kv { display: flex; flex-direction: column; gap: var(--space-2); }
+.secret-kv__row { display: grid; grid-template-columns: minmax(140px, 240px) 1fr; align-items: center; gap: var(--space-3); }
+.secret-kv__key { font: var(--type-code); }
+.secret-kv__val {
+  font: var(--type-code);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+}
+
+tr.is-selected td { background: var(--color-surface-selected); }

@@ -10,6 +10,7 @@ import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
 import { PodDetail } from "@/features/drill/PodDetail";
 import { LogsExplorer } from "@/features/logs/LogsExplorer";
 import { TopologyView } from "@/features/topology/TopologyView";
+import { ManageView } from "@/features/manage/ManageView";
 import { AlertsView } from "@/features/alerts/AlertsView";
 import { DashboardView } from "@/features/dashboards/DashboardView";
 import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
@@ -50,6 +51,8 @@ async function bootstrap() {
               <Route path="/topology" element={<TopologyView />} />
               <Route path="/logs" element={<LogsExplorer />} />
               <Route path="/alerts" element={<AlertsView />} />
+              <Route path="/deployments" element={<ManageView kind="deployments" />} />
+              <Route path="/secrets" element={<ManageView kind="secrets" />} />
               <Route path="/dashboards/:id" element={<DashboardView />} />
               <Route path="/dashboard-builder" element={<DashboardBuilderList />} />
               <Route path="/dashboard-builder/:id" element={<DashboardBuilderEditor />} />

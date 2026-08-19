@@ -28,7 +28,10 @@ const unhealthyLimit = 20
 func (s *Server) handleScope(w http.ResponseWriter, r *http.Request) {
 	serve(s, w, r, func(ctx context.Context) (contract.ScopeResponse, error) {
 		sc := scope.From(ctx)
-		out := contract.ScopeResponse{Clusters: make([]contract.ScopeCluster, 0, len(sc.Clusters))}
+		out := contract.ScopeResponse{
+			Clusters:           make([]contract.ScopeCluster, 0, len(sc.Clusters)),
+			CanManageWorkloads: sc.CanManageWorkloads && s.deps.KubeClient != nil,
+		}
 		for _, c := range sc.Clusters {
 			out.Clusters = append(out.Clusters, contract.ScopeCluster{
 				ID:         c.ID,
@@ -303,6 +306,7 @@ func (s *Server) handlePodDetail(w http.ResponseWriter, r *http.Request) {
 		target := datasource.Target{ClusterID: c.ID, Namespace: ns, PodUID: summary.UID}
 		panels, err := s.deps.Metrics.Trends(ctx, target, dsWindow(win), nil)
 		out.Trends = dsSection(panels, err, contract.SourceGreptimeDB, "GreptimeDB")
+		out.SecretRefs = secretNamesFromPod(pod) // 값 아님 — 이름만. (#33)
 		return out, nil
 	})
 }
