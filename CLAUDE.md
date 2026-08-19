@@ -31,8 +31,14 @@ OIDC 인증·역할 기반 Scope(#10)는 `apps/api/internal/auth`로 구현되�
 ## 시작 전에
 
 1. 원격 변경사항을 먼저 확인합니다. 변경이 있으면 `git fetch && git pull` 후에 작업합니다.
-2. 관련 ADR(`docs/adr/`)을 읽습니다. ADR과 충돌하는 구현을 제안하지 않습니다.
+2. 관련 ADR을 읽습니다. ADR과 충돌하는 구현을 제안하지 않습니다.
    결정을 바꿔야 한다면 코드를 먼저 고치지 말고 **새 ADR을 제안**합니다.
+   - **확정된 과거 ADR**은 `docs/adr/`(0001~0013)에 파일로 있습니다.
+   - **새 ADR은 파일이 아니라 GitHub Issue로 만듭니다.** 제목 맨 앞에 `[ADR]`을 붙이고
+     `ADR` 라벨을 답니다(없으면 `gh label create ADR`). 본문에 ADR 번호(기존 최대+1)·상태
+     (Proposed/Accepted/Superseded)·배경·검토한 대안·결정·결과·롤백을 적습니다.
+     기존 파일 ADR을 대체·갱신할 때도 새 ADR 이슈를 만들고 파일 ADR의 상태를 갱신합니다.
+   - ADR 이슈 목록: `gh issue list --label ADR`. 최신 결정은 이 목록을 먼저 봅니다.
 
 ## 반드시 지킬 것
 

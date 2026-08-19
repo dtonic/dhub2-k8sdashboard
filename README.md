@@ -298,6 +298,10 @@ Pod Name
 
 기술 선택은 ADR 검토 후 확정합니다.
 
+> **ADR 작성 방식:** 확정된 과거 결정(0001~0013)은 [`docs/adr/`](./docs/adr/)에 파일로 있고,
+> **0014부터 새 ADR은 GitHub Issue**로 만듭니다 — 제목에 `[ADR]`, `ADR` 라벨을 답니다.
+> 최신 결정은 `gh issue list --label ADR`로 봅니다. 자세한 규칙은 [`docs/adr/README.md`](./docs/adr/README.md).
+
 ---
 
 ## 7. 예상 저장소 구조

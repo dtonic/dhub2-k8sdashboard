@@ -1,8 +1,16 @@
 # Architecture Decision Records
 
-되돌리기 비싼 결정만 기록합니다. 파일명은 `NNNN-kebab-case-title.md`이며 번호는 재사용하지 않습니다.
+되돌리기 비싼 결정만 기록합니다.
 
-## 목록
+## 작성 방식 (2026-08-19 변경)
+
+- **0001~0013은 이 디렉터리에 파일**(`NNNN-kebab-case-title.md`)로 있습니다. 번호는 재사용하지 않습니다.
+- **0014부터 새 ADR은 GitHub Issue로 만듭니다.** 제목 맨 앞에 `[ADR]`, `ADR` 라벨을 답니다.
+  본문에 ADR 번호·상태·배경·검토한 대안·결정·결과·롤백을 적습니다.
+  - 목록: `gh issue list --label ADR` · 생성 라벨이 없으면 `gh label create ADR`.
+  - 파일 ADR을 대체·갱신할 때도 새 ADR 이슈를 만들고 아래 표의 상태를 갱신합니다.
+
+## 목록 (파일 ADR)
 
 | # | 제목 | 상태 | 날짜 |
 |---|---|---|---|
@@ -19,7 +27,12 @@
 | [0011](./0011-server-side-oidc-browser-session.md) | 서버 측 OIDC 브라우저 세션 | Proposed | 2026-08-15 |
 | [0012](./0012-alertmanager-current-alerts-and-history-boundary.md) | Alertmanager 현재 알림과 해소 이력의 경계를 분리한다 | Proposed | 2026-08-15 |
 | [0013](./0013-dhub2-ansible-role-deployment.md) | dhub2 Ansible role로 대시보드 배포와 모니터링 연결을 선언적으로 자동화한다 | Proposed | 2026-08-18 |
-| [0014](./0014-admin-gated-workload-secret-management.md) | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | 2026-08-19 |
+
+## 목록 (이슈 ADR, 0014~)
+
+| # | 제목 | 상태 | 이슈 |
+|---|---|---|---|
+| 0014 | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | [#34](https://github.com/xenx96/k8s-dashboard/issues/34) |
 
 ## 상태 값
 
