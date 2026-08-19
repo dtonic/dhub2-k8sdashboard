@@ -47,14 +47,25 @@ export function useDashboardParams() {
       setParams(
         (prev) => {
           const p = new URLSearchParams(prev);
+          /* 기본값과 같은 파라미터는 URL에 남기지 않습니다 — 링크 재현성은 그대로면서
+             "그냥 로그 보기"의 URL이 짧아집니다. ns=all·range=1h·refresh=30초가 기본. (#31 후속) */
           if (next.cluster !== undefined) {
             p.set("cluster", next.cluster);
-            /* 클러스터를 바꾸면 namespace 선택은 유효하지 않을 수 있으므로 초기화합니다. */
-            p.set("ns", "all");
+            /* 클러스터를 바꾸면 namespace 선택은 유효하지 않을 수 있으므로 초기화합니다(기본=all). */
+            p.delete("ns");
           }
-          if (next.ns !== undefined) p.set("ns", next.ns);
-          if (next.range !== undefined) p.set("range", next.range);
-          if (next.refresh !== undefined) p.set("refresh", String(next.refresh));
+          if (next.ns !== undefined) {
+            if (next.ns === "all") p.delete("ns");
+            else p.set("ns", next.ns);
+          }
+          if (next.range !== undefined) {
+            if (next.range === "1h") p.delete("range");
+            else p.set("range", next.range);
+          }
+          if (next.refresh !== undefined) {
+            if (next.refresh === 30_000) p.delete("refresh");
+            else p.set("refresh", String(next.refresh));
+          }
           return p;
         },
         { replace: true },

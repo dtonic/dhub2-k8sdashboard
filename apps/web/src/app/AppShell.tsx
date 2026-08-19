@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { useScope } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
@@ -15,9 +15,31 @@ const NAV = [
   { to: "/alerts", label: "Alerts" },
 ];
 
-/** 좌측 내비게이션은 현재 Scope/시간 범위를 유지한 채 이동합니다. */
+/* 화면을 넘어가도 유지할 공용 파라미터 — Scope와 시간 범위뿐입니다.
+   from/to·edge·uid·workload·container·levels·q·tab 같은 **화면 전용 필터**는
+   nav로 다른 화면에 새어들어가면 안 됩니다. 예전에는 search를 통째로 넘겨
+   Topology의 edge나 로그 차트 구간(from/to)이 Logs Explorer로 흘러들어가
+   빈 결과("데이터 없음")와 지저분한 URL을 만들었습니다. (#31 후속) */
+const SHARED_PARAMS = ["cluster", "ns", "range", "refresh"];
+/* 기본값과 같으면 URL에서 생략합니다 — 링크 하나로 재현되는 것은 그대로면서
+   "그냥 로그 보기"의 URL이 ?cluster=…&ns=… 수준으로 짧아집니다. */
+const PARAM_DEFAULTS: Record<string, string> = { range: "1h", refresh: "30000" };
+
+function sharedSearch(search: string): string {
+  const src = new URLSearchParams(search);
+  const out = new URLSearchParams();
+  for (const k of SHARED_PARAMS) {
+    const v = src.get(k);
+    if (v && v !== PARAM_DEFAULTS[k]) out.set(k, v);
+  }
+  const s = out.toString();
+  return s ? `?${s}` : "";
+}
+
+/** 좌측 내비게이션은 현재 Scope/시간 범위만 유지한 채 이동합니다. */
 export function AppShell() {
   const { search } = useLocation();
+  const navSearch = useMemo(() => sharedSearch(search), [search]);
   const scope = useScope();
   const { clusterId } = useDashboardParams();
   const cluster = scope.data?.clusters.find((c) => c.id === clusterId);
@@ -68,16 +90,16 @@ export function AppShell() {
         <div className="app__nav-group">
           <div className="app__nav-title">관측</div>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={{ pathname: n.to, search }} end={n.end} className="app__nav-link">
+            <NavLink key={n.to} to={{ pathname: n.to, search: navSearch }} end={n.end} className="app__nav-link">
               {n.label}
             </NavLink>
           ))}
           {embeddedDashboards.map((dashboard) => (
-            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search }} className="app__nav-link">
+            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search: navSearch }} className="app__nav-link">
               {dashboard.title}
             </NavLink>
           ))}
-          <NavLink to={{ pathname: "/dashboard-builder", search }} className="app__nav-link">Dashboard Builder</NavLink>
+          <NavLink to={{ pathname: "/dashboard-builder", search: navSearch }} className="app__nav-link">Dashboard Builder</NavLink>
         </div>
       </nav>
 
