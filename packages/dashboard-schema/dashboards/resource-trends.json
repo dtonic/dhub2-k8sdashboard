@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "resource-trends",
+  "title": "Resource Trends",
+  "description": "CPU·Memory·Disk I/O·Network 추세를 한 화면에서 비교하는 리소스 중심 프리셋.",
+  "variables": [
+    { "id": "scope", "label": "Scope", "kind": "scope" },
+    { "id": "range", "label": "Time range", "kind": "range" }
+  ],
+  "widgets": [
+    { "id": "cpu", "title": "CPU Usage", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.cpu.used", "metrics.cpu.requested"], "layout": { "x": 0, "y": 0, "w": 6, "h": 4 } },
+    { "id": "memory", "title": "Memory Usage", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.memory.used", "metrics.memory.requested"], "layout": { "x": 6, "y": 0, "w": 6, "h": 4 } },
+    { "id": "disk-io", "title": "Disk I/O", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.io.read", "metrics.io.write"], "layout": { "x": 0, "y": 4, "w": 6, "h": 4 } },
+    { "id": "network", "title": "Network", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.network.rx", "metrics.network.tx"], "layout": { "x": 6, "y": 4, "w": 6, "h": 4 } },
+    { "id": "unhealthy", "title": "Unhealthy Workloads", "type": "Table", "binding": "unhealthy", "options": { "maxRows": 5000 }, "layout": { "x": 0, "y": 8, "w": 12, "h": 4 } }
+  ]
+}

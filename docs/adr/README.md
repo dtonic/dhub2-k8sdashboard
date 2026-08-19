@@ -33,7 +33,7 @@
 | # | 제목 | 상태 | 이슈 |
 |---|---|---|---|
 | 0014 | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | [#34](https://github.com/xenx96/k8s-dashboard/issues/34) |
-| 0015 | Dashboard Builder 위젯 확장·예시 대시보드 갱신·편집 UX 개선 | Proposed | [#35](https://github.com/xenx96/k8s-dashboard/issues/35) |
+| 0015 | Dashboard Builder 위젯 확장·예시 대시보드 갱신·편집 UX 개선 | Accepted | [#35](https://github.com/xenx96/k8s-dashboard/issues/35) |
 
 ## 상태 값
 

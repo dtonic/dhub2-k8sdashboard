@@ -360,6 +360,14 @@ k8s-dashboard/
 - Metric/Log/Event/Alert Drill-down
 - Alertmanager 현재 알림 조회 연동 *(구현됨; Resolved 운영 이력 adapter는 P2 후속, ADR 0012)*
 - Dashboard DSL 기반 읽기 전용 대시보드 *(구현 — schemaVersion 1, bounded loader, 6종 폐쇄형 registry, generic route)*
+  - **Dashboard Builder** = 대시보드를 *만드는* 도구. 등록된 위젯(Stat·Gauge·Table·EventTimeline·
+    TimeSeries)과 **등록된 queryRef**로만 draft를 조립 → 제출 → `platform.admin` 승인 → canonical
+    JSON export → Git 커밋. Raw PromQL/SQL은 쓸 수 없습니다(보안). LogStream 위젯은 화면 단위
+    집계에 로그가 없어 **미지원**이며 팔레트에 노출하지 않습니다(로그는 Logs Explorer에서 봅니다).
+  - **내장(임베드) 대시보드** = 그렇게 승인·export해 앱에 넣은 *결과물 프리셋*. 좌측 nav에 뜹니다.
+    현재 `Cluster Operations`(노드·파드·CPU·메모리·디스크 I/O·네트워크·이상 워크로드·이벤트)와
+    `Resource Trends`(리소스 추세 중심) 두 프리셋이 있습니다. 즉 Builder=만드는 곳, 내장
+    대시보드=만들어진 것의 관계입니다. (ADR 0015)
 - Helm/Kustomize 배포
 - CI, 보안 검증, E2E 테스트
 

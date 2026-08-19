@@ -76,6 +76,38 @@ export const embeddedDashboards = [
         }
       },
       {
+        "id": "disk-io",
+        "title": "Disk I/O",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.io.read",
+          "metrics.io.write"
+        ],
+        "layout": {
+          "x": 0,
+          "y": 6,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": "network",
+        "title": "Network",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.network.rx",
+          "metrics.network.tx"
+        ],
+        "layout": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
         "id": "unhealthy",
         "title": "Unhealthy Workloads",
         "type": "Table",
@@ -85,7 +117,7 @@ export const embeddedDashboards = [
         },
         "layout": {
           "x": 0,
-          "y": 6,
+          "y": 10,
           "w": 7,
           "h": 5
         }
@@ -100,9 +132,108 @@ export const embeddedDashboards = [
         },
         "layout": {
           "x": 7,
-          "y": 6,
+          "y": 10,
           "w": 5,
           "h": 5
+        }
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "id": "resource-trends",
+    "title": "Resource Trends",
+    "description": "CPU·Memory·Disk I/O·Network 추세를 한 화면에서 비교하는 리소스 중심 프리셋.",
+    "variables": [
+      {
+        "id": "scope",
+        "label": "Scope",
+        "kind": "scope"
+      },
+      {
+        "id": "range",
+        "label": "Time range",
+        "kind": "range"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "cpu",
+        "title": "CPU Usage",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.cpu.used",
+          "metrics.cpu.requested"
+        ],
+        "layout": {
+          "x": 0,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": "memory",
+        "title": "Memory Usage",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.memory.used",
+          "metrics.memory.requested"
+        ],
+        "layout": {
+          "x": 6,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": "disk-io",
+        "title": "Disk I/O",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.io.read",
+          "metrics.io.write"
+        ],
+        "layout": {
+          "x": 0,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": "network",
+        "title": "Network",
+        "type": "TimeSeries",
+        "binding": "trends",
+        "queryRefs": [
+          "metrics.network.rx",
+          "metrics.network.tx"
+        ],
+        "layout": {
+          "x": 6,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": "unhealthy",
+        "title": "Unhealthy Workloads",
+        "type": "Table",
+        "binding": "unhealthy",
+        "options": {
+          "maxRows": 5000
+        },
+        "layout": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 4
         }
       }
     ]
@@ -112,46 +243,55 @@ export const embeddedDashboardBindings = [
   {
     "queryRef": "metrics.cpu.requested",
     "panelId": "cpu",
-    "seriesKey": "requested"
+    "seriesKey": "requested",
+    "panelTitle": "CPU 사용량"
   },
   {
     "queryRef": "metrics.cpu.used",
     "panelId": "cpu",
-    "seriesKey": "used"
+    "seriesKey": "used",
+    "panelTitle": "CPU 사용량"
   },
   {
     "queryRef": "metrics.io.read",
     "panelId": "io",
-    "seriesKey": "read"
+    "seriesKey": "read",
+    "panelTitle": "디스크 I/O"
   },
   {
     "queryRef": "metrics.io.write",
     "panelId": "io",
-    "seriesKey": "write"
+    "seriesKey": "write",
+    "panelTitle": "디스크 I/O"
   },
   {
     "queryRef": "metrics.memory.requested",
     "panelId": "memory",
-    "seriesKey": "requested"
+    "seriesKey": "requested",
+    "panelTitle": "메모리 사용량"
   },
   {
     "queryRef": "metrics.memory.used",
     "panelId": "memory",
-    "seriesKey": "used"
+    "seriesKey": "used",
+    "panelTitle": "메모리 사용량"
   },
   {
     "queryRef": "metrics.network.rx",
     "panelId": "network",
-    "seriesKey": "rx"
+    "seriesKey": "rx",
+    "panelTitle": "네트워크"
   },
   {
     "queryRef": "metrics.network.tx",
     "panelId": "network",
-    "seriesKey": "tx"
+    "seriesKey": "tx",
+    "panelTitle": "네트워크"
   },
   {
     "queryRef": "metrics.restarts",
     "panelId": "restarts",
-    "seriesKey": "restarts"
+    "seriesKey": "restarts",
+    "panelTitle": "컨테이너 재시작"
   }
 ] as const;

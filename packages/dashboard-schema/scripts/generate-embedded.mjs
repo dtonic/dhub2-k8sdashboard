@@ -32,7 +32,8 @@ for (const { name, catalog } of catalogs) {
   for (const panel of catalog.panels ?? []) for (const series of panel.series ?? []) {
     if (typeof panel.id !== "string" || typeof series.key !== "string" || typeof series.query !== "string" || !queryRefs.has(series.query))
       throw new Error(`invalid panel binding: ${name}`);
-    bindings.push({ queryRef: series.query, panelId: panel.id, seriesKey: series.key });
+    // panelTitle은 Builder 팔레트에서 사람이 읽을 그룹 이름입니다(카탈로그가 정본).
+    bindings.push({ queryRef: series.query, panelId: panel.id, seriesKey: series.key, panelTitle: panel.title ?? panel.id });
   }
 }
 if (queryRefs.size === 0 || bindings.length === 0) throw new Error("query catalog contains no dashboard bindings");

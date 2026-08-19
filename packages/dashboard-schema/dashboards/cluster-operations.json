@@ -12,7 +12,9 @@
     { "id": "pods-running", "title": "Pods Running", "type": "Gauge", "binding": "pods.runningPercent", "layout": { "x": 3, "y": 0, "w": 3, "h": 2 } },
     { "id": "cpu", "title": "CPU Usage", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.cpu.used", "metrics.cpu.requested"], "layout": { "x": 0, "y": 2, "w": 6, "h": 4 } },
     { "id": "memory", "title": "Memory Usage", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.memory.used", "metrics.memory.requested"], "layout": { "x": 6, "y": 2, "w": 6, "h": 4 } },
-    { "id": "unhealthy", "title": "Unhealthy Workloads", "type": "Table", "binding": "unhealthy", "options": { "maxRows": 5000 }, "layout": { "x": 0, "y": 6, "w": 7, "h": 5 } },
-    { "id": "events", "title": "Recent Events", "type": "EventTimeline", "binding": "events", "options": { "maxRows": 200 }, "layout": { "x": 7, "y": 6, "w": 5, "h": 5 } }
+    { "id": "disk-io", "title": "Disk I/O", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.io.read", "metrics.io.write"], "layout": { "x": 0, "y": 6, "w": 6, "h": 4 } },
+    { "id": "network", "title": "Network", "type": "TimeSeries", "binding": "trends", "queryRefs": ["metrics.network.rx", "metrics.network.tx"], "layout": { "x": 6, "y": 6, "w": 6, "h": 4 } },
+    { "id": "unhealthy", "title": "Unhealthy Workloads", "type": "Table", "binding": "unhealthy", "options": { "maxRows": 5000 }, "layout": { "x": 0, "y": 10, "w": 7, "h": 5 } },
+    { "id": "events", "title": "Recent Events", "type": "EventTimeline", "binding": "events", "options": { "maxRows": 200 }, "layout": { "x": 7, "y": 10, "w": 5, "h": 5 } }
   ]
 }
