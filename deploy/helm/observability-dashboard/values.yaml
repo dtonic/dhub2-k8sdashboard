@@ -125,6 +125,15 @@ dashboardBuilder:
   postgresEgress:
     cidrs: []
     port: 5432
+  # SQLite 파일 백엔드 (ADR 0016). 켜면 외부 PostgreSQL 대신 PVC의 SQLite 파일을 씁니다.
+  # 단일 writer라 API는 replicas=1 + Recreate로 강제됩니다. PVC로 재배포·삭제→배포에도 draft가 보존됩니다.
+  sqlite:
+    enabled: false
+    path: /data/dashboard/drafts.db
+    persistence:
+      size: 1Gi
+      storageClass: ""
+      accessMode: ReadWriteOnce
 
 # 관리 기능(ADR 0014, #32) — Deployment/Secret 조회·수정·재배포. 명시적 opt-in입니다.
 # 켜면 대시보드 SA에 secrets get/list/update, deployments update/patch 권한이 붙습니다.

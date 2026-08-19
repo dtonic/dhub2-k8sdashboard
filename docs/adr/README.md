@@ -22,7 +22,7 @@
 | [0006](./0006-quickwit-scroll-cursor.md) | Quickwit 로그 페이징에 TTL scroll capability를 사용한다 | Accepted | 2026-08-14 |
 | [0007](./0007-sse-replay-reset-backpressure.md) | SSE 상태 변경 스트림은 프로세스 로컬 재생 링 · reset 폴백 · 연결 절단 backpressure로 유계를 유지한다 | Accepted | 2026-08-14 |
 | [0008](./0008-opentelemetry-agent-gateway-pipeline.md) | OpenTelemetry Agent/Gateway 수집 소유권과 fail-closed cutover를 표준화한다 | Proposed | 2026-08-15 |
-| [0009](./0009-dashboard-drafts-postgresql-and-git-export.md) | Dashboard draft PostgreSQL 저장과 승인본 Git export | Proposed | 2026-08-15 |
+| [0009](./0009-dashboard-drafts-postgresql-and-git-export.md) | Dashboard draft PostgreSQL 저장과 승인본 Git export | Proposed (0016으로 확장) | 2026-08-15 |
 | [0010](./0010-multi-cluster-state-agent-registry.md) | 멀티 클러스터 상태 Agent와 중앙 Registry | Proposed | 2026-08-15 |
 | [0011](./0011-server-side-oidc-browser-session.md) | 서버 측 OIDC 브라우저 세션 | Proposed | 2026-08-15 |
 | [0012](./0012-alertmanager-current-alerts-and-history-boundary.md) | Alertmanager 현재 알림과 해소 이력의 경계를 분리한다 | Proposed | 2026-08-15 |
@@ -34,6 +34,7 @@
 |---|---|---|---|
 | 0014 | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | [#34](https://github.com/xenx96/k8s-dashboard/issues/34) |
 | 0015 | Dashboard Builder 위젯 확장·예시 대시보드 갱신·편집 UX 개선 | Accepted | [#35](https://github.com/xenx96/k8s-dashboard/issues/35) |
+| 0016 | Dashboard draft 저장소를 SQLite 파일(PVC)로 선택 지원하고 Import를 추가한다 (0009 확장) | Proposed | [#37](https://github.com/xenx96/k8s-dashboard/issues/37) |
 
 ## 상태 값
 

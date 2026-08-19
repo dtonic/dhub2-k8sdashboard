@@ -62,9 +62,10 @@
       "properties": {
         "enabled": {"type": "boolean"}, "databaseURLKey": {"type": "string", "minLength": 1}, "cursorKeyKey": {"type": "string", "minLength": 1},
         "maxConnections": {"type": "integer", "minimum": 1, "maximum": 32}, "connectTimeout": {"type": "string", "pattern": "^(?:[1-9]|[12][0-9]|30)s$"}, "requireTLS": {"type": "boolean"},
-        "postgresEgress": {"type": "object", "required": ["cidrs", "port"], "properties": {"cidrs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/cidr"}}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
+        "postgresEgress": {"type": "object", "required": ["cidrs", "port"], "properties": {"cidrs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/cidr"}}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}},
+        "sqlite": {"type": "object", "required": ["enabled", "path", "persistence"], "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}, "path": {"type": "string", "minLength": 1}, "persistence": {"type": "object", "required": ["size", "storageClass", "accessMode"], "additionalProperties": false, "properties": {"size": {"type": "string", "minLength": 1}, "storageClass": {"type": "string"}, "accessMode": {"enum": ["ReadWriteOnce", "ReadWriteOncePod"]}}}}}
       },
-      "allOf": [{"if": {"properties": {"enabled": {"const": true}}}, "then": {"properties": {"postgresEgress": {"properties": {"cidrs": {"minItems": 1}}}}}}]
+      "allOf": [{"if": {"properties": {"enabled": {"const": true}, "sqlite": {"properties": {"enabled": {"const": false}}}}, "required": ["enabled"]}, "then": {"properties": {"postgresEgress": {"properties": {"cidrs": {"minItems": 1}}}}}}]
     },
     "networkPolicy": {
       "type": "object", "required": ["enabled", "ingress", "dns", "kubernetesApiCidrs", "external", "internal"],

@@ -21,6 +21,9 @@ GreptimeDB·Quickwit 실클라이언트는 구현되어 있습니다
 질의 정의를 바꿀 때는 코드가 아니라 `querycatalog/defaults/*.yaml`을 고칩니다.
 OIDC 인증·역할 기반 Scope(#10)는 `apps/api/internal/auth`로 구현되어 있습니다
 (`AUTH_MODE=none|oidc|mock` — 로컬은 mock IdP로 실제 검증 경로를 그대로 탑니다).
+Custom Dashboard Builder(#9/ADR 0016)는 `apps/api/internal/dashboard`로 구현되어 있습니다 —
+저장 백엔드는 선택형입니다. `DASHBOARD_DB_PATH`면 SQLite 파일(PVC, 단일 writer, 경량 기본),
+`DATABASE_URL`이면 PostgreSQL(HA)입니다. 초안 생성·수정·삭제·제출·승인·Export·Import를 지원합니다.
 남은 것은 Alertmanager 실클라이언트(#17 잔여), Redis 캐시(#11), SSE(#12)입니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`,
 프런트엔드 규칙은 `apps/web/README.md`, 백엔드 규칙은 `apps/api/README.md`에 있습니다.

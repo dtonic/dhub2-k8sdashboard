@@ -88,6 +88,7 @@ export function AppShell() {
       </header>
 
       <nav className="app__nav" aria-label="주요 화면">
+        {/* 3개 그룹으로 관리: 관측 / 관리 / Custom. 그룹 사이는 점선 구분선으로 나눕니다. */}
         <div className="app__nav-group">
           <div className="app__nav-title">관측</div>
           {NAV.map((n) => (
@@ -95,12 +96,6 @@ export function AppShell() {
               {n.label}
             </NavLink>
           ))}
-          {embeddedDashboards.map((dashboard) => (
-            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search: navSearch }} className="app__nav-link">
-              {dashboard.title}
-            </NavLink>
-          ))}
-          <NavLink to={{ pathname: "/dashboard-builder", search: navSearch }} className="app__nav-link">Dashboard Builder</NavLink>
         </div>
         {canManage && (
           <div className="app__nav-group">
@@ -109,6 +104,15 @@ export function AppShell() {
             <NavLink to={{ pathname: "/secrets", search: navSearch }} className="app__nav-link">Secrets</NavLink>
           </div>
         )}
+        <div className="app__nav-group">
+          <div className="app__nav-title">Custom</div>
+          {embeddedDashboards.map((dashboard) => (
+            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search: navSearch }} className="app__nav-link">
+              {dashboard.title}
+            </NavLink>
+          ))}
+          <NavLink to={{ pathname: "/dashboard-builder", search: navSearch }} className="app__nav-link">Dashboard Builder</NavLink>
+        </div>
       </nav>
 
       <main className="app__main" id="main">

@@ -148,11 +148,16 @@ type ClusterStateConfig struct {
 type DashboardBuilderConfig struct {
 	Enabled        bool
 	DatabaseURL    string
+	DBPath         string
 	CursorKey      string
 	MaxConns       int
 	ConnectTimeout time.Duration
 	RequireTLS     bool
 }
+
+// UsesSQLite는 SQLite 파일 백엔드(ADR 0016)를 쓰는지 알려줍니다.
+// DBPath가 있으면 SQLite, 없고 DatabaseURL이 있으면 PostgreSQL(ADR 0009)입니다.
+func (c DashboardBuilderConfig) UsesSQLite() bool { return c.DBPath != "" }
 
 // GreptimeConfig는 GreptimeDB 접속 설정입니다. Credential은 서버만 압니다 —
 // 브라우저로 나가는 응답 어디에도 실리지 않습니다. (README §10)
@@ -226,6 +231,7 @@ func Load() Config {
 		QueryCatalogDir:          env("QUERY_CATALOG_DIR", ""),
 		DashboardBuilder: DashboardBuilderConfig{
 			Enabled: envBool("DASHBOARD_BUILDER_ENABLED", false), DatabaseURL: env("DATABASE_URL", ""),
+			DBPath:    env("DASHBOARD_DB_PATH", ""),
 			CursorKey: env("DASHBOARD_CURSOR_KEY", ""), MaxConns: envInt("DASHBOARD_DB_MAX_CONNS", 8),
 			ConnectTimeout: envDuration("DASHBOARD_DB_CONNECT_TIMEOUT", 5*time.Second),
 			RequireTLS:     envBool("DASHBOARD_DB_REQUIRE_TLS", false),
@@ -345,8 +351,12 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("invalid cluster-state limits"))
 	}
 	if c.DashboardBuilder.Enabled {
-		if c.DashboardBuilder.DatabaseURL == "" {
-			errs = append(errs, errors.New("DATABASE_URL is required when dashboard builder is enabled"))
+		// SQLite(ADR 0016)와 PostgreSQL(ADR 0009)은 배타적입니다. 둘 다 주면 의도가 모호하므로 실패시킵니다.
+		if c.DashboardBuilder.DBPath != "" && c.DashboardBuilder.DatabaseURL != "" {
+			errs = append(errs, errors.New("set only one of DASHBOARD_DB_PATH (SQLite) or DATABASE_URL (PostgreSQL)"))
+		}
+		if c.DashboardBuilder.DBPath == "" && c.DashboardBuilder.DatabaseURL == "" {
+			errs = append(errs, errors.New("DASHBOARD_DB_PATH (SQLite) or DATABASE_URL (PostgreSQL) is required when dashboard builder is enabled"))
 		}
 		if len(c.DashboardBuilder.CursorKey) < 32 {
 			errs = append(errs, errors.New("DASHBOARD_CURSOR_KEY must contain at least 32 bytes"))
@@ -524,13 +534,21 @@ func (c Config) Scope() scope.Scope {
 	if name == "" {
 		name = c.ClusterID
 	}
-	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 편집·워크로드 관리를 허용합니다. (#28, #32)
-	return scope.Scope{CanEditTopology: true, CanManageWorkloads: true, Clusters: []scope.Cluster{{
-		ID:         c.ClusterID,
-		Name:       name,
-		Namespaces: c.Namespaces,
-		All:        c.AllNS,
-	}}}
+	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 편집·워크로드 관리·대시보드 편집/발행을
+	// 모두 허용합니다. (#28, #32, ADR 0016) draft 소유·감사에는 Subject가 필요하므로 고정값을 둡니다.
+	return scope.Scope{
+		Subject:             "local",
+		CanEditTopology:     true,
+		CanManageWorkloads:  true,
+		CanEditDashboard:    true,
+		CanPublishDashboard: true,
+		Clusters: []scope.Cluster{{
+			ID:         c.ClusterID,
+			Name:       name,
+			Namespaces: c.Namespaces,
+			All:        c.AllNS,
+		}},
+	}
 }
 
 func env(k, def string) string {

@@ -72,11 +72,19 @@ metadata:
     {{- include "dashboard.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
+  {{- if and .Values.dashboardBuilder.enabled .Values.dashboardBuilder.sqlite.enabled }}
+  {{- /* SQLite draft store는 단일 writer + RWO PVC이므로 replicas=1 + Recreate로 강제합니다. (ADR 0016) */}}
+  replicas: 1
+  minReadySeconds: 10
+  strategy:
+    type: Recreate
+  {{- else }}
   replicas: {{ .Values.api.replicas }}
   minReadySeconds: 10
   strategy:
     type: RollingUpdate
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "dashboard.selector" . | nindent 6 }}
@@ -97,7 +105,7 @@ spec:
       automountServiceAccountToken: false
       {{- end }}
       terminationGracePeriodSeconds: 30
-      {{- if .Values.alerts.enabled }}
+      {{- if or .Values.alerts.enabled (and .Values.dashboardBuilder.enabled .Values.dashboardBuilder.sqlite.enabled) }}
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -153,16 +161,24 @@ spec:
             {{- if $.Values.dashboardBuilder.enabled }}
             - name: DASHBOARD_BUILDER_ENABLED
               value: "true"
-            - name: DATABASE_URL
-              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.dashboardBuilder.databaseURLKey }}, optional: false}}
             - name: DASHBOARD_CURSOR_KEY
               valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.dashboardBuilder.cursorKeyKey }}, optional: false}}
+            {{- if $.Values.dashboardBuilder.sqlite.enabled }}
+            {{- /* SQLite 파일 백엔드 (ADR 0016) — PVC 경로만 지정하면 됩니다. */}}
+            - name: DASHBOARD_DB_PATH
+              value: {{ $.Values.dashboardBuilder.sqlite.path | quote }}
+            - name: DASHBOARD_DB_CONNECT_TIMEOUT
+              value: {{ $.Values.dashboardBuilder.connectTimeout | quote }}
+            {{- else }}
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ $.Values.api.existingSecret.name }}, key: {{ $.Values.dashboardBuilder.databaseURLKey }}, optional: false}}
             - name: DASHBOARD_DB_MAX_CONNS
               value: {{ $.Values.dashboardBuilder.maxConnections | quote }}
             - name: DASHBOARD_DB_CONNECT_TIMEOUT
               value: {{ $.Values.dashboardBuilder.connectTimeout | quote }}
             - name: DASHBOARD_DB_REQUIRE_TLS
               value: {{ $.Values.dashboardBuilder.requireTLS | quote }}
+            {{- end }}
             {{- end }}
             {{- if $.Values.authSession.enabled }}
             - name: AUTH_SESSION_KEY
@@ -198,7 +214,8 @@ spec:
           livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, failureThreshold: 3}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-          {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled }}
+          {{- $sqlite := and .Values.dashboardBuilder.enabled .Values.dashboardBuilder.sqlite.enabled }}
+          {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled $sqlite }}
           volumeMounts:
             {{- if eq .Values.clusterState.mode "central" }}
             - {name: cluster-state-tls, mountPath: /var/run/cluster-state-tls, readOnly: true}
@@ -206,9 +223,17 @@ spec:
             {{- if .Values.alerts.enabled }}
             - {name: alertmanager, mountPath: /var/run/alertmanager, readOnly: true}
             {{- end }}
+            {{- if $sqlite }}
+            - {name: dashboard-drafts, mountPath: {{ dir .Values.dashboardBuilder.sqlite.path | quote }}}
+            {{- end }}
           {{- end }}
-      {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled }}
+      {{- $sqlite := and .Values.dashboardBuilder.enabled .Values.dashboardBuilder.sqlite.enabled }}
+      {{- if or (eq .Values.clusterState.mode "central") .Values.alerts.enabled $sqlite }}
       volumes:
+        {{- if $sqlite }}
+        - name: dashboard-drafts
+          persistentVolumeClaim: {claimName: {{ include "dashboard.fullname" . }}-dashboard-drafts}
+        {{- end }}
         {{- if eq .Values.clusterState.mode "central" }}
         - name: cluster-state-tls
           secret:

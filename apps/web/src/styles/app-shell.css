@@ -81,6 +81,11 @@ a:hover { text-decoration: underline; }
   overflow: auto;
 }
 .app__nav-group { margin-bottom: var(--space-6); }
+/* 그룹(관측/관리/Custom) 사이는 점선 구분선으로 나눕니다. */
+.app__nav-group + .app__nav-group {
+  border-top: 1px dashed var(--color-border-default);
+  padding-top: var(--space-5);
+}
 .app__nav-title {
   padding: 0 var(--space-4) var(--space-3);
   font: var(--type-label);
@@ -502,6 +507,25 @@ a:hover { text-decoration: underline; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn--warning { border-color: var(--status-warning); color: var(--status-warning); }
 .btn--critical { border-color: var(--status-critical); color: var(--color-text-inverse); background: var(--status-critical); }
+.btn--primary { border-color: var(--color-text-link); background: var(--color-text-link); color: var(--color-text-inverse); }
+.btn--sm { font: var(--type-meta); padding: var(--space-1) var(--space-3); }
+.btn--icon { font: var(--type-meta); padding: var(--space-1) var(--space-2); min-width: 2.2em; text-align: center; }
+
+/* ── Dashboard Builder — 초안 목록/배지/편집 툴바 (ADR 0016, #37) ────────── */
+.builder-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.builder-list__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border-subtle); }
+.builder-list__item:last-child { border-bottom: 0; }
+.builder-list__main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.builder-list__title { font: var(--type-body-strong); color: var(--color-text-link); text-decoration: none; }
+.builder-list__title:hover { text-decoration: underline; }
+.builder-list__meta { font: var(--type-meta); color: var(--color-text-muted); display: flex; align-items: center; gap: var(--space-2); }
+
+.builder-badge { font: var(--type-meta); padding: 0 var(--space-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border-default); }
+.builder-badge--draft { color: var(--color-text-muted); }
+.builder-badge--submitted { color: var(--color-status-info); border-color: var(--color-status-info); }
+.builder-badge--approved { color: var(--color-status-good); border-color: var(--color-status-good); }
+
+.builder-widget__toolbar { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 50;

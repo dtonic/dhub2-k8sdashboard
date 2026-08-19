@@ -18,7 +18,6 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/transport"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
-	"github.com/xenx96/k8s-dashboard/apps/api/internal/dashboard"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
@@ -69,16 +68,12 @@ func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config, con
 	if err != nil {
 		return err
 	}
-	dashboardStore, err := openDashboardStore(ctx, cfg.DashboardBuilder)
+	dashboardAPI, err := openDashboardStore(ctx, cfg.DashboardBuilder)
 	if err != nil {
 		return err
 	}
-	if dashboardStore != nil {
-		defer dashboardStore.Close()
-	}
-	var dashboardAPI dashboard.Store
-	if dashboardStore != nil {
-		dashboardAPI = dashboardStore
+	if closer, ok := dashboardAPI.(interface{ Close() error }); ok {
+		defer closer.Close()
 	}
 	resolver, err := buildResolver(ctx, logger, cfg)
 	if err != nil {

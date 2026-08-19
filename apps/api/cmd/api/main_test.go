@@ -188,7 +188,22 @@ func TestOpenDashboardStoreWithActualPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer store.(interface{ Close() error }).Close()
+	if err := store.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOpenDashboardStoreSQLite는 외부 인프라 없이 SQLite 백엔드 배선을 검증합니다. (ADR 0016)
+func TestOpenDashboardStoreSQLite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "drafts.db")
+	store, err := openDashboardStore(context.Background(), config.DashboardBuilderConfig{
+		Enabled: true, DBPath: path, CursorKey: "cmd-wiring-sqlite-cursor-000000000000", MaxConns: 1, ConnectTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.(interface{ Close() error }).Close()
 	if err := store.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}

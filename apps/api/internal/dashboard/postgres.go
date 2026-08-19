@@ -60,7 +60,7 @@ func Open(ctx context.Context, databaseURL string, cursorKey []byte, maxConns in
 func verifiedTLS(cfg *pgxpool.Config) bool {
 	return cfg.ConnConfig.TLSConfig != nil && !cfg.ConnConfig.TLSConfig.InsecureSkipVerify && cfg.ConnConfig.TLSConfig.ServerName != ""
 }
-func (p *Postgres) Close()                          { p.pool.Close() }
+func (p *Postgres) Close() error                    { p.pool.Close(); return nil }
 func (p *Postgres) Ready(ctx context.Context) error { return p.pool.Ping(ctx) }
 func (p *Postgres) migrate(ctx context.Context) error {
 	tx, err := p.pool.Begin(ctx)

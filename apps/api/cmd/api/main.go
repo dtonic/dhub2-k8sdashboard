@@ -149,17 +149,17 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("쿼리 카탈로그 로드", "refs", len(queries.Refs()), "panels", len(queries.Panels()))
 
-	dashboardStore, err := openDashboardStore(ctx, cfg.DashboardBuilder)
+	dashboardAPI, err := openDashboardStore(ctx, cfg.DashboardBuilder)
 	if err != nil {
 		return err
 	}
-	if dashboardStore != nil {
-		defer dashboardStore.Close()
-		logger.Info("dashboard builder metadata store ready")
-	}
-	var dashboardAPI dashboard.Store
-	if dashboardStore != nil {
-		dashboardAPI = dashboardStore
+	if closer, ok := dashboardAPI.(interface{ Close() error }); ok {
+		defer closer.Close()
+		backend := "postgres"
+		if cfg.DashboardBuilder.UsesSQLite() {
+			backend = "sqlite"
+		}
+		logger.Info("dashboard builder metadata store ready", "backend", backend)
 	}
 
 	resolver, err := buildResolver(ctx, logger, cfg)
@@ -291,9 +291,18 @@ func startDirectAlertPoller(parent context.Context, poller *stream.AlertPoller, 
 	}
 }
 
-func openDashboardStore(ctx context.Context, cfg config.DashboardBuilderConfig) (*dashboard.Postgres, error) {
+// openDashboardStore는 설정에 따라 SQLite(ADR 0016) 또는 PostgreSQL(ADR 0009) draft
+// 저장소를 엽니다. 비활성이면 nil을 돌려주고 Builder는 fail closed 합니다.
+func openDashboardStore(ctx context.Context, cfg config.DashboardBuilderConfig) (dashboard.Store, error) {
 	if !cfg.Enabled {
 		return nil, nil
+	}
+	if cfg.UsesSQLite() {
+		store, err := dashboard.OpenSQLite(ctx, cfg.DBPath, []byte(cfg.CursorKey), cfg.ConnectTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("dashboard metadata store: %w", err)
+		}
+		return store, nil
 	}
 	store, err := dashboard.Open(ctx, cfg.DatabaseURL, []byte(cfg.CursorKey), int32(cfg.MaxConns), cfg.ConnectTimeout, cfg.RequireTLS)
 	if err != nil {

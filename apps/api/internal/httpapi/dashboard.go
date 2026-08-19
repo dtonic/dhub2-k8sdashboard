@@ -292,6 +292,53 @@ func (s *Server) handleDashboardExport(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+// handleDashboardImport는 export한 canonical JSON(정의 본문 그 자체)을 업로드받아
+// 요청자 소유 draft로 생성합니다. Export와 대칭이며, 서버가 queryRef allowlist·closed
+// widget 규칙으로 재검증하므로 raw query나 임의 component는 유입되지 않습니다. (ADR 0016)
+func (s *Server) handleDashboardImport(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.requireDashboard(w, r, true, false)
+	if !ok {
+		return
+	}
+	def, ok := s.readCanonicalDefinition(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.deps.DashboardStore.Create(r.Context(), sc.Subject, def)
+	if err != nil {
+		s.writeDashboardResult(w, r, nil, err)
+		return
+	}
+	d.Owned = true
+	w.Header().Set("ETag", revisionETag(d.Revision))
+	writeJSON(w, http.StatusCreated, d)
+}
+
+// readCanonicalDefinition은 wrapper 없는 순수 Definition JSON(export 산출물)을 읽어 검증합니다.
+func (s *Server) readCanonicalDefinition(w http.ResponseWriter, r *http.Request) (dashboard.Definition, bool) {
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "application/json" {
+		writeError(w, r, 415, "unsupported_media_type", "Content-Type application/json is required.")
+		return dashboard.Definition{}, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, dashboardBodyLimit)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, r, http.StatusRequestEntityTooLarge, "body_too_large", "Dashboard request is too large.")
+		return dashboard.Definition{}, false
+	}
+	if err := dashboard.ValidateJSONTokens(raw); err != nil {
+		writeError(w, r, 400, "invalid_dashboard", err.Error())
+		return dashboard.Definition{}, false
+	}
+	def, err := dashboard.DecodeAndValidate(raw, s.dashboardRefs())
+	if err != nil {
+		writeError(w, r, 400, "invalid_dashboard", err.Error())
+		return dashboard.Definition{}, false
+	}
+	return def, true
+}
+
 func (s *Server) readDefinition(w http.ResponseWriter, r *http.Request) (dashboard.Definition, bool) {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {

@@ -93,9 +93,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $redisEgress := false -}}{{- range .Values.networkPolicy.external -}}{{- if eq .purpose "redis" }}{{- $redisEgress = true -}}{{- end -}}{{- end -}}
 {{- if and (not .Values.redis.enabled) (not $redisEgress) }}{{ fail "external browser session Redis requires exactly one explicit redis egress destination" }}{{ end -}}
 {{- end -}}
-{{- if and .Values.dashboardBuilder.enabled (or (empty .Values.api.existingSecret.name) (empty .Values.dashboardBuilder.databaseURLKey) (empty .Values.dashboardBuilder.cursorKeyKey) (not .Values.dashboardBuilder.postgresEgress.cidrs)) }}{{ fail "dashboard builder requires existingSecret keys and bounded PostgreSQL egress CIDRs" }}{{ end -}}
+{{- if and .Values.dashboardBuilder.enabled .Values.dashboardBuilder.sqlite.enabled }}
+{{- /* SQLite 백엔드(ADR 0016): cursor key 시크릿과 파일 경로만 필요합니다. PostgreSQL egress/TLS는 무관합니다. */}}
+{{- if or (empty .Values.api.existingSecret.name) (empty .Values.dashboardBuilder.cursorKeyKey) (empty .Values.dashboardBuilder.sqlite.path) }}{{ fail "dashboard builder (sqlite) requires existingSecret.name, cursorKeyKey, and sqlite.path" }}{{ end -}}
+{{- else if .Values.dashboardBuilder.enabled }}
+{{- if or (empty .Values.api.existingSecret.name) (empty .Values.dashboardBuilder.databaseURLKey) (empty .Values.dashboardBuilder.cursorKeyKey) (not .Values.dashboardBuilder.postgresEgress.cidrs) }}{{ fail "dashboard builder requires existingSecret keys and bounded PostgreSQL egress CIDRs" }}{{ end -}}
+{{- if and (ne .Values.environment "dev") (not .Values.dashboardBuilder.requireTLS) }}{{ fail "stage/prod dashboard builder requires verified PostgreSQL TLS" }}{{ end -}}
+{{- end -}}
 {{- if and .Values.dashboardBuilder.enabled (not (regexMatch "^(?:[1-9]|[12][0-9]|30)s$" .Values.dashboardBuilder.connectTimeout)) }}{{ fail "dashboard builder connectTimeout must be between 1s and 30s" }}{{ end -}}
-{{- if and .Values.dashboardBuilder.enabled (ne .Values.environment "dev") (not .Values.dashboardBuilder.requireTLS) }}{{ fail "stage/prod dashboard builder requires verified PostgreSQL TLS" }}{{ end -}}
 {{- if and (eq .Values.environment "prod") (not .Values.networkPolicy.external) }}{{ fail "prod requires explicit external network destinations" }}{{ end -}}
 {{- if and (not .Values.networkPolicy.ingress.cidrs) (or (empty .Values.networkPolicy.ingress.namespaceSelector) (empty .Values.networkPolicy.ingress.podSelector)) }}{{ fail "UI ingress requires at least one CIDR or nonempty namespace+pod selectors" }}{{ end -}}
 {{- if and .Values.networkPolicy.monitoring.enabled (or (empty .Values.networkPolicy.monitoring.namespaceSelector) (empty .Values.networkPolicy.monitoring.podSelector)) }}{{ fail "monitoring ingress requires nonempty namespace+pod selectors" }}{{ end -}}

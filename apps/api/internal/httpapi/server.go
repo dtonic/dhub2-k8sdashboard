@@ -161,6 +161,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/dashboard-capabilities", s.handleDashboardCapabilities)
 	m.HandleFunc("GET /api/v1/dashboard-drafts", s.handleDashboardList)
 	m.HandleFunc("POST /api/v1/dashboard-drafts", s.handleDashboardCreate)
+	m.HandleFunc("POST /api/v1/dashboard-drafts/import", s.handleDashboardImport)
 	m.HandleFunc("GET /api/v1/dashboard-drafts/{id}", s.handleDashboardGet)
 	m.HandleFunc("PUT /api/v1/dashboard-drafts/{id}", s.handleDashboardUpdate)
 	m.HandleFunc("DELETE /api/v1/dashboard-drafts/{id}", s.handleDashboardDelete)

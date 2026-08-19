@@ -189,6 +189,14 @@ if [ -f "$HOME/.docker/config.json" ]; then
     --dry-run=client -o yaml | KC -n "$RELEASE_NAMESPACE" apply -f -
 fi
 
+# Dashboard Builder(SQLite, ADR 0016)용 cursor key 시크릿 — 없을 때만 생성해
+# 재배포·Delete→Deploy에도 같은 키를 유지합니다(진행 중 페이지네이션 cursor만 영향).
+API_SECRET="$RELEASE_NAME-api"
+if ! KC -n "$RELEASE_NAMESPACE" get secret "$API_SECRET" >/dev/null 2>&1; then
+  KC -n "$RELEASE_NAMESPACE" create secret generic "$API_SECRET" \
+    --from-literal=DASHBOARD_CURSOR_KEY="$(openssl rand -hex 32)"
+fi
+
 # chart의 API egress 규칙은 TCP 443 고정이지만 OKD apiserver endpoint는 6443이고,
 # OKD DNS는 openshift-dns의 5353 포트입니다. NetworkPolicy는 additive이므로
 # 부족한 허용만 보완 정책 하나로 추가합니다.
@@ -253,6 +261,18 @@ EOF
 EOF
   fi
   cat <<EOF
+  existingSecret:
+    name: $API_SECRET
+manageWorkloads:
+  # 시험 배포에서 Deployment/Secret 관리 탭을 켭니다(ADR 0014). AUTH_MODE=none이므로
+  # 사내망 admin 게이팅 없이 열립니다 — 정식 운영에서는 OIDC platform.admin과 함께 쓰세요.
+  enabled: true
+dashboardBuilder:
+  # Custom Dashboard Builder(ADR 0016). SQLite 파일을 PVC에 두어 재배포에도 draft가 보존됩니다.
+  # 단일 writer라 API는 replicas=1 + Recreate로 강제됩니다. cursor key는 위에서 만든 시크릿에서 옵니다.
+  enabled: true
+  sqlite:
+    enabled: true
 redis:
   # OKD cri-o는 short name을 거부하므로 fully-qualified 경로를 씁니다.
   image: {repository: docker.io/library/redis}

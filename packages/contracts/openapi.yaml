@@ -131,6 +131,25 @@ paths:
         "413": {$ref: "#/components/responses/DashboardError"}
         "415": {$ref: "#/components/responses/DashboardError"}
         "503": {$ref: "#/components/responses/DashboardError"}
+  /api/v1/dashboard-drafts/import:
+    post:
+      operationId: importDashboardDraft
+      description: Export한 canonical 정의 JSON을 업로드해 요청자 소유 draft로 생성합니다. (ADR 0016)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "201": {$ref: "#/components/responses/DashboardCreated"}
+        "400": {$ref: "#/components/responses/DashboardError"}
+        "401": {$ref: "#/components/responses/DashboardError"}
+        "403": {$ref: "#/components/responses/DashboardError"}
+        "405": {$ref: "#/components/responses/MethodNotAllowed"}
+        "409": {$ref: "#/components/responses/DashboardError"}
+        "413": {$ref: "#/components/responses/DashboardError"}
+        "415": {$ref: "#/components/responses/DashboardError"}
+        "503": {$ref: "#/components/responses/DashboardError"}
   /api/v1/dashboard-drafts/{id}:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
