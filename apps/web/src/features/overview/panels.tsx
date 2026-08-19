@@ -38,7 +38,7 @@ export function UnhealthyTable({ items, referenceIso }: { items: UnhealthyEntity
   const { search } = useLocation();
   const sorted = [...items].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
   return (
-    <div className="panel__scroll">
+    <div className="panel__scroll panel__scroll--fixed">
       <table className="ds-data-table ds-data-table--compact">
         <thead>
           <tr>

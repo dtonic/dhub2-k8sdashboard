@@ -273,9 +273,15 @@ func (s *Source) Histogram(ctx context.Context, q datasource.LogQuery) ([]contra
 	if q.Window.Step <= 0 {
 		return nil, nil
 	}
+	// 히스토그램은 레벨별 분포를 집계해 레벨 칩의 count를 채웁니다. 여기에 레벨
+	// 필터를 걸면 선택한 레벨만 남아 나머지 칩이 0이 됩니다 — 칩 숫자는 "레벨
+	// 필터를 빼고 센 값"이어야 하므로(#Logs Explorer) 레벨만 제외하고 나머지
+	// Scope·검색어·컨테이너 필터는 그대로 적용합니다. 로그 목록 검색은 레벨을 유지합니다.
+	hq := q
+	hq.Levels = nil
 	body := map[string]any{
 		"size":  0,
-		"query": s.boolQuery(q),
+		"query": s.boolQuery(hq),
 		"aggs": map[string]any{
 			"over_time": map[string]any{
 				"date_histogram": map[string]any{
