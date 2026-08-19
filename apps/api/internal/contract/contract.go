@@ -651,20 +651,11 @@ type TopologyNode struct {
 	External bool `json:"external,omitempty"`
 }
 
-// TopologyRouteSample은 Route의 최근 송수신 payload **데모 표본**입니다.
-// 실측 캡처가 아니며(payload 관측 스택 부재) UI가 그 사실을 함께 표기합니다. (#31)
-type TopologyRouteSample struct {
-	SentHex     string `json:"sentHex"`
-	ReceivedHex string `json:"receivedHex"`
-	CapturedAt  string `json:"capturedAt"`
-}
-
 type TopologyRoute struct {
-	Protocol   string               `json:"protocol"`
-	Route      string               `json:"route"`
-	Count      int                  `json:"count"`
-	ErrorCount int                  `json:"errorCount"`
-	Sample     *TopologyRouteSample `json:"sample,omitempty"`
+	Protocol   string `json:"protocol"`
+	Route      string `json:"route"`
+	Count      int    `json:"count"`
+	ErrorCount int    `json:"errorCount"`
 }
 
 type TopologyEdge struct {

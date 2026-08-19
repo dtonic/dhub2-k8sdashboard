@@ -57,6 +57,18 @@ test.describe("Pod Topology", () => {
     expect(failures, `deep link 실패: ${failures.join(", ")}`).toEqual([]);
   });
 
+  test("Route를 클릭하면 그 경로의 실제 로그를 조회한다 (#31)", async ({ page }) => {
+    await page.goto("/topology?range=1h");
+    await waitForData(page);
+    // 첫 선이 자동 선택되어 방향 상세 표가 열려 있다. Route 이름을 클릭한다.
+    const routeBtn = page.locator(".topo-route-toggle").first();
+    await routeBtn.click();
+    await waitForData(page);
+    // 실제 로그 뷰(mock 로그)가 펼쳐지고 hex 덤프가 아니어야 한다.
+    await expect(page.locator(".topo-route-logs, .topo-route-logs__hint")).toBeVisible();
+    expect(await page.locator(".topo-hex").count()).toBe(0);
+  });
+
   test("배치 편집: 저장한 좌표가 다시 조회해도 유지된다 (#28)", async ({ page }) => {
     /* 화면(fitView) 좌표가 아니라 **flow 좌표**(노드 transform)를 비교합니다 —
        fitView가 뷰포트를 재정규화하므로 boundingBox로는 저장 여부를 알 수 없습니다. */

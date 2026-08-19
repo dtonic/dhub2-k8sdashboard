@@ -178,7 +178,7 @@
   color: var(--color-border-subtle);
 }
 
-/* ── Route payload 표본 (hex 덤프) ─────────────────────────────────────── */
+/* ── Route 실제 로그 뷰 (#31 후속) ─────────────────────────────────────── */
 
 .topo-route-toggle {
   font: inherit;
@@ -188,26 +188,37 @@
   background: var(--color-surface-sunken);
 }
 
-.topo-route-sample__meta {
+.topo-route-logs__meta,
+.topo-route-logs__hint {
   font: var(--type-meta);
-  margin-bottom: var(--space-2);
+  padding: var(--space-2) 0;
 }
 
-.topo-route-sample__label {
-  font: var(--type-label);
-  color: var(--color-text-secondary);
-  margin: var(--space-2) 0 var(--space-1);
-}
-
-.topo-hex {
+.topo-route-logs__list {
+  list-style: none;
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-1);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.topo-route-logs__list li {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 180px) 1fr auto;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.topo-route-logs__msg {
   font: var(--type-code);
-  overflow-x: auto;
-  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topo-route-logs__time {
+  font: var(--type-meta);
 }
 
 /* ── 편집 도구줄 ───────────────────────────────────────────────────────── */

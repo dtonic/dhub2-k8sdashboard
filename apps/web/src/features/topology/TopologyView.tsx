@@ -1,31 +1,62 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { RANGE_LABEL, type TopologyNodePosition } from "@k8s-dashboard/contracts";
+import { RANGE_LABEL, type RangeKey, type TopologyNodePosition } from "@k8s-dashboard/contracts";
 import { topoKeys, useEdgeSeries, useSaveTopologyLayout, useTopology } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { LineChart } from "@/components/LineChart";
 import { Panel, StatTile, StatusBadge } from "@/components/primitives";
 import { SectionView } from "@/components/SectionState";
 import { Breadcrumb, logsPath, refPath, withSearch } from "@/components/drill";
-import { duration, num } from "@/lib/format";
+import { duration, num, since } from "@/lib/format";
 import { PageError, PageHeader, useDrillControls, useInvalidate } from "@/features/drill/common";
+import { useLogSearch } from "@/api/queries";
 import { TopologyGraph } from "./TopologyGraph";
 
-/** hex 문자열을 16바이트/행 offset·hex·ASCII 덤프로 렌더합니다. (#31) */
-function HexDump({ hex }: { hex: string }) {
-  const bytes = hex.match(/.{2}/g) ?? [];
-  const rows: string[] = [];
-  for (let o = 0; o < bytes.length; o += 16) {
-    const chunk = bytes.slice(o, o + 16);
-    const ascii = chunk
-      .map((b) => {
-        const c = parseInt(b, 16);
-        return c >= 32 && c < 127 ? String.fromCharCode(c) : ".";
-      })
-      .join("");
-    rows.push(`${o.toString(16).padStart(4, "0")}  ${chunk.join(" ").padEnd(47)}  ${ascii}`);
+/**
+ * Route를 클릭하면 그 경로의 **실제 최근 로그**를 Quickwit에서 조회해 보여줍니다. (#31 후속)
+ * 실시간 패킷 캡처는 이 조회 전용 대시보드가 해선 안 되는 일이라(특권 프로세스·PII·TLS),
+ * 이미 수집 중인 액세스 로그를 route 문자열로 검색해 "실제 송수신"에 가장 가까운
+ * 실데이터를 보여줍니다. 서버 마스킹이 그대로 적용됩니다(README §10).
+ */
+function RouteLogs({ clusterId, namespace, route, range }: { clusterId: string; namespace: string; route: string; range: RangeKey }) {
+  const q = useLogSearch({
+    clusterId,
+    namespace: namespace || "all",
+    workload: "",
+    podUid: "",
+    container: "",
+    levels: [],
+    q: route,
+    range,
+  });
+  const section = q.data?.pages[0]?.lines;
+  const lines = (section?.status === "ok" ? section.data : [])?.slice(0, 8) ?? [];
+  const ref = q.data?.pages[0]?.generatedAt ?? new Date().toISOString();
+
+  if (q.isLoading) return <div className="topo-route-logs__hint muted">최근 로그를 불러오는 중…</div>;
+  if (section && section.status !== "ok") {
+    return <div className="topo-route-logs__hint muted">이 경로의 로그를 조회할 수 없습니다({section.status}). 로그 데이터소스 연결을 확인하세요.</div>;
   }
-  return <pre className="topo-hex">{rows.join("\n")}</pre>;
+  if (lines.length === 0) {
+    return <div className="topo-route-logs__hint muted">선택한 범위에 "{route}"와 일치하는 로그가 없습니다.</div>;
+  }
+  return (
+    <div className="topo-route-logs">
+      <div className="topo-route-logs__meta muted">
+        "{route}" 최근 로그 · Quickwit 실데이터 · 민감정보는 서버에서 마스킹됨
+      </div>
+      <ul className="topo-route-logs__list">
+        {lines.map((l) => (
+          <li key={l.id}>
+            <StatusBadge severity={l.level === "ERROR" ? "critical" : l.level === "WARN" ? "warning" : "healthy"} label={l.level} small />
+            <span className="topo-route-logs__pod ds-ident">{l.podName}</span>
+            <span className="topo-route-logs__msg" title={l.message}>{l.message}</span>
+            <span className="topo-route-logs__time num muted">{since(new Date(l.t).toISOString(), ref)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /**
@@ -272,33 +303,28 @@ export function TopologyView() {
                             <tr>
                               <td>{r.protocol}</td>
                               <td className="ds-ident">
-                                {r.sample ? (
-                                  <button
-                                    type="button"
-                                    className="linkish topo-route-toggle"
-                                    aria-expanded={open}
-                                    onClick={() => setOpenRoute(open ? null : routeKey)}
-                                    title="최근 송수신 payload 표본 보기"
-                                  >
-                                    {r.route}
-                                  </button>
-                                ) : (
-                                  r.route
-                                )}
+                                <button
+                                  type="button"
+                                  className="linkish topo-route-toggle"
+                                  aria-expanded={open}
+                                  onClick={() => setOpenRoute(open ? null : routeKey)}
+                                  title="이 경로의 최근 실제 로그 보기"
+                                >
+                                  {r.route}
+                                </button>
                               </td>
                               <td className="ds-num">{num(r.count)}</td>
                               <td className="ds-num">{num(r.errorCount)}</td>
                             </tr>
-                            {open && r.sample && (
+                            {open && (
                               <tr className="topo-route-sample">
                                 <td colSpan={4}>
-                                  <div className="topo-route-sample__meta muted">
-                                    최근 payload 표본 · <strong>demo 생성값 — 실측 캡처 아님</strong> · 기준 {r.sample.capturedAt}
-                                  </div>
-                                  <div className="topo-route-sample__label">송신</div>
-                                  <HexDump hex={r.sample.sentHex} />
-                                  <div className="topo-route-sample__label">수신</div>
-                                  <HexDump hex={r.sample.receivedHex} />
+                                  <RouteLogs
+                                    clusterId={clusterId}
+                                    namespace={graph?.nodes.find((nn) => nn.id === edge.from)?.namespace ?? namespace}
+                                    route={r.route}
+                                    range={range}
+                                  />
                                 </td>
                               </tr>
                             )}

@@ -8,7 +8,6 @@ package demo
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -38,15 +37,6 @@ func New(c datasource.PodCatalog) *Source { return &Source{Catalog: c} }
 /* ── 결정적 잡음 ────────────────────────────────────────────────────────── */
 
 // noise는 키와 인덱스로 0~1 값을 만듭니다. 난수를 쓰지 않아 재실행해도 같습니다.
-// sampleHex는 결정적 데모 payload입니다. 같은 route는 항상 같은 표본을 돌려줍니다.
-func sampleHex(key string, n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = byte(noise(key, i) * 256)
-	}
-	return hex.EncodeToString(b)
-}
-
 func noise(key string, i int) float64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(key))
@@ -573,16 +563,7 @@ func (s *Source) edge(clusterID string, from, to contract.TopologyNode, w dataso
 		e := int(float64(c) * noise(clusterID+r+"err", j) * 0.08)
 		total += c
 		errs += e
-		routes = append(routes, contract.TopologyRoute{
-			Protocol: proto, Route: r, Count: c, ErrorCount: e,
-			// payload는 데모 표본입니다 — 실측 캡처 스택이 없으므로 결정적 생성값을
-			// 내려보내고 UI가 "실측 아님"을 표기합니다. (#31)
-			Sample: &contract.TopologyRouteSample{
-				SentHex:     sampleHex(clusterID+from.ID+to.ID+r+"sent", 64),
-				ReceivedHex: sampleHex(clusterID+from.ID+to.ID+r+"recv", 64),
-				CapturedAt:  w.To.UTC().Format(time.RFC3339),
-			},
-		})
+		routes = append(routes, contract.TopologyRoute{Protocol: proto, Route: r, Count: c, ErrorCount: e})
 	}
 	sort.Slice(routes, func(a, b int) bool { return routes[a].Count > routes[b].Count })
 
