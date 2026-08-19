@@ -15,6 +15,7 @@ export function VirtualTable<T>({
   rowHeight = 32,
   height = 420,
   overscan = 8,
+  columns,
   header,
   renderRow,
   getKey,
@@ -24,6 +25,11 @@ export function VirtualTable<T>({
   rowHeight?: number;
   height?: number;
   overscan?: number;
+  /**
+   * 컬럼 폭(CSS 값 배열). head와 body는 별개의 <table>이므로, 같은 colgroup을
+   * 양쪽에 렌더해야 컬럼 경계가 일치합니다. 없으면 fixed 레이아웃이 균등 분배합니다.
+   */
+  columns?: string[];
   header: ReactNode;
   renderRow: (item: T, index: number) => ReactNode;
   getKey: (item: T, index: number) => string;
@@ -53,10 +59,18 @@ export function VirtualTable<T>({
   const visible = Math.ceil(viewport / rowHeight) + overscan * 2;
   const end = Math.min(items.length, start + visible);
   const slice = items.slice(start, end);
+  const colgroup = columns ? (
+    <colgroup>
+      {columns.map((w, i) => (
+        <col key={i} style={{ width: w }} />
+      ))}
+    </colgroup>
+  ) : null;
 
   return (
     <div className="vtable">
       <table className="ds-data-table ds-data-table--compact vtable__head">
+        {colgroup}
         <thead>{header}</thead>
       </table>
       <div className="vtable__viewport" ref={ref} onScroll={onScroll} style={{ height: viewport }} tabIndex={0}>
@@ -65,6 +79,7 @@ export function VirtualTable<T>({
             className="ds-data-table ds-data-table--compact vtable__body"
             style={{ position: "absolute", top: start * rowHeight, left: 0, right: 0 }}
           >
+            {colgroup}
             <tbody>
               {slice.map((item, i) => (
                 <tr key={getKey(item, start + i)} style={{ height: rowHeight }}>

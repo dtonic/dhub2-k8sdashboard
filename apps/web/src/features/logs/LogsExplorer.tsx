@@ -76,7 +76,8 @@ export function LogsExplorer() {
   const levelCounts = useMemo(() => {
     const h = first?.histogram.data ?? [];
     return Object.fromEntries(
-      LEVEL_ORDER.map((l) => [l, h.reduce((s, b) => s + b.counts[l], 0)]),
+      // 서버는 관측된 레벨만 내려줍니다 — 없는 키를 더하면 NaN이 됩니다.
+      LEVEL_ORDER.map((l) => [l, h.reduce((s, b) => s + (b.counts[l] ?? 0), 0)]),
     ) as Record<LogLevel, number>;
   }, [first]);
 

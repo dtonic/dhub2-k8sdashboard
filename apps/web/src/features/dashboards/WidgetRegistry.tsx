@@ -51,9 +51,10 @@ function Table({ widget, overview, loading }: WidgetProps) {
   if (widget.type !== "Table") return <ErrorState detail="Widget contract mismatch" />;
   return state(overview?.unhealthy, loading, "No unhealthy workloads", (rows) => <VirtualTable
     items={rows.slice(0, widget.options?.maxRows ?? 500)} height={260}
-    header={<tr><th>Name</th><th>Namespace</th><th>Status</th><th>Restarts</th></tr>}
+    columns={["40%", "24%", "24%", "12%"]}
+    header={<tr><th>Name</th><th>Namespace</th><th>Status</th><th className="ds-num">Restarts</th></tr>}
     getKey={(row) => `${row.kind}-${row.ref.podUid ?? row.ref.workloadUid ?? row.name}`}
-    renderRow={(row) => <><td>{row.name}</td><td>{row.namespace}</td><td><StatusBadge severity={row.severity} label={row.reason} small /></td><td className="ds-num">{row.restarts}</td></>}
+    renderRow={(row) => <><td className="ds-ident">{row.name}</td><td>{row.namespace}</td><td><StatusBadge severity={row.severity} label={row.reason} small /></td><td className="ds-num">{row.restarts}</td></>}
   />);
 }
 
@@ -66,9 +67,10 @@ function EventTimeline({ widget, overview, loading }: WidgetProps) {
   if (widget.type !== "EventTimeline") return <ErrorState detail="Widget contract mismatch" />;
   return state(overview?.events, loading, "No recent events", (events) => <VirtualTable
     items={events.slice(0, widget.options?.maxRows ?? 200)} height={260}
-    header={<tr><th>Type</th><th>Reason</th><th>Object</th><th>Count</th></tr>}
+    columns={["16%", "28%", "44%", "12%"]}
+    header={<tr><th>Type</th><th>Reason</th><th>Object</th><th className="ds-num">Count</th></tr>}
     getKey={(event) => event.id}
-    renderRow={(event) => <><td>{event.type}</td><td>{event.reason}</td><td>{event.involvedName}</td><td className="ds-num">{event.count}</td></>}
+    renderRow={(event) => <><td>{event.type}</td><td>{event.reason}</td><td className="ds-ident">{event.involvedName}</td><td className="ds-num">{event.count}</td></>}
   />);
 }
 

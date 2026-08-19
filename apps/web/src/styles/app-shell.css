@@ -350,8 +350,10 @@ a:hover { text-decoration: underline; }
 
 /* --- 가상 스크롤 테이블 --------------------------------------------------- */
 .vtable { display: flex; flex-direction: column; min-width: 0; }
-.vtable__head { table-layout: fixed; }
-.vtable__body { table-layout: fixed; }
+.vtable__head { table-layout: fixed; width: 100%; }
+.vtable__body { table-layout: fixed; width: 100%; }
+/* fixed 레이아웃에서 셀 내용이 넘쳐 옆 컬럼을 침범하지 않도록 자릅니다. */
+.vtable__head th, .vtable__body td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vtable__viewport { overflow: auto; border-top: var(--border-hairline) solid var(--color-border-subtle); }
 .vtable__viewport:focus-visible { outline: var(--focus-ring-width) solid var(--color-border-focus); outline-offset: -2px; }
 .vtable__footer {

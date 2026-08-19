@@ -54,7 +54,7 @@ export function LogHistogram({
   const span = Math.max(1, to - from);
   const xOf = (t: number) => X0 + ((X1 - X0) * (t - from)) / span;
   const tOf = (x: number) => from + ((x - X0) / (X1 - X0)) * span;
-  const total = (b: (typeof buckets)[number]) => LEVEL_ORDER.reduce((s, l) => s + b.counts[l], 0);
+  const total = (b: (typeof buckets)[number]) => LEVEL_ORDER.reduce((s, l) => s + (b.counts[l] ?? 0), 0);
   const max = Math.max(1, ...buckets.map(total));
   const bw = buckets.length > 1 ? (X1 - X0) / buckets.length : X1 - X0;
 
@@ -63,7 +63,7 @@ export function LogHistogram({
     return Math.min(X1, Math.max(X0, ((ev.clientX - box.left) / box.width) * W));
   };
 
-  const totals = LEVEL_ORDER.map((l) => ({ level: l, count: buckets.reduce((s, b) => s + b.counts[l], 0) }));
+  const totals = LEVEL_ORDER.map((l) => ({ level: l, count: buckets.reduce((s, b) => s + (b.counts[l] ?? 0), 0) }));
   const hovered = hover !== null ? buckets[hover] : null;
 
   return (
