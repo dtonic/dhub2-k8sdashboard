@@ -86,6 +86,35 @@
   font: var(--type-meta);
 }
 
+/* 노드 카드 안 In/Out 프로토콜 요약 (선의 캡슐을 대체). 프로토콜은 상태색이 아니라
+   중립 배지 텍스트로, 방향은 In/Out 라벨로 구분합니다. */
+.topo-node__protos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-1);
+}
+.topo-node__proto-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.topo-node__proto-dir {
+  font: var(--type-meta);
+  color: var(--color-text-muted);
+  min-width: 22px;
+}
+.topo-node__proto {
+  padding: 0 5px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  font: var(--type-meta);
+  line-height: 1.5;
+}
+
 .topo-node__handle {
   width: 6px;
   height: 6px;
@@ -119,25 +148,8 @@
   }
 }
 
-/* ── 방향 캡슐 ─────────────────────────────────────────────────────────── */
-
-.topo-edge__cap {
-  position: absolute;
-  pointer-events: all;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-2);
-  color: var(--color-text-secondary);
-  font: var(--type-meta);
-  cursor: pointer;
-}
-
-.topo-edge__cap:hover,
-.topo-edge__cap--selected {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-strong);
-}
+/* 선 클릭 영역을 넓혀 캡슐 없이도 방향 선을 쉽게 선택합니다. */
+.topo-edge { cursor: pointer; }
 
 /* ── React Flow 부속(컨트롤·미니맵)을 토큰에 맞춥니다 ─────────────────── */
 

@@ -5,35 +5,21 @@ test.describe("Pod Topology", () => {
   test("A→B와 B→A가 별도 선으로 분리된다", async ({ page }) => {
     await page.goto("/topology?range=1h");
     await waitForData(page);
-
-    const labels = await page
-      .locator(".topo-edge__cap")
-      .evaluateAll((caps) => caps.map((c) => c.getAttribute("aria-label") ?? ""));
-    /* 같은 두 노드 사이의 왕복은 방향별로 각각 캡슐이 있어야 합니다. */
-    const forward = labels.filter((l) => /(.+)에서 (.+)로 가는/.test(l));
-    expect(forward.length).toBe(labels.length);
-    const directions = new Set(labels.map((l) => l.split(" 가는 ")[0]));
-    expect(directions.size).toBe(labels.length); // 방향(from→to)이 전부 서로 다른 선
-    expect(labels.length).toBeGreaterThan(8);
+    // 방향별 별도 엣지는 React Flow 엣지 path 개수로 확인합니다(캡슐 제거 후).
+    const edgeCount = await page.locator(".react-flow__edge").count();
+    expect(edgeCount).toBeGreaterThan(8);
   });
 
-  test("방향 캡슐 라벨이 서로 겹치지 않는다", async ({ page }) => {
+  test("프로토콜은 선이 아니라 노드 카드의 In/Out으로 표기된다", async ({ page }) => {
     await page.goto("/topology?range=1h");
     await waitForData(page);
-
-    const overlaps = await page.evaluate(() => {
-      const rects = [...document.querySelectorAll(".topo-edge__cap")].map((r) => r.getBoundingClientRect());
-      let hit = 0;
-      for (let i = 0; i < rects.length; i++) {
-        for (let j = i + 1; j < rects.length; j++) {
-          const a = rects[i]!;
-          const b = rects[j]!;
-          if (!(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)) hit++;
-        }
-      }
-      return hit;
-    });
-    expect(overlaps).toBe(0);
+    // 선에는 프로토콜 캡슐이 없어야 한다.
+    expect(await page.locator(".topo-edge__cap").count()).toBe(0);
+    // 노드 카드에는 In/Out 프로토콜 요약이 있어야 한다.
+    const protoRows = await page.locator(".topo-node__proto-row").count();
+    expect(protoRows).toBeGreaterThan(0);
+    await expect(page.locator(".topo-node__proto-dir").first()).toHaveText(/In|Out/);
+    await expect(page.locator(".topo-node__proto").first()).toHaveText(/HTTP|gRPC|TCP|UDP/);
   });
 
   test("엣지 시계열은 선택했을 때만 조회한다", async ({ page }) => {

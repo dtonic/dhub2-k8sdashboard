@@ -239,7 +239,7 @@ export function TopologyView() {
                     <li>
                       <i style={{ ["--_c" as string]: "var(--color-border-strong)" }} /> 그 외 경로
                     </li>
-                    <li>선 두께 = 트래픽 양 · 캡슐 텍스트 = 프로토콜과 누적 요청 · 상태는 노드 카드 테두리 색과 상세 뱃지로 표시</li>
+                    <li>선 두께 = 트래픽 양 · 프로토콜은 노드 카드의 In/Out 요약으로 · 방향·Route·Count 상세는 아래 표에서 · 상태는 노드 카드 테두리 색으로 표시</li>
                   </ul>
                 </>
               )}

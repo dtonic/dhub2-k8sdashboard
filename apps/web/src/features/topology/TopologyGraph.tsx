@@ -4,7 +4,6 @@ import {
   BackgroundVariant,
   BaseEdge,
   Controls,
-  EdgeLabelRenderer,
   getBezierPath,
   Handle,
   MarkerType,
@@ -22,7 +21,6 @@ import "@xyflow/react/dist/style.css";
 import "./topology.css";
 import type { Severity, TopologyEdge, TopologyNode, TopologyNodePosition } from "@k8s-dashboard/contracts";
 import { StatusDot } from "@/components/primitives";
-import { compact } from "@/lib/format";
 
 /**
  * Pod Topology 그래프 — React Flow 기반. (#28)
@@ -46,7 +44,15 @@ const COL_W = 480;
 const ROW_H = 198;
 const EDGE_LANE_OFFSET = 16;
 
-type PodNodeData = { name: string; namespace: string; severity: Severity; external: boolean };
+type PodNodeData = {
+  name: string;
+  namespace: string;
+  severity: Severity;
+  external: boolean;
+  /** 이 노드로 들어오는(수신)·나가는(송신) 프로토콜 목록. 카드에 In/Out으로 표기합니다. (#topology) */
+  inProtos: string[];
+  outProtos: string[];
+};
 
 /* 선 색 규칙 (#31, 사용자 결정): 기본 선은 중립색 하나로 통일해 화면을 차분하게
    유지하고, **선택한 선만** 주황~빨강 계열 강조 토큰으로 집중시킵니다.
@@ -68,6 +74,30 @@ function PodNode({ data }: NodeProps) {
           {d.name}
         </span>
         <span className="topo-node__ns muted">{d.namespace}</span>
+        {(d.inProtos.length > 0 || d.outProtos.length > 0) && (
+          <span className="topo-node__protos">
+            {d.inProtos.length > 0 && (
+              <span className="topo-node__proto-row" title={`수신 프로토콜: ${d.inProtos.join(", ")}`}>
+                <span className="topo-node__proto-dir">In</span>
+                {d.inProtos.map((p) => (
+                  <span key={`in-${p}`} className="topo-node__proto">
+                    {p}
+                  </span>
+                ))}
+              </span>
+            )}
+            {d.outProtos.length > 0 && (
+              <span className="topo-node__proto-row" title={`송신 프로토콜: ${d.outProtos.join(", ")}`}>
+                <span className="topo-node__proto-dir">Out</span>
+                {d.outProtos.map((p) => (
+                  <span key={`out-${p}`} className="topo-node__proto">
+                    {p}
+                  </span>
+                ))}
+              </span>
+            )}
+          </span>
+        )}
       </span>
       {d.external && <span className="topo-node__external-badge">외부</span>}
       <Handle type="source" position={Position.Right} className="topo-node__handle" />
@@ -76,25 +106,19 @@ function PodNode({ data }: NodeProps) {
 }
 
 type TrafficEdgeData = {
-  proto: string;
-  total: number;
-  severity: Severity;
   width: number;
   lane: 1 | -1;
-  /** 캡슐이 서로 겹치지 않도록 곡선 위 위치를 흩뿌리는 지수. */
-  stagger: number;
-  fromName: string;
-  toName: string;
   selected: boolean;
-  onSelect: (id: string) => void;
 };
 
+/* 선에는 더 이상 프로토콜 라벨(캡슐)을 붙이지 않습니다. 프로토콜은 노드 카드의
+   In/Out 요약으로, 방향·Route·Count 상세는 하단 방향 상세 테이블로 봅니다. (#topology)
+   선 자체는 ReactFlow의 클릭 히트영역으로 선택합니다(onEdgeClick). */
 function TrafficEdge(props: EdgeProps) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd } = props;
   const d = props.data as TrafficEdgeData;
-  /* 방향별 lane offset — 같은 두 노드 사이의 왕복이 한 선으로 겹치지 않습니다. */
-  const off = EDGE_LANE_OFFSET * d.lane;
-  const [path, labelX, labelY] = getBezierPath({
+  const off = EDGE_LANE_OFFSET * d.lane; // 방향별 분리 — 왕복이 한 선으로 겹치지 않게.
+  const [path] = getBezierPath({
     sourceX,
     sourceY: sourceY + off,
     targetX,
@@ -104,38 +128,15 @@ function TrafficEdge(props: EdgeProps) {
     curvature: 0.4,
   });
   const color = d.selected ? EDGE_COLOR_SELECTED : EDGE_COLOR_DEFAULT;
-  /* 캡슐 겹침 방지: 곡선 중점에서 (1) 엣지 진행 방향으로 순번만큼 밀고
-     (2) 방향에 수직으로 lane만큼 띄웁니다. 같은 노드쌍의 왕복·다중 프로토콜
-     캡슐이 서로 다른 지점에 놓여 문구가 겹치지 않습니다. */
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len;
-  const uy = dy / len;
-  const capX = labelX + ux * d.stagger + -uy * off * 1.6;
-  const capY = labelY + uy * d.stagger + ux * off * 1.6;
   return (
-    <>
-      <BaseEdge
-        id={id}
-        path={path}
-        markerEnd={markerEnd}
-        className={d.selected ? "topo-edge topo-edge--selected" : "topo-edge"}
-        style={{ stroke: color, strokeWidth: d.selected ? d.width + 0.8 : d.width }}
-      />
-      <EdgeLabelRenderer>
-        <button
-          type="button"
-          className={d.selected ? "topo-edge__cap topo-edge__cap--selected" : "topo-edge__cap"}
-          style={{ transform: `translate(-50%, -50%) translate(${capX}px, ${capY}px)`, zIndex: d.selected ? 5 : 1 }}
-          onClick={() => d.onSelect(id)}
-          aria-pressed={d.selected}
-          aria-label={`${d.fromName}에서 ${d.toName}로 가는 ${d.proto} 경로 선택 · 누적 ${d.total}건`}
-        >
-          {d.proto} {compact(d.total)}
-        </button>
-      </EdgeLabelRenderer>
-    </>
+    <BaseEdge
+      id={id}
+      path={path}
+      markerEnd={markerEnd}
+      interactionWidth={20}
+      className={d.selected ? "topo-edge topo-edge--selected" : "topo-edge"}
+      style={{ stroke: color, strokeWidth: d.selected ? d.width + 0.8 : d.width }}
+    />
   );
 }
 
@@ -216,6 +217,37 @@ export function TopologyGraph({
 
   const savedKey = useMemo(() => JSON.stringify(savedPositions ?? []), [savedPositions]);
 
+  /* 노드별 In/Out 프로토콜 집계. from 엣지 = 송신(Out), to 엣지 = 수신(In).
+     프로토콜은 고정 순서(TCP·UDP·HTTP·gRPC)로 정렬해 카드마다 일관되게 보입니다. */
+  const protoByNode = useMemo(() => {
+    const order = ["HTTP", "gRPC", "TCP", "UDP"];
+    const rank = (p: string) => {
+      const i = order.indexOf(p);
+      return i < 0 ? order.length : i;
+    };
+    const map = new Map<string, { in: Set<string>; out: Set<string> }>();
+    const slot = (id: string) => {
+      let s = map.get(id);
+      if (!s) {
+        s = { in: new Set(), out: new Set() };
+        map.set(id, s);
+      }
+      return s;
+    };
+    for (const e of graphEdges) {
+      for (const p of e.protocols) {
+        slot(e.from).out.add(p);
+        slot(e.to).in.add(p);
+      }
+    }
+    const sorted = (s: Set<string>) => [...s].sort((a, b) => rank(a) - rank(b));
+    return { get: (id: string) => map.get(id), sorted };
+  }, [graphEdges]);
+  const protoKey = useMemo(
+    () => graphEdges.map((e) => `${e.from}>${e.to}:${e.protocols.join(",")}`).join("|"),
+    [graphEdges],
+  );
+
   const emitPositions = () => {
     onPositionsChange?.(
       Array.from(posRef.current, ([id, p]) => ({ id, x: Math.round(p.x), y: Math.round(p.y) })),
@@ -236,7 +268,14 @@ export function TopologyGraph({
           (editRef.current ? prevPos.get(n.id) : undefined) ??
           saved.get(n.id) ??
           defaults.get(n.id) ?? { x: 0, y: 0 },
-        data: { name: n.name, namespace: n.namespace, severity: n.severity, external: n.external ?? false } satisfies PodNodeData,
+        data: {
+          name: n.name,
+          namespace: n.namespace,
+          severity: n.severity,
+          external: n.external ?? false,
+          inProtos: protoByNode.get(n.id) ? protoByNode.sorted(protoByNode.get(n.id)!.in) : [],
+          outProtos: protoByNode.get(n.id) ? protoByNode.sorted(protoByNode.get(n.id)!.out) : [],
+        } satisfies PodNodeData,
         draggable: editMode,
         connectable: false,
       }));
@@ -245,15 +284,14 @@ export function TopologyGraph({
     });
     /* 편집 모드에서는 드래그 전에도 부모가 현재 좌표를 알아야 "저장"이 가능합니다. */
     if (editRef.current) emitPositions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- savedPositions는 savedKey로 비교합니다.
-  }, [graphNodes, savedKey, editMode, editSession, setNodes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- savedPositions·protoByNode는 savedKey·protoKey로 비교합니다.
+  }, [graphNodes, savedKey, protoKey, editMode, editSession, setNodes]);
 
   /* 엣지 동기화 — 두께는 트래픽 양을 최댓값 대비로 정규화합니다. */
   useEffect(() => {
     const maxCount = Math.max(1, ...graphEdges.map((e) => e.totalCount));
     setEdges(
-      graphEdges.map((e, i) => {
-        const severity = e.severity;
+      graphEdges.map((e) => {
         const selected = e.id === selectedEdgeId;
         return {
           id: e.id,
@@ -267,25 +305,15 @@ export function TopologyGraph({
             color: selected ? "var(--color-status-serious, var(--status-critical))" : "var(--color-border-strong)",
           },
           data: {
-            proto: e.protocols.join("/"),
-            total: e.totalCount,
-            severity,
-            /* 두께 = 트래픽 양. 선형 스케일은 최대 5px까지 굵어져 난잡했다 —
-               sqrt로 눌러 1~2.2px 범위에 둔다. (#31) */
+            /* 두께 = 트래픽 양. sqrt로 눌러 1~2.2px 범위에 둔다. (#31) */
             width: 1 + 1.2 * Math.sqrt(e.totalCount / maxCount),
             lane: (e.from < e.to ? 1 : -1) as 1 | -1,
-            /* 곡선 진행 방향으로 순번만큼 흩뿌립니다(범위 확대). 늘어난 노드 간격
-               덕에 캡슐이 곡선 위 넓게 퍼져 서로 겹치지 않습니다. */
-            stagger: ((i % 7) - 3) * 56,
-            fromName: byId.get(e.from)?.name ?? e.from,
-            toName: byId.get(e.to)?.name ?? e.to,
-            selected: e.id === selectedEdgeId,
-            onSelect: onSelectEdge,
+            selected,
           } satisfies TrafficEdgeData,
         };
       }),
     );
-  }, [graphEdges, byId, selectedEdgeId, onSelectEdge, setEdges]);
+  }, [graphEdges, selectedEdgeId, setEdges]);
 
   return (
     <div className={editMode ? "topo-canvas topo-canvas--edit" : "topo-canvas"}>
