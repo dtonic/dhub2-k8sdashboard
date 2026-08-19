@@ -131,8 +131,14 @@ a:hover { text-decoration: underline; }
 
 /* --- Grid ----------------------------------------------------------------- */
 .grid { display: grid; gap: var(--layout-grid-gap); }
-.grid--kpi { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-.grid--trends { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
+/* KPI·추세 카드는 flex-wrap으로 배치합니다. auto-fit grid는 항목 수가 열 수로
+   나눠떨어지지 않으면 마지막 줄에 빈 트랙을 남깁니다(예: 3열에 패널 5개 → 3+2로
+   오른쪽 1칸 공백). flex-grow를 주면 마지막 줄 카드가 남는 폭을 채워 공백이 사라지고,
+   같은 줄 카드 높이도 stretch로 통일되어 더 깔끔합니다. */
+.grid--kpi { display: flex; flex-wrap: wrap; }
+.grid--kpi > * { flex: 1 1 210px; min-width: 0; }
+.grid--trends { display: flex; flex-wrap: wrap; }
+.grid--trends > * { flex: 1 1 min(100%, 460px); min-width: 0; }
 .grid--split { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; }
 @media (max-width: 1180px) {
   .grid--split { grid-template-columns: 1fr; }

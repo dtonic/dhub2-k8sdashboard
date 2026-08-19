@@ -95,9 +95,9 @@ export function ClusterOverview() {
         <>
           {/* ── KPI ───────────────────────────────────────────────────── */}
           <div className="grid grid--kpi">
-            {firstLoad || !nodes ? (
+            {firstLoad ? (
               <LoadingState lines={2} height={110} />
-            ) : (
+            ) : nodes ? (
               <StatTile
                 label="Nodes Ready"
                 value={`${nodes.ready}/${nodes.total}`}
@@ -109,6 +109,14 @@ export function ClusterOverview() {
                       ? `Warning · Pressure ${nodes.pressure}`
                       : "모든 노드 정상"
                 }
+              />
+            ) : (
+              /* nodes 섹션은 클러스터 범위 권한이 없으면 forbidden으로 옵니다.
+                 로딩이 아니라 "권한 없음"을 명시해야 무한 스켈레톤이 사라집니다. (#버그) */
+              <StatTile
+                label="Nodes Ready"
+                value="—"
+                footnote={data?.nodes.status === "forbidden" ? "노드 상태는 클러스터 범위 권한이 필요합니다" : "노드 데이터 없음"}
               />
             )}
             {firstLoad || !pods ? (
