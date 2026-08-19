@@ -172,6 +172,15 @@ a:hover { text-decoration: underline; }
 /* 카드 높이를 고정해 row가 적어도 일정 크기를 유지하고, 넘치면 스크롤합니다.
    thead th는 이미 position:sticky라 스크롤해도 컬럼 헤더가 고정됩니다. (이상 엔티티 Top N) */
 .panel__scroll--fixed { min-height: 300px; max-height: 380px; }
+
+/* 이 행만 좌우 카드를 같은 높이로 늘립니다(align-items:start를 stretch로 덮음).
+   panel--fill 카드는 남는 높이를 body→scroll로 흘려보내 테이블만 내부 스크롤합니다.
+   그 결과 이상 엔티티 카드가 우측(알림+통신경로 합) 높이와 같아집니다. */
+.grid--stretch { align-items: stretch; }
+.panel--fill { min-height: 0; }
+.panel--fill .panel__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* stretch로 늘어난 카드 안에서는 고정 max-height 대신 남는 높이를 전부 씁니다. */
+.panel--fill .panel__scroll--fixed { min-height: 0; max-height: none; flex: 1; }
 .panel--degraded { border-color: var(--status-degraded); }
 
 /* --- Section state -------------------------------------------------------- */

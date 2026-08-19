@@ -198,8 +198,11 @@ export function ClusterOverview() {
           </SectionView>
 
           {/* ── 이상 엔티티 + 알림 ────────────────────────────────────── */}
-          <div className="grid grid--split">
+          {/* 이 행만 stretch: 좌측 이상 엔티티 카드가 우측(알림+통신경로 합) 높이에
+              맞춰 늘어나고, 테이블이 넘치면 카드 내부에서 스크롤합니다. */}
+          <div className="grid grid--split grid--stretch">
             <Panel
+              className="panel--fill"
               title={
                 <>
                   이상 엔티티 Top N

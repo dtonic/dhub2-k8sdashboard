@@ -95,6 +95,7 @@ export function Panel({
   section,
   referenceIso,
   flush,
+  className,
   children,
 }: {
   title: ReactNode;
@@ -103,12 +104,13 @@ export function Panel({
   section?: Section<unknown>;
   referenceIso?: string;
   flush?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   const degraded = section?.status === "degraded";
   const stale = degraded && section?.observedAt && referenceIso;
   return (
-    <section className={`panel${degraded ? " panel--degraded" : ""}`}>
+    <section className={`panel${degraded ? " panel--degraded" : ""}${className ? ` ${className}` : ""}`}>
       <header className="panel__header">
         <div>
           <div className="panel__title">{title}</div>
