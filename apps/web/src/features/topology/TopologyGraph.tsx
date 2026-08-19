@@ -41,9 +41,10 @@ import { compact } from "@/lib/format";
  * 지우지 않습니다. (CLAUDE.md: 사용자 상태를 갱신이 지우지 않습니다)
  */
 
-const COL_W = 320;
-const ROW_H = 132;
-const EDGE_LANE_OFFSET = 14;
+/* 노드 간격을 기존의 1.5배로 늘려 캡슐(프로토콜 라벨)이 놓일 여유를 확보합니다. (#topology) */
+const COL_W = 480;
+const ROW_H = 198;
+const EDGE_LANE_OFFSET = 16;
 
 type PodNodeData = { name: string; namespace: string; severity: Severity; external: boolean };
 
@@ -103,6 +104,16 @@ function TrafficEdge(props: EdgeProps) {
     curvature: 0.4,
   });
   const color = d.selected ? EDGE_COLOR_SELECTED : EDGE_COLOR_DEFAULT;
+  /* 캡슐 겹침 방지: 곡선 중점에서 (1) 엣지 진행 방향으로 순번만큼 밀고
+     (2) 방향에 수직으로 lane만큼 띄웁니다. 같은 노드쌍의 왕복·다중 프로토콜
+     캡슐이 서로 다른 지점에 놓여 문구가 겹치지 않습니다. */
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const capX = labelX + ux * d.stagger + -uy * off * 1.6;
+  const capY = labelY + uy * d.stagger + ux * off * 1.6;
   return (
     <>
       <BaseEdge
@@ -116,7 +127,7 @@ function TrafficEdge(props: EdgeProps) {
         <button
           type="button"
           className={d.selected ? "topo-edge__cap topo-edge__cap--selected" : "topo-edge__cap"}
-          style={{ transform: `translate(-50%, -50%) translate(${labelX + d.stagger}px, ${labelY}px)` }}
+          style={{ transform: `translate(-50%, -50%) translate(${capX}px, ${capY}px)`, zIndex: d.selected ? 5 : 1 }}
           onClick={() => d.onSelect(id)}
           aria-pressed={d.selected}
           aria-label={`${d.fromName}에서 ${d.toName}로 가는 ${d.proto} 경로 선택 · 누적 ${d.total}건`}
@@ -137,7 +148,7 @@ const edgeTypes = { traffic: TrafficEdge };
  * 순환 배치해 화면이 한 줄로 길어지지 않게 합니다(서버 기본 열 수와 동일).
  */
 const MAX_COLS = 4;
-const GROUP_GAP = 60;
+const GROUP_GAP = 90;
 
 function defaultPositions(nodes: TopologyNode[]): Map<string, { x: number; y: number }> {
   const families: string[] = [];
@@ -263,7 +274,9 @@ export function TopologyGraph({
                sqrt로 눌러 1~2.2px 범위에 둔다. (#31) */
             width: 1 + 1.2 * Math.sqrt(e.totalCount / maxCount),
             lane: (e.from < e.to ? 1 : -1) as 1 | -1,
-            stagger: ((i % 5) - 2) * 30,
+            /* 곡선 진행 방향으로 순번만큼 흩뿌립니다(범위 확대). 늘어난 노드 간격
+               덕에 캡슐이 곡선 위 넓게 퍼져 서로 겹치지 않습니다. */
+            stagger: ((i % 7) - 3) * 56,
             fromName: byId.get(e.from)?.name ?? e.from,
             toName: byId.get(e.to)?.name ?? e.to,
             selected: e.id === selectedEdgeId,
