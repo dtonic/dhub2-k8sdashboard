@@ -3,7 +3,7 @@
   "entries": [
     {
       "package": "react-router",
-      "installedVersion": "6.30.4",
+      "installedVersion": "6.30.6",
       "severity": "moderate",
       "vulnerabilityRange": "6.0.0 - 7.17.0",
       "advisories": {
@@ -20,17 +20,15 @@
     },
     {
       "package": "react-router-dom",
-      "installedVersion": "6.30.4",
+      "installedVersion": "6.30.6",
       "severity": "moderate",
       "vulnerabilityRange": "6.0.0-alpha.0 - 7.17.0",
-      "advisories": {
-        "GHSA-jjmj-jmhj-qwj2": ">=6.30.2 <=6.30.4"
-      },
+      "advisories": {},
       "fixAvailable": { "name": "react-router-dom", "version": "7.18.2", "isSemVerMajor": true },
       "unusedFeatures": [
         "untrusted external redirect destinations"
       ],
-      "reason": "Navigation targets are application-owned relative routes. Remove this exception when external redirect input is introduced, when React Router 7 migration is validated, or by reviewBy."
+      "reason": "Direct advisory GHSA-jjmj-jmhj-qwj2 was fixed by the 6.30.6 backport; the package is now flagged only transitively via react-router. Remove this exception when React Router 7 migration is validated or by reviewBy."
     }
   ]
 }

@@ -149,6 +149,101 @@ func TestDashboardClonePermissions(t *testing.T) {
 	run(t, scope.Scope{Subject: "publisher", CanPublishDashboard: true}, dashboard.Draft{ID: id, Owner: "other", State: dashboard.StateApproved, Definition: def}, 403)
 }
 
+// TestDashboardDeleteApproveImport — delete/approve/import 본문 경로 (#5).
+func TestDashboardDeleteApproveImport(t *testing.T) {
+	def := dashboard.Definition{SchemaVersion: 1, ID: "custom", Title: "Custom", Variables: []dashboard.Variable{}, Widgets: []dashboard.Widget{{ID: "ready", Title: "Ready", Type: "Stat", Binding: "nodes.ready", Layout: dashboard.Layout{X: 0, Y: 0, W: 3, H: 2}}}}
+	id := "33333333-3333-4333-8333-333333333333"
+	canonical := `{"schemaVersion":1,"id":"custom","title":"Custom","variables":[],"widgets":[{"id":"ready","title":"Ready","type":"Stat","binding":"nodes.ready","layout":{"x":0,"y":0,"w":3,"h":2}}]}`
+
+	t.Run("delete는 If-Match를 요구하고 성공 시 204", func(t *testing.T) {
+		stub := &dashboardStub{item: dashboard.Draft{ID: id, Owner: "editor", Revision: 1, State: dashboard.StateDraft, SchemaVersion: 1, Definition: def}}
+		f := newFixture(t, func(d *httpapi.Deps) {
+			d.DashboardStore = stub
+			d.Resolver = scope.Static{S: scope.Scope{Subject: "editor", CanEditDashboard: true}}
+		})
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/dashboard-drafts/"+id, nil))
+		if rec.Code != http.StatusPreconditionRequired {
+			t.Fatalf("delete without if-match = %d, want 428", rec.Code)
+		}
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/dashboard-drafts/"+id, nil)
+		req.Header.Set("If-Match", `"revision-1"`)
+		rec = httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("delete = %d %s", rec.Code, rec.Body.String())
+		}
+		rec = httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/dashboard-drafts/not-a-uuid", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("delete invalid id = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("approve는 publisher 권한과 If-Match로 200", func(t *testing.T) {
+		stub := &dashboardStub{item: dashboard.Draft{ID: id, Owner: "other", Revision: 3, State: dashboard.StateSubmitted, SchemaVersion: 1, Definition: def}}
+		f := newFixture(t, func(d *httpapi.Deps) {
+			d.DashboardStore = stub
+			d.Resolver = scope.Static{S: scope.Scope{Subject: "publisher", CanPublishDashboard: true}}
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard-drafts/"+id+"/approve", nil)
+		req.Header.Set("If-Match", `"revision-3"`)
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Header().Get("ETag") == "" {
+			t.Fatalf("approve = %d etag=%q %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"owned":false`) {
+			t.Fatalf("남의 draft 승인 응답이 owned여서는 안 됩니다: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("approve는 편집 권한만으로는 403", func(t *testing.T) {
+		stub := &dashboardStub{item: dashboard.Draft{ID: id, Owner: "editor", Revision: 3, State: dashboard.StateSubmitted, SchemaVersion: 1, Definition: def}}
+		f := newFixture(t, func(d *httpapi.Deps) {
+			d.DashboardStore = stub
+			d.Resolver = scope.Static{S: scope.Scope{Subject: "editor", CanEditDashboard: true}}
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard-drafts/"+id+"/approve", nil)
+		req.Header.Set("If-Match", `"revision-3"`)
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("editor approve = %d, want 403", rec.Code)
+		}
+	})
+
+	t.Run("import는 canonical 정의를 재검증해 draft로 만든다", func(t *testing.T) {
+		stub := &dashboardStub{}
+		f := newFixture(t, func(d *httpapi.Deps) {
+			d.DashboardStore = stub
+			d.Resolver = scope.Static{S: scope.Scope{Subject: "editor", CanEditDashboard: true}}
+		})
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/dashboard-drafts/import", strings.NewReader(canonical)))
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("import without content-type = %d, want 415", rec.Code)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard-drafts/import", strings.NewReader(`{"broken`))
+		req.Header.Set("Content-Type", "application/json")
+		rec = httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("import broken json = %d, want 400", rec.Code)
+		}
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/dashboard-drafts/import", strings.NewReader(canonical))
+		req.Header.Set("Content-Type", "application/json")
+		rec = httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated || rec.Header().Get("ETag") == "" {
+			t.Fatalf("import = %d etag=%q %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"owned":true`) {
+			t.Fatalf("import 결과가 요청자 소유가 아닙니다: %s", rec.Body.String())
+		}
+	})
+}
+
 func TestDashboardMutationResponsesRemainOwned(t *testing.T) {
 	stub := &dashboardStub{}
 	f := newFixture(t, func(d *httpapi.Deps) {

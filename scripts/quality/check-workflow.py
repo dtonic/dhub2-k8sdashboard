@@ -35,7 +35,7 @@ ACTION_PINS = {
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
 }
 REDIS = "redis:8.2.6-alpine@sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e"
-POSTGRES = "cgr.dev/chainguard/postgres@sha256:844baac51caa0212727f9a53f25beec94cedb6778c06c75e3f7bb092079142f3"
+POSTGRES = "cgr.dev/chainguard/postgres@sha256:fb649dbd7afb840985b9e59fd78b35282424a9cc2d1ecef374183973ce19ede4"
 POSTGRES_TEST_URL_LINE = "DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable"
 GO_VERSION = "1.26.6"
 GO_LANGUAGE_VERSION = "1.26.0"
