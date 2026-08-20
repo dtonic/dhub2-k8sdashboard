@@ -1,0 +1,117 @@
+/* ==========================================================================
+   Component — Combobox (검색형 셀렉터)
+   --------------------------------------------------------------------------
+   옵션이 수백 개일 수 있는 목록(Namespace 등)을 위한 검색형 단일 선택
+   컨트롤입니다. (#1)
+
+   정책
+   - 네이티브 <select>는 옵션 검색이 불가능해 목록이 길면 쓸 수 없습니다.
+     input[role=combobox] + [role=listbox] 패턴으로 대체합니다.
+   - 목록은 max-height를 넘으면 **스크롤**합니다. 옵션 개수를 자르지 않습니다.
+   - 선택·활성 상태는 색만으로 전달하지 않습니다. 선택은 ✓ 표식을 함께 씁니다.
+   - 표시 필터일 뿐이며 실제 권한 판정은 서버가 합니다 (README §10).
+   ========================================================================== */
+
+.ds-combobox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ds-combobox__input {
+  height: var(--control-height-sm);
+  width: 100%;
+  padding: 0 calc(var(--space-6) + var(--space-3)) 0 var(--space-4);
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font: var(--type-label);
+}
+
+.ds-combobox__input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.ds-combobox__input:disabled {
+  color: var(--color-text-muted);
+}
+
+.ds-combobox__caret {
+  position: absolute;
+  right: var(--space-3);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+  pointer-events: none;
+}
+
+/* --- 옵션 목록 -------------------------------------------------------------
+   개수 제한 없이 전부 렌더링하고 넘치면 스크롤합니다. */
+.ds-combobox__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: 40;
+  min-width: 100%;
+  max-width: 340px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--color-surface-2);
+  border: var(--border-hairline) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-2);
+}
+
+.ds-combobox__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--density-row-compact);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font: var(--type-label);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.ds-combobox__option--active {
+  background: var(--color-surface-hover);
+}
+
+.ds-combobox__option[aria-selected="true"] {
+  background: var(--color-surface-selected);
+}
+
+.ds-combobox__option--disabled {
+  color: var(--color-text-muted);
+}
+
+/* 선택 표식 — 색이 아니라 글리프로 전달합니다. */
+.ds-combobox__check {
+  width: 1em;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+.ds-combobox__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ds-combobox__note {
+  margin-left: auto;
+  padding-left: var(--space-3);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.ds-combobox__empty {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}

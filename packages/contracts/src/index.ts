@@ -284,6 +284,11 @@ export interface ScopeResponse {
     namespaces: string[] | "all";
     /** 접근 가능한 namespace가 하나도 없으면 false. 목록에는 보이되 선택 불가 */
     accessible: boolean;
+    /**
+     * namespaces가 "all"일 때 셀렉터 옵션으로 쓸 실제 namespace 이름 목록(서버
+     * informer 캐시 열거). 표시 힌트일 뿐 권한 판정은 서버가 요청마다 강제합니다. (#1)
+     */
+    availableNamespaces?: string[];
   }>;
   /** Deployment/Secret 관리 탭·버튼 노출 여부(platform.admin + 관리 기능 활성). (ADR 0014) */
   canManageWorkloads?: boolean;

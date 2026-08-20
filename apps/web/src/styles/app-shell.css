@@ -277,17 +277,8 @@ a:hover { text-decoration: underline; }
 }
 
 .scope { display: inline-flex; align-items: center; gap: var(--space-3); }
-.scope select {
-  height: var(--control-height-sm);
-  padding: 0 var(--space-4);
-  background: var(--color-surface-1);
-  color: var(--color-text-primary);
-  border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  font: var(--type-label);
-  max-width: 220px;
-}
-.scope select:disabled { color: var(--color-text-muted); }
+/* 콤보박스(검색형 셀렉터)로 교체 — 옵션이 수백 개여도 검색·스크롤이 됩니다. (#1) */
+.scope .ds-combobox { width: 200px; max-width: 220px; }
 .scope__sep { color: var(--color-text-muted); }
 
 .visually-hidden {

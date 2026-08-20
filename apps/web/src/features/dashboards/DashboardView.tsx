@@ -7,7 +7,6 @@ import { queryKeys, useClusterOverview, useScope } from "@/api/queries";
 import { ErrorState, ForbiddenState } from "@/components/SectionState";
 import { RefreshControl, ScopeSelector, TimeRangePicker } from "@/components/controls";
 import { embeddedDashboards } from "@/generated/dashboards";
-import { NAMESPACES } from "@/mocks/data";
 import { useDashboardParams } from "@/state/useDashboardParams";
 import { HttpError } from "@/api/client";
 import { DashboardWidgetView } from "./WidgetRegistry";
@@ -32,7 +31,7 @@ export function ResolvedDashboard({ definition }: { definition: DashboardDefinit
       <div><h1 className="page__title">{definition.title}</h1><p className="page__subtitle">{definition.description ? `${definition.description} · ` : ""}{RANGE_LABEL[range]}</p></div>
       <div className="row row--wrap">
         {dashboardControlKinds(definition).map((kind) => kind === "scope"
-          ? <ScopeSelector key={kind} scope={scope.data} clusterId={clusterId} namespace={namespace} namespaces={NAMESPACES} onChange={patch} disabled={scope.isLoading} />
+          ? <ScopeSelector key={kind} scope={scope.data} clusterId={clusterId} namespace={namespace} onChange={patch} disabled={scope.isLoading} />
           : <TimeRangePicker key={kind} range={range} onChange={(next) => patch({ range: next })} />)}
         <RefreshControl refreshMs={refreshMs} onChange={(next) => patch({ refresh: next })}
           onRefreshNow={() => queryClient.invalidateQueries({ queryKey: queryKeys.overview(clusterId, namespace, range) })}

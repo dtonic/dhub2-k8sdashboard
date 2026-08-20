@@ -3,7 +3,6 @@ import { RANGE_LABEL } from "@k8s-dashboard/contracts";
 import { useClusterOverview, useScope, queryKeys } from "@/api/queries";
 import { HttpError } from "@/api/client";
 import { useDashboardParams } from "@/state/useDashboardParams";
-import { NAMESPACES } from "@/mocks/data";
 import { LineChart } from "@/components/LineChart";
 import { Panel, StatTile, StatusBadge } from "@/components/primitives";
 import { ErrorState, ForbiddenState, LoadingState, SectionView } from "@/components/SectionState";
@@ -45,7 +44,6 @@ export function ClusterOverview() {
         scope={scope.data}
         clusterId={clusterId}
         namespace={namespace}
-        namespaces={NAMESPACES}
         onChange={(next) => patch(next)}
         disabled={scope.isLoading}
       />

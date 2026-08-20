@@ -357,6 +357,10 @@ type ScopeCluster struct {
 	// 접근 가능한 namespace 목록. 전체면 "all".
 	Namespaces any  `json:"namespaces"`
 	Accessible bool `json:"accessible"`
+	// AvailableNamespaces는 Namespaces가 "all"일 때 셀렉터 옵션으로 쓸 실제
+	// namespace 이름 목록입니다(informer 캐시 열거). 표시 힌트일 뿐이며
+	// 권한 판정은 여전히 서버가 요청마다 강제합니다. (#1)
+	AvailableNamespaces []string `json:"availableNamespaces,omitempty"`
 }
 
 type ScopeResponse struct {

@@ -1,6 +1,7 @@
 import { RANGE_LABEL, STEP_LABEL, type RangeKey, type ScopeResponse } from "@k8s-dashboard/contracts";
 import { REFRESH_OPTIONS } from "@/state/useDashboardParams";
 import { clock } from "@/lib/format";
+import { Combobox } from "./Combobox";
 
 /* ── Scope Selector ──────────────────────────────────────────────────────── */
 
@@ -9,59 +10,66 @@ import { clock } from "@/lib/format";
  * 선택할 수 없게 하고 이유를 표시합니다 — 목록에서 통째로 지우면
  * "왜 내 클러스터가 안 보이지?"라는 질문이 반복됩니다.
  *
+ * 옵션은 검색형 콤보박스로 노출합니다 — namespace가 수백 개여도 스크롤·검색으로
+ * 찾을 수 있습니다. 전체(all) scope의 이름 목록은 서버가 /scope 응답의
+ * availableNamespaces로 열거합니다. (#1)
+ *
  * 여기서 고른 값은 힌트일 뿐이고, 실제 Scope는 서버가 토큰에서 강제합니다. (README §10)
  */
 export function ScopeSelector({
   scope,
   clusterId,
   namespace,
-  namespaces,
   onChange,
   disabled,
+  showNamespace = true,
 }: {
   scope: ScopeResponse | undefined;
   clusterId: string;
   namespace: string;
-  namespaces: string[];
   onChange: (next: { cluster?: string; ns?: string }) => void;
   disabled?: boolean;
+  /** Namespace 자체가 화면의 주제인 페이지(/namespaces)는 ns 셀렉터를 숨깁니다. (#2) */
+  showNamespace?: boolean;
 }) {
   const clusters = scope?.clusters ?? [];
   const current = clusters.find((c) => c.id === clusterId);
-  const nsOptions = current?.namespaces === "all" ? namespaces : (current?.namespaces ?? []);
+  const nsOptions =
+    current?.namespaces === "all" ? (current.availableNamespaces ?? []) : (current?.namespaces ?? []);
 
   return (
     <div className="scope">
-      <label className="visually-hidden" htmlFor="scope-cluster">
-        클러스터
-      </label>
-      <select
+      <Combobox
         id="scope-cluster"
+        label="클러스터"
         value={clusterId}
         disabled={disabled || clusters.length === 0}
-        onChange={(e) => onChange({ cluster: e.target.value })}
-      >
-        {clusters.map((c) => (
-          <option key={c.id} value={c.id} disabled={!c.accessible}>
-            {c.name}
-            {c.accessible ? "" : " (권한 없음)"}
-          </option>
-        ))}
-      </select>
-      <span className="scope__sep" aria-hidden="true">
-        /
-      </span>
-      <label className="visually-hidden" htmlFor="scope-ns">
-        네임스페이스
-      </label>
-      <select id="scope-ns" value={namespace} disabled={disabled} onChange={(e) => onChange({ ns: e.target.value })}>
-        <option value="all">모든 Namespace</option>
-        {nsOptions.map((ns) => (
-          <option key={ns} value={ns}>
-            {ns}
-          </option>
-        ))}
-      </select>
+        options={clusters.map((c) => ({
+          value: c.id,
+          label: c.name,
+          disabled: !c.accessible,
+          note: c.accessible ? undefined : "권한 없음",
+        }))}
+        onSelect={(v) => onChange({ cluster: v })}
+      />
+      {showNamespace && (
+        <>
+          <span className="scope__sep" aria-hidden="true">
+            /
+          </span>
+          <Combobox
+            id="scope-ns"
+            label="네임스페이스"
+            value={namespace}
+            disabled={disabled}
+            options={[
+              { value: "all", label: "모든 Namespace" },
+              ...nsOptions.map((ns) => ({ value: ns, label: ns })),
+            ]}
+            onSelect={(v) => onChange({ ns: v })}
+          />
+        </>
+      )}
     </div>
   );
 }

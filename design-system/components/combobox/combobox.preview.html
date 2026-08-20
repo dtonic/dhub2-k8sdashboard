@@ -1,0 +1,100 @@
+<!-- @dsCard group="Components" name="Combobox" viewport="960x640" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Combobox</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/combobox/combobox.css */
+.ds-preview .ds-combobox { width: 220px; }
+.ds-preview__row--tall { min-height: 320px; align-items: flex-start; }
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Combobox</h1>
+    <p class="ds-preview__desc">
+      Namespace처럼 옵션이 수백 개일 수 있는 목록의 검색형 셀렉터입니다.
+      목록은 자르지 않고 스크롤하며, 타이핑으로 라벨 부분 일치 필터가 됩니다.
+      선택 표식은 색이 아니라 ✓ 글리프입니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">닫힌 상태</h2>
+    <div class="ds-preview__row">
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="false" value="모든 Namespace" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+      </div>
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="false" value="prod-seoul" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+      </div>
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" value="prod-frankfurt" disabled>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">열린 목록 — 스크롤 · 선택 표식 · 권한 없음 옵션</h2>
+    <div class="ds-preview__row ds-preview__row--tall">
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="true" value="모든 Namespace" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+        <ul class="ds-combobox__list" role="listbox" aria-label="네임스페이스">
+          <li class="ds-combobox__option ds-combobox__option--active" role="option" aria-selected="true"><span class="ds-combobox__check" aria-hidden="true">✓</span><span class="ds-combobox__label">모든 Namespace</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">ingress</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">media</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">observability</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">payments</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">payments-batch</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">platform</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">search</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">search-indexer</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">kube-system</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">kube-public</span></li>
+        </ul>
+      </div>
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="true" value="prod-seoul" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+        <ul class="ds-combobox__list" role="listbox" aria-label="클러스터">
+          <li class="ds-combobox__option ds-combobox__option--active" role="option" aria-selected="true"><span class="ds-combobox__check" aria-hidden="true">✓</span><span class="ds-combobox__label">prod-seoul</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">prod-tokyo</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">stage</span></li>
+          <li class="ds-combobox__option ds-combobox__option--disabled" role="option" aria-selected="false" aria-disabled="true"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">prod-frankfurt</span><span class="ds-combobox__note">권한 없음</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">검색 필터 — "pay" 입력</h2>
+    <div class="ds-preview__row ds-preview__row--tall">
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="true" value="pay" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+        <ul class="ds-combobox__list" role="listbox" aria-label="네임스페이스">
+          <li class="ds-combobox__option ds-combobox__option--active" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">payments</span></li>
+          <li class="ds-combobox__option" role="option" aria-selected="false"><span class="ds-combobox__check" aria-hidden="true"></span><span class="ds-combobox__label">payments-batch</span></li>
+        </ul>
+      </div>
+      <div class="ds-combobox">
+        <input class="ds-combobox__input" role="combobox" aria-expanded="true" value="grafana" readonly>
+        <span class="ds-combobox__caret" aria-hidden="true">▾</span>
+        <ul class="ds-combobox__list" role="listbox" aria-label="네임스페이스">
+          <li class="ds-combobox__empty">일치하는 항목이 없습니다</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

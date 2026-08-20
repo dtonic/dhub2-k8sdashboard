@@ -22,7 +22,11 @@ export function NamespaceDetail() {
   const { clusterId, range, refreshMs } = useDashboardParams();
   const q = useNamespaceDetail(clusterId, namespace, range, refreshMs);
   const invalidate = useInvalidate(drillKeys.namespace(clusterId, namespace, range));
-  const { controls } = useDrillControls(invalidate, q.isFetching, q.dataUpdatedAt || undefined);
+  /* 이 화면의 namespace는 경로가 정합니다 — 상단 ns 셀렉터를 두면 "셀렉터는 X,
+     내용은 Y" 불일치만 만들므로 숨깁니다. 다른 namespace는 목록에서 고릅니다. (#2) */
+  const { controls } = useDrillControls(invalidate, q.isFetching, q.dataUpdatedAt || undefined, {
+    showNamespaceSelector: false,
+  });
   const filter = useIssueFilter();
 
   const summary = q.data?.summary.data;

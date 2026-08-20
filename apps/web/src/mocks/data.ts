@@ -421,14 +421,15 @@ export function buildOverview(key: RangeKey, scenario: Scenario): ClusterOvervie
   return base;
 }
 
+export const NAMESPACES = ["payments", "search", "media", "platform", "ingress", "observability"];
+
 export const SCOPE = {
   clusters: [
-    { id: "prod-seoul", name: "prod-seoul", namespaces: "all" as const, accessible: true },
+    /* 전체(all) scope 클러스터는 서버처럼 availableNamespaces로 실제 이름을 열거합니다. (#1) */
+    { id: "prod-seoul", name: "prod-seoul", namespaces: "all" as const, accessible: true, availableNamespaces: NAMESPACES },
     { id: "prod-tokyo", name: "prod-tokyo", namespaces: ["payments", "search"], accessible: true },
-    { id: "stage", name: "stage", namespaces: "all" as const, accessible: true },
+    { id: "stage", name: "stage", namespaces: "all" as const, accessible: true, availableNamespaces: NAMESPACES },
     { id: "prod-frankfurt", name: "prod-frankfurt", namespaces: [], accessible: false },
   ],
   canManageWorkloads: true,
 };
-
-export const NAMESPACES = ["payments", "search", "media", "platform", "ingress", "observability"];

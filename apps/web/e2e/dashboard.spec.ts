@@ -10,10 +10,13 @@ test.describe("Embedded dashboards (#18)", () => {
     await expect(page.getByRole("link", { name: "Cluster Operations" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Cluster Operations" })).toBeVisible();
     const controlOrder = await page.evaluate(() => {
+      /* scope 셀렉터는 검색형 콤보박스(input[role=combobox])입니다. (#1) */
       const scope = document.querySelector("#scope-cluster")!;
       const range = document.querySelector('[role="group"][aria-label="시간 범위"]')!;
       const refresh = document.querySelector("#refresh-interval")!;
-      return [scope, range, refresh].map((node) => Array.from(document.querySelectorAll("select, [role=group]" )).indexOf(node));
+      return [scope, range, refresh].map((node) =>
+        Array.from(document.querySelectorAll("select, [role=group], [role=combobox]")).indexOf(node),
+      );
     });
     expect(controlOrder[0]).toBeLessThan(controlOrder[1]!);
     expect(controlOrder[1]).toBeLessThan(controlOrder[2]!);

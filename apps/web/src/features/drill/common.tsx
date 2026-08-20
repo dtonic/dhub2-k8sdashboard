@@ -5,12 +5,19 @@ import type { IssueReason, RangeKey } from "@k8s-dashboard/contracts";
 import { HttpError } from "@/api/client";
 import { useScope } from "@/api/queries";
 import { useDashboardParams } from "@/state/useDashboardParams";
-import { NAMESPACE_NAMES } from "@/mocks/drilldown";
 import { RefreshControl, ScopeSelector, TimeRangePicker } from "@/components/controls";
 import { ErrorState, ForbiddenState } from "@/components/SectionState";
 
 /** 드릴다운 화면들이 공유하는 컨트롤 묶음. Scope·범위·갱신 주기는 URL에 남습니다. */
-export function useDrillControls(invalidate: () => void, fetching: boolean, updatedAtMs?: number) {
+export function useDrillControls(
+  invalidate: () => void,
+  fetching: boolean,
+  updatedAtMs?: number,
+  options?: {
+    /** false면 namespace 셀렉터를 숨깁니다 — Namespace 자체가 주제인 화면용. (#2) */
+    showNamespaceSelector?: boolean;
+  },
+) {
   const { clusterId, namespace, range, refreshMs, patch } = useDashboardParams();
   const scope = useScope();
 
@@ -20,9 +27,9 @@ export function useDrillControls(invalidate: () => void, fetching: boolean, upda
         scope={scope.data}
         clusterId={clusterId}
         namespace={namespace}
-        namespaces={NAMESPACE_NAMES}
         onChange={(next) => patch(next)}
         disabled={scope.isLoading}
+        showNamespace={options?.showNamespaceSelector !== false}
       />
       <TimeRangePicker range={range} onChange={(r) => patch({ range: r })} />
       <RefreshControl
