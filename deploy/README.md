@@ -68,7 +68,7 @@ HTTPS여야 하고 `redirectURI`는 정확히 `<publicOrigin>/api/v1/auth/callba
 `scripts/deploy.sh`는 **OIDC가 기본**입니다(`AUTH_MODE=none`으로만 옵트아웃).
 클러스터의 keycloak Route와 기존 `<release>-ui` Route를 자동 발견해 issuer와
 공개 origin을 구성하고, `AUTH_SESSION_KEY`가 없으면 생성하며, issuer로의
-`purpose: oidc` egress를 주입합니다. IdP에는 다음이 한 번 준비되어 있어야 합니다.
+issuer egress를 보완 NetworkPolicy(cluster-compat)로 주입합니다. IdP에는 다음이 한 번 준비되어 있어야 합니다.
 
 - public client(권장) + PKCE S256, redirect URI = `<publicOrigin>/api/v1/auth/callback`
 - ID/access token에 **최상위 flat `roles` 배열** claim (중첩 `realm_access.roles`는

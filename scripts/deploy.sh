@@ -45,6 +45,14 @@
 #   OIDC_CLIENT_SECRET confidential client일 때만 지정. Secret으로만 주입됩니다.
 #   AUTH_LOGIN_URL     미로그인 사용자에게 안내할 로그인(포털) URL. Dhub2.0 위임
 #                      모드에서는 클러스터의 *portal* Route를 자동 발견합니다.
+#   OIDC_MANAGER       1이면 Dhub2.0 위임 모드를 명시적으로 켭니다 — Route 자동
+#                      발견이 없는 클러스터(EKS 등)용. OIDC_ISSUER 지정이 필수이며
+#                      UI 공개는 ROUTE_HOST(host명)와 별도 ingress(HTTPRoute 등)로
+#                      운영자가 준비합니다.
+#   OIDC_EGRESS_CIDR   API → issuer egress CIDR 재정의(쉼표 구분 목록 가능).
+#                      기본은 issuer host의 모든 A 레코드 /32입니다. 이 egress는
+#                      chart values가 아니라 보완 NetworkPolicy(cluster-compat)에
+#                      들어갑니다 — NLB처럼 IP가 여러 개인 issuer 지원.
 #
 #   Dhub2.0 위임 모드(manager Route 자동 발견 시): IdP 사전 조건이 없습니다 —
 #   client 등록·역할 매퍼 없이 manager 세션의 Bearer 토큰을 검증하고 역할은
@@ -91,6 +99,8 @@ OIDC_AUDIENCE="${OIDC_AUDIENCE_RAW:-$OIDC_CLIENT_ID}"
 OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-}"
 OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-}"
 AUTH_LOGIN_URL="${AUTH_LOGIN_URL:-}"
+OIDC_MANAGER="${OIDC_MANAGER:-0}"
+OIDC_EGRESS_CIDR="${OIDC_EGRESS_CIDR:-}"
 OIDC_MANAGER_MODE=0
 case "$AUTH_MODE" in
   oidc|none) ;;
@@ -171,6 +181,18 @@ if [ "$AUTH_MODE" = "oidc" ]; then
       OIDC_ISSUER_VAL="https://$KC_HOST/realms/$OIDC_REALM"
     fi
   fi
+  if [ "$OIDC_MANAGER" = "1" ]; then
+    # Route 자동 발견이 없는 클러스터(EKS 등)에서 위임 모드를 명시적으로 켭니다.
+    [ -n "$OIDC_ISSUER_VAL" ] || die "OIDC_MANAGER=1에는 OIDC_ISSUER를 함께 지정해야 합니다."
+    OIDC_MANAGER_MODE=1
+  fi
+  if [ "$OIDC_MANAGER_MODE" = "1" ]; then
+    # 자동 발견·명시 지정 공통 기본값(이미 설정된 값은 유지).
+    OIDC_AUDIENCE="${OIDC_AUDIENCE_RAW:-dhub2-manager}"
+    OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-groups}"
+    OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-dhub2-admin=platform.admin}"
+    AUTH_LOGIN_URL="${AUTH_LOGIN_URL:-$OIDC_ISSUER_VAL}"
+  fi
   # discovery 문서의 issuer 문자열까지 정확히 일치해야 토큰 검증이 통과합니다.
   DISCOVERED_ISSUER="$(curl -skf --max-time 10 "$OIDC_ISSUER_VAL/.well-known/openid-configuration" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("issuer",""))' 2>/dev/null || true)"
@@ -190,11 +212,14 @@ if [ "$AUTH_MODE" = "oidc" ]; then
     rm -f "$CA_TMP"
     echo "   oidc: issuer TLS를 클러스터 ingress CA로 신뢰합니다 (SSL_CERT_FILE 번들 주입)"
   fi
-  # API → issuer egress(NetworkPolicy)용 IP — 라우터 VIP 등 issuer host의 A 레코드.
-  ISSUER_HOST="$(printf '%s' "$OIDC_ISSUER_VAL" | sed -E 's#^https://([^/:]+).*#\1#')"
-  OIDC_EGRESS_IP="$(getent hosts "$ISSUER_HOST" | awk '{print $1; exit}')"
-  [ -n "$OIDC_EGRESS_IP" ] || die "issuer host($ISSUER_HOST)의 IP를 확인하지 못했습니다."
-  echo "   oidc: issuer=$OIDC_ISSUER_VAL client=$OIDC_CLIENT_ID origin=https://$ROUTE_HOST egress=$OIDC_EGRESS_IP:443"
+  # API → issuer egress — 기본은 issuer host의 모든 A 레코드 /32(쉼표 목록)이고
+  # OIDC_EGRESS_CIDR로 재정의합니다. 보완 NetworkPolicy(cluster-compat)가 소유합니다.
+  if [ -z "$OIDC_EGRESS_CIDR" ]; then
+    ISSUER_HOST="$(printf '%s' "$OIDC_ISSUER_VAL" | sed -E 's#^https://([^/:]+).*#\1#')"
+    OIDC_EGRESS_CIDR="$(getent hosts "$ISSUER_HOST" | awk '{print $1"/32"}' | sort -u | paste -sd, -)"
+    [ -n "$OIDC_EGRESS_CIDR" ] || die "issuer host($ISSUER_HOST)의 IP를 확인하지 못했습니다."
+  fi
+  echo "   oidc: issuer=$OIDC_ISSUER_VAL client=$OIDC_CLIENT_ID origin=https://$ROUTE_HOST egress=$OIDC_EGRESS_CIDR:443"
 fi
 
 # 데이터소스 자동 발견 — 클러스터 안의 GreptimeDB/Quickwit이 있으면 실데이터로
@@ -327,6 +352,19 @@ for ip in $API_EP_IPS; do
   EP_BLOCKS="$EP_BLOCKS
         - ipBlock: {cidr: $ip/32}"
 done
+# OIDC issuer egress — chart external은 purpose당 1개 CIDR만 받으므로, NLB처럼
+# IP가 여러 개인 issuer는 보완 정책에서 허용합니다.
+OIDC_EGRESS_RULE=""
+if [ "$AUTH_MODE" = "oidc" ]; then
+  OIDC_BLOCKS=""
+  for c in ${OIDC_EGRESS_CIDR//,/ }; do
+    OIDC_BLOCKS="$OIDC_BLOCKS
+        - ipBlock: {cidr: $c}"
+  done
+  OIDC_EGRESS_RULE="
+    - to:$OIDC_BLOCKS
+      ports: [{protocol: TCP, port: 443}]"
+fi
 DNS_EGRESS=""
 if [ "$IS_OPENSHIFT" = "1" ]; then
   DNS_EGRESS="
@@ -347,7 +385,7 @@ spec:
   policyTypes: [Egress]
   egress:
     - to:$EP_BLOCKS
-      ports: [{protocol: TCP, port: $API_EP_PORT}]$DNS_EGRESS
+      ports: [{protocol: TCP, port: $API_EP_PORT}]$OIDC_EGRESS_RULE$DNS_EGRESS
 EOF
 
 # 4) helm 설치/업그레이드 — 동적 값은 overlay values로 주입
@@ -454,12 +492,7 @@ networkPolicy:
     - $API_SVC_IP/32
 EOF
   for ip in $API_EP_IPS; do echo "    - $ip/32"; done
-  if [ "$AUTH_MODE" = "oidc" ]; then
-    cat <<EOF
-  external:
-    - {cidr: $OIDC_EGRESS_IP/32, port: 443, protocol: TCP, purpose: oidc}
-EOF
-  fi
+  # issuer egress는 위의 cluster-compat 보완 정책이 소유합니다(다중 IP issuer 지원).
   # 발견된 데이터소스로의 egress만 엽니다. namespace를 아는 자동 발견 경로에서만
   # 규칙을 만들 수 있습니다(URL 수동 지정 시에는 NetworkPolicy를 직접 관리하세요).
   if [ -n "$GREPTIME_NS$QUICKWIT_NS" ]; then
