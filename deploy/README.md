@@ -57,6 +57,29 @@ bundled Redis를 사용하는 경우에는 별도 external Redis egress가 필�
 않으므로 외부 reloader를 사용하거나 `secretRevision`을 증가시켜 rollout을 유도합니다. OIDC issuer와
 audience는 비밀이 아니므로 ConfigMap에 둡니다.
 
+## 브라우저 세션과 OIDC (ADR 0011)
+
+브라우저 로그인은 `authSession.enabled=true`로 켭니다. 기본 검증은 chart Ingress
+(TLS secret 포함)를 요구하지만, OpenShift Route나 외부 LB가 TLS 게시를 맡는 배포는
+`authSession.externalIngress=true`로 선언합니다. 이때도 `publicOrigin`은 경로 없는
+HTTPS여야 하고 `redirectURI`는 정확히 `<publicOrigin>/api/v1/auth/callback`이어야
+하며, `api.existingSecret`에 32-byte base64url(무패딩) `AUTH_SESSION_KEY`가 필요합니다.
+
+루트의 `deploy.sh`는 **OIDC가 기본**입니다(`AUTH_MODE=none`으로만 옵트아웃).
+클러스터의 keycloak Route와 기존 `<release>-ui` Route를 자동 발견해 issuer와
+공개 origin을 구성하고, `AUTH_SESSION_KEY`가 없으면 생성하며, issuer로의
+`purpose: oidc` egress를 주입합니다. IdP에는 다음이 한 번 준비되어 있어야 합니다.
+
+- public client(권장) + PKCE S256, redirect URI = `<publicOrigin>/api/v1/auth/callback`
+- ID/access token에 **최상위 flat `roles` 배열** claim (중첩 `realm_access.roles`는
+  파싱되지 않습니다 — Keycloak은 client-role 매퍼에 `claim.name=roles`를 지정)
+- 로그인할 계정에 client role 부여(`platform.admin`, `namespace.viewer:<ns>` 등)
+- refresh 응답에 서명된 ID token 포함(Keycloak 충족 — 미지원 provider는 세션이
+  fail-closed 됩니다)
+
+lnode 시험 클러스터에는 Keycloak realm `dhub2`에 client `k8s-dashboard`
+(platform.admin → 해당 realm 관리자 계정)가 2026-08-20에 등록되어 있습니다.
+
 ## Dashboard Builder PostgreSQL
 
 Dashboard Builder는 기본 `enabled=false`이며 disabled render에는 DB env/egress가 추가되지 않습니다. 활성화할 때는 `api.existingSecret.name`, `dashboardBuilder.databaseURLKey`, `cursorKeyKey`, `postgresEgress.cidrs/port`를 환경 소유 값으로 지정합니다. chart는 PostgreSQL을 배포하지 않으며 Secret의 URL을 출력하지 않습니다.

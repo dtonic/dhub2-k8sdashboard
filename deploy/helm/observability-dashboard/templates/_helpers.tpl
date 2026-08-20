@@ -76,9 +76,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and (ne .Values.environment "dev") (not .Values.secretRevision) }}{{ fail "stage/prod require secretRevision for explicit secret rollout tracking" }}{{ end -}}
 {{- if and (ne .Values.environment "dev") .Values.redis.enabled (or (not (regexMatch "^sha256:[a-f0-9]{64}$" .Values.redis.image.digest)) (not .Values.redis.persistence.enabled)) }}{{ fail "stage/prod bundled Redis requires immutable digest and persistence" }}{{ end -}}
 {{- if and (not .Values.redis.enabled) (not .Values.api.existingSecret.name) }}{{ fail "disabled bundled Redis requires existingSecret.name containing REDIS_ADDR" }}{{ end -}}
+{{- if .Values.api.caBundle.configMapName -}}
+{{- /* CA 번들은 마운트만으로는 효력이 없습니다 — Go가 읽도록 SSL_CERT_FILE 경로와 짝이 맞아야 합니다. */}}
+{{- if ne (printf "/etc/dashboard-ca/%s" .Values.api.caBundle.key) (toString (get .Values.api.config "SSL_CERT_FILE")) }}{{ fail "api.caBundle requires api.config.SSL_CERT_FILE=/etc/dashboard-ca/<key>" }}{{ end -}}
+{{- end -}}
 {{- if .Values.authSession.enabled -}}
+{{- if .Values.authSession.externalIngress -}}
+{{- /* externalIngress: OpenShift Route 등 chart 밖 계층이 publicOrigin을 TLS로 게시함을 운영자가 선언합니다. HTTPS origin 형식과 정확한 callback은 여기서도 강제합니다. */}}
+{{- if or (ne .Values.api.config.AUTH_MODE "oidc") (not (regexMatch "^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" .Values.authSession.publicOrigin)) (ne .Values.authSession.redirectURI (printf "%s/api/v1/auth/callback" .Values.authSession.publicOrigin)) (empty .Values.authSession.clientID) (empty .Values.api.existingSecret.name) (empty .Values.api.existingSecret.keys.authSessionKey) }}{{ fail "browser session with external ingress requires OIDC, an exact HTTPS origin/callback, client ID, and existing Secret key" }}{{ end -}}
+{{- else -}}
 {{- $expectedOrigin := printf "https://%s" .Values.ingress.host -}}
 {{- if or (ne .Values.api.config.AUTH_MODE "oidc") (not .Values.ingress.enabled) (not .Values.ingress.tls.enabled) (empty .Values.ingress.tls.secretName) (ne .Values.authSession.publicOrigin $expectedOrigin) (ne .Values.authSession.redirectURI (printf "%s/api/v1/auth/callback" $expectedOrigin)) (empty .Values.authSession.clientID) (empty .Values.api.existingSecret.name) (empty .Values.api.existingSecret.keys.authSessionKey) }}{{ fail "browser session requires OIDC, exact HTTPS TLS ingress origin/callback, client ID, and existing Secret key" }}{{ end -}}
+{{- end -}}
 {{- $idleText := toString .Values.authSession.idleTTL -}}{{- $absoluteText := toString .Values.authSession.absoluteTTL -}}{{- $loginText := toString .Values.authSession.loginTTL -}}{{- $skewText := toString .Values.authSession.refreshSkew -}}
 {{- $idleMul := 1 -}}{{- if hasSuffix "m" $idleText }}{{- $idleMul = 60 -}}{{- else if hasSuffix "h" $idleText }}{{- $idleMul = 3600 -}}{{- end -}}
 {{- $absoluteMul := 1 -}}{{- if hasSuffix "m" $absoluteText }}{{- $absoluteMul = 60 -}}{{- else if hasSuffix "h" $absoluteText }}{{- $absoluteMul = 3600 -}}{{- end -}}

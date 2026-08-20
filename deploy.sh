@@ -25,9 +25,23 @@
 #   GREPTIME_URL_OVERRIDE / GREPTIME_DB_OVERRIDE / QUICKWIT_URL_OVERRIDE /
 #   QUICKWIT_INDEX_OVERRIDE  자동 발견 대신 수동 지정합니다.
 #   ROUTE_HOST         OpenShift/OKD에서 UI를 노출할 Route 호스트명
-#                      (예: k8sdashboard.apps.okd.dtonic.io). 비우면 Route를 만들지
-#                      않습니다. 현재 dev 모드는 AUTH_MODE=none이므로 이 URL은
-#                      사내망 누구나 접근 가능합니다 — 조회 전용이지만 유의하세요.
+#                      (예: k8sdashboard.apps.okd.dtonic.io). 비우면 기존
+#                      <release>-ui Route의 host를 재사용합니다. OIDC 모드에서는
+#                      HTTPS 공개 origin이 필수라 둘 다 없으면 배포를 중단합니다.
+#   AUTH_MODE          기본 oidc — Keycloak OIDC + 브라우저 세션(ADR 0011)으로
+#                      배포합니다. none이면 인증 없는 개방 배포(개발·데모 전용)이며
+#                      사내망 누구나 접근 가능합니다.
+#   OIDC_ISSUER        발급자 HTTPS URL. 비우면 클러스터의 keycloak Route를 자동
+#                      발견해 https://<host>/realms/$OIDC_REALM 을 사용합니다.
+#   OIDC_REALM         issuer 자동 발견 시 realm 이름   (기본: dhub2)
+#   OIDC_CLIENT_ID     public PKCE client id            (기본: k8s-dashboard)
+#   OIDC_AUDIENCE      API Bearer 토큰 audience         (기본: OIDC_CLIENT_ID)
+#   OIDC_CLIENT_SECRET confidential client일 때만 지정. Secret으로만 주입됩니다.
+#
+#   IdP 사전 조건(한 번만): 해당 realm에 OIDC_CLIENT_ID public client가 있어야 하고
+#   (redirect URI = https://<ROUTE_HOST>/api/v1/auth/callback, PKCE S256),
+#   flat "roles" claim 매퍼(ID/access token)와 client role(platform.admin 등)이
+#   로그인할 계정에 부여되어 있어야 합니다. 자세한 명세는 deploy/README.md 참고.
 #
 # 동작 개요:
 #   chart의 NetworkPolicy는 항상 켜져 있습니다(schema 강제). 이 스크립트는
@@ -56,6 +70,14 @@ RELEASE_NAME="${RELEASE_NAME:-dashboard}"
 RELEASE_NAMESPACE="${RELEASE_NAMESPACE:-observability}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 ROUTE_HOST="${ROUTE_HOST:-}"
+AUTH_MODE="${AUTH_MODE:-oidc}"
+OIDC_REALM="${OIDC_REALM:-dhub2}"
+OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-k8s-dashboard}"
+OIDC_AUDIENCE="${OIDC_AUDIENCE:-$OIDC_CLIENT_ID}"
+case "$AUTH_MODE" in
+  oidc|none) ;;
+  *) die "AUTH_MODE는 oidc 또는 none이어야 합니다: $AUTH_MODE" ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 CHART="$ROOT/deploy/helm/observability-dashboard"
@@ -97,6 +119,47 @@ API_EP_PORT="$(KC get endpoints kubernetes -n default -o jsonpath='{.subsets[0].
 IS_OPENSHIFT=0
 KC api-versions | grep -q '^security.openshift.io/' && IS_OPENSHIFT=1
 echo "   apiserver: svc=$API_SVC_IP endpoints=[$API_EP_IPS]:$API_EP_PORT openshift=$IS_OPENSHIFT"
+
+# OIDC 기본 활성화(ADR 0011) — 브라우저 세션에는 HTTPS 공개 origin과 살아 있는
+# issuer가 필요합니다. 확인에 실패하면 조용히 개방 배포로 낮추지 않고 중단합니다.
+OIDC_ISSUER_VAL="${OIDC_ISSUER:-}"
+OIDC_EGRESS_IP=""
+OIDC_CA_PEM=""
+if [ "$AUTH_MODE" = "oidc" ]; then
+  if [ -z "$ROUTE_HOST" ] && [ "$IS_OPENSHIFT" = "1" ]; then
+    ROUTE_HOST="$(KC -n "$RELEASE_NAMESPACE" get route "$RELEASE_NAME-ui" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+  fi
+  [ -n "$ROUTE_HOST" ] || die "AUTH_MODE=oidc에는 HTTPS 공개 origin이 필요합니다. ROUTE_HOST를 지정하거나 AUTH_MODE=none으로 명시적으로 끄세요."
+  if [ -z "$OIDC_ISSUER_VAL" ]; then
+    KC_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /keycloak/ {print $3; exit}')"
+    [ -n "$KC_HOST" ] || die "keycloak Route를 찾지 못했습니다. OIDC_ISSUER를 직접 지정하거나 AUTH_MODE=none으로 끄세요."
+    OIDC_ISSUER_VAL="https://$KC_HOST/realms/$OIDC_REALM"
+  fi
+  # discovery 문서의 issuer 문자열까지 정확히 일치해야 토큰 검증이 통과합니다.
+  DISCOVERED_ISSUER="$(curl -skf --max-time 10 "$OIDC_ISSUER_VAL/.well-known/openid-configuration" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("issuer",""))' 2>/dev/null || true)"
+  [ "$DISCOVERED_ISSUER" = "$OIDC_ISSUER_VAL" ] \
+    || die "OIDC issuer 확인 실패: $OIDC_ISSUER_VAL (discovery 응답: ${DISCOVERED_ISSUER:-없음})"
+  # issuer TLS 신뢰 확인 — 공용 CA로 검증되지 않으면(OKD edge Route 기본 인증서 등)
+  # 클러스터 ingress CA로 재검증하고, 성공 시 그 CA를 API의 SSL_CERT_FILE 번들로 주입합니다.
+  if ! curl -sf --max-time 10 "$OIDC_ISSUER_VAL/.well-known/openid-configuration" >/dev/null 2>&1; then
+    OIDC_CA_PEM="$(KC -n openshift-config-managed get configmap default-ingress-cert -o jsonpath='{.data.ca-bundle\.crt}' 2>/dev/null || true)"
+    [ -n "$OIDC_CA_PEM" ] || die "issuer TLS가 공용 CA로 검증되지 않고 클러스터 ingress CA도 찾지 못했습니다: $OIDC_ISSUER_VAL"
+    CA_TMP="$(mktemp)"
+    printf '%s\n' "$OIDC_CA_PEM" > "$CA_TMP"
+    if ! curl -sf --cacert "$CA_TMP" --max-time 10 "$OIDC_ISSUER_VAL/.well-known/openid-configuration" >/dev/null 2>&1; then
+      rm -f "$CA_TMP"
+      die "클러스터 ingress CA로도 issuer TLS 검증에 실패했습니다: $OIDC_ISSUER_VAL"
+    fi
+    rm -f "$CA_TMP"
+    echo "   oidc: issuer TLS를 클러스터 ingress CA로 신뢰합니다 (SSL_CERT_FILE 번들 주입)"
+  fi
+  # API → issuer egress(NetworkPolicy)용 IP — 라우터 VIP 등 issuer host의 A 레코드.
+  ISSUER_HOST="$(printf '%s' "$OIDC_ISSUER_VAL" | sed -E 's#^https://([^/:]+).*#\1#')"
+  OIDC_EGRESS_IP="$(getent hosts "$ISSUER_HOST" | awk '{print $1; exit}')"
+  [ -n "$OIDC_EGRESS_IP" ] || die "issuer host($ISSUER_HOST)의 IP를 확인하지 못했습니다."
+  echo "   oidc: issuer=$OIDC_ISSUER_VAL client=$OIDC_CLIENT_ID origin=https://$ROUTE_HOST egress=$OIDC_EGRESS_IP:443"
+fi
 
 # 데이터소스 자동 발견 — 클러스터 안의 GreptimeDB/Quickwit이 있으면 실데이터로
 # 연결하고, 없으면 demo로 남습니다(fail-open). 대시보드는 조회 계층이므로
@@ -197,6 +260,28 @@ if ! KC -n "$RELEASE_NAMESPACE" get secret "$API_SECRET" >/dev/null 2>&1; then
     --from-literal=DASHBOARD_CURSOR_KEY="$(openssl rand -hex 32)"
 fi
 
+# 브라우저 세션 키(ADR 0011) — 32-byte base64url(무패딩). 없을 때만 만들어
+# 재배포에도 기존 세션을 유지합니다. 키를 교체하면 전체 세션이 로그아웃됩니다.
+if [ "$AUTH_MODE" = "oidc" ]; then
+  if [ -z "$(KC -n "$RELEASE_NAMESPACE" get secret "$API_SECRET" -o jsonpath='{.data.AUTH_SESSION_KEY}')" ]; then
+    KC -n "$RELEASE_NAMESPACE" patch secret "$API_SECRET" \
+      -p "{\"stringData\":{\"AUTH_SESSION_KEY\":\"$(openssl rand 32 | basenc --base64url -w0 | tr -d '=')\"}}" >/dev/null
+    echo "   secret: $API_SECRET 에 AUTH_SESSION_KEY 생성"
+  fi
+  if [ -n "${OIDC_CLIENT_SECRET:-}" ]; then
+    KC -n "$RELEASE_NAMESPACE" patch secret "$API_SECRET" \
+      -p "{\"stringData\":{\"OIDC_CLIENT_SECRET\":\"$OIDC_CLIENT_SECRET\"}}" >/dev/null
+  fi
+fi
+
+# 사설 CA 번들 ConfigMap — 클러스터 ingress CA로 issuer TLS를 신뢰해야 할 때만 만듭니다.
+OIDC_CA_CONFIGMAP=""
+if [ -n "$OIDC_CA_PEM" ]; then
+  OIDC_CA_CONFIGMAP="$RELEASE_NAME-oidc-ca"
+  KC -n "$RELEASE_NAMESPACE" create configmap "$OIDC_CA_CONFIGMAP" \
+    --from-literal=ca.crt="$OIDC_CA_PEM" --dry-run=client -o yaml | KC -n "$RELEASE_NAMESPACE" apply -f -
+fi
+
 # chart의 API egress 규칙은 TCP 443 고정이지만 OKD apiserver endpoint는 6443이고,
 # OKD DNS는 openshift-dns의 5353 포트입니다. NetworkPolicy는 additive이므로
 # 부족한 허용만 보완 정책 하나로 추가합니다.
@@ -247,6 +332,18 @@ api:
     CLUSTER_NAME: "$CLUSTER"
     SCOPE_NAMESPACES: "$SCOPE"
 EOF
+  if [ "$AUTH_MODE" = "oidc" ]; then
+    cat <<EOF
+    AUTH_MODE: "oidc"
+    OIDC_ISSUER: "$OIDC_ISSUER_VAL"
+    OIDC_AUDIENCE: "$OIDC_AUDIENCE"
+EOF
+    if [ -n "$OIDC_CA_CONFIGMAP" ]; then
+      cat <<EOF
+    SSL_CERT_FILE: "/etc/dashboard-ca/ca.crt"
+EOF
+    fi
+  fi
   if [ -n "$GREPTIME_URL_VAL" ]; then
     cat <<EOF
     GREPTIME_URL: "$GREPTIME_URL_VAL"
@@ -263,9 +360,16 @@ EOF
   cat <<EOF
   existingSecret:
     name: $API_SECRET
+EOF
+  if [ -n "$OIDC_CA_CONFIGMAP" ]; then
+    cat <<EOF
+  caBundle: {configMapName: $OIDC_CA_CONFIGMAP, key: ca.crt}
+EOF
+  fi
+  cat <<EOF
 manageWorkloads:
-  # 시험 배포에서 Deployment/Secret 관리 탭을 켭니다(ADR 0014). AUTH_MODE=none이므로
-  # 사내망 admin 게이팅 없이 열립니다 — 정식 운영에서는 OIDC platform.admin과 함께 쓰세요.
+  # Deployment/Secret 관리 탭(ADR 0014). 기본 OIDC 모드에서는 platform.admin 역할이
+  # 부여된 계정에만 열립니다. AUTH_MODE=none이면 게이팅 없이 열리니 유의하세요.
   enabled: true
 dashboardBuilder:
   # Custom Dashboard Builder(ADR 0016). SQLite 파일을 PVC에 두어 재배포에도 draft가 보존됩니다.
@@ -276,6 +380,19 @@ dashboardBuilder:
 redis:
   # OKD cri-o는 short name을 거부하므로 fully-qualified 경로를 씁니다.
   image: {repository: docker.io/library/redis}
+EOF
+  if [ "$AUTH_MODE" = "oidc" ]; then
+    # 브라우저 세션(ADR 0011). TLS 게시는 chart Ingress가 아니라 OKD Route가 맡습니다.
+    cat <<EOF
+authSession:
+  enabled: true
+  externalIngress: true
+  publicOrigin: "https://$ROUTE_HOST"
+  redirectURI: "https://$ROUTE_HOST/api/v1/auth/callback"
+  clientID: "$OIDC_CLIENT_ID"
+EOF
+  fi
+  cat <<EOF
 networkPolicy:
   ingress:
     cidrs: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
@@ -283,6 +400,12 @@ networkPolicy:
     - $API_SVC_IP/32
 EOF
   for ip in $API_EP_IPS; do echo "    - $ip/32"; done
+  if [ "$AUTH_MODE" = "oidc" ]; then
+    cat <<EOF
+  external:
+    - {cidr: $OIDC_EGRESS_IP/32, port: 443, protocol: TCP, purpose: oidc}
+EOF
+  fi
   # 발견된 데이터소스로의 egress만 엽니다. namespace를 아는 자동 발견 경로에서만
   # 규칙을 만들 수 있습니다(URL 수동 지정 시에는 NetworkPolicy를 직접 관리하세요).
   if [ -n "$GREPTIME_NS$QUICKWIT_NS" ]; then
@@ -360,4 +483,9 @@ if [ -n "$ROUTE_HOST" ] && [ "$IS_OPENSHIFT" = "1" ]; then
 else
   echo "  kubectl --context $CLUSTER -n $RELEASE_NAMESPACE port-forward svc/$RELEASE_NAME-ui 18080:8080"
   echo "  → http://localhost:18080"
+fi
+if [ "$AUTH_MODE" = "oidc" ]; then
+  echo "  로그인: $OIDC_ISSUER_VAL 계정 중 '$OIDC_CLIENT_ID' client role(platform.admin 등)이"
+  echo "  부여된 계정만 접근할 수 있습니다. 세션은 HTTPS origin에서만 동작하므로"
+  echo "  port-forward(http://localhost)로는 로그인할 수 없습니다."
 fi

@@ -44,12 +44,20 @@ api:
       redisAddr: REDIS_ADDR
       authSessionKey: AUTH_SESSION_KEY
       oidcClientSecret: OIDC_CLIENT_SECRET
+  # 사설 CA로 서명된 TLS 목적지(예: 클러스터 ingress CA가 서명한 OIDC issuer Route)를
+  # 신뢰하기 위한 PEM 번들 ConfigMap. 지정하면 /etc/dashboard-ca/<key>로 마운트되며,
+  # api.config에 SSL_CERT_FILE=/etc/dashboard-ca/<key>를 함께 설정해야 합니다.
+  # Go는 이 번들을 기본 신뢰 디렉터리(/etc/ssl/certs)에 더해 추가로 읽습니다.
+  caBundle: {configMapName: "", key: ca.crt}
 
 authSession:
   enabled: false
   publicOrigin: ""
   redirectURI: ""
   clientID: ""
+  # externalIngress: chart Ingress 대신 OpenShift Route·외부 LB가 publicOrigin을
+  # TLS로 게시함을 운영자가 선언합니다. 이때도 HTTPS origin과 정확한 callback은 강제됩니다.
+  externalIngress: false
   idleTTL: 30m
   absoluteTTL: 8h
   loginTTL: 5m
