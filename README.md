@@ -179,10 +179,11 @@ Kubernetes API를 매 요청마다 직접 조회하지 않고 Shared Informer Ca
 
 구현에 앞서 디자인 토큰과 핵심 컴포넌트를 먼저 확정합니다. 자세한 규칙은
 [`design-system/README.md`](./design-system/README.md), 결정 배경은
-[ADR 0001](./docs/adr/0001-design-system-with-claude-design.md)에 있습니다.
+[ADR 0017](https://github.com/xenx96/k8s-dashboard/issues/4)에 있습니다.
 
-- **원천은 git입니다.** `design-system/tokens/`가 단일 원천이며 `apps/web`은 토큰만 참조합니다.
-  컴포넌트 코드에 원시 hex나 임의 픽셀값을 쓰지 않습니다.
+- **제품 디자인 원천은 dhub2-portal입니다.** `dtonic/dhub2-portal/docs/design-system`의 고정 커밋을
+  `design-system/portal/`에 vendoring하고, 로컬 역할 토큰과 컴포넌트는 이 스냅숏을 따릅니다.
+  `apps/web`은 로컬 역할 토큰만 참조하며 컴포넌트 코드에 원시 hex나 임의 픽셀값을 쓰지 않습니다.
 - **리뷰 표면은 Claude Design입니다.** 컴포넌트별 `*.preview.html`을 자기완결 HTML로 빌드해
   **design-sync**로 업로드하고, 팀은 카드 단위로 보고 논의합니다. 동기화는 한 번에 한 컴포넌트씩
   증분으로 수행합니다.
@@ -313,6 +314,7 @@ k8s-dashboard/
 │   ├── api/                    # Go Observability API/BFF
 │   └── web/                    # React/TypeScript UI
 ├── design-system/              # 디자인 토큰 · 컴포넌트 스타일 · Claude Design preview
+│   ├── portal/                 #   dhub2-portal 디자인 원천의 고정 SHA 스냅숏
 │   ├── tokens/                 #   color / typography / layout (단일 원천)
 │   ├── components/             #   컴포넌트 CSS + *.preview.html
 │   ├── foundations/            #   토큰 자체를 보여주는 preview

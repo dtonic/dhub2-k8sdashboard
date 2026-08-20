@@ -1,7 +1,9 @@
 # Design System
 
-K8s Dashboard의 디자인 토큰과 컴포넌트 스타일의 **단일 원천(single source of truth)** 입니다.
-`apps/web`은 여기 정의된 토큰만 참조하며, 컴포넌트 코드에 원시 hex나 임의 픽셀값을 직접 쓰지 않습니다.
+제품 디자인의 원천은 `dtonic/dhub2-portal/docs/design-system`입니다. 검토한 고정 커밋을
+`portal/`에 vendoring하고, K8s Dashboard의 역할 토큰과 컴포넌트 스타일은 이 스냅숏을
+런타임 계약에 맞게 변환합니다. `apps/web`은 로컬 역할 토큰만 참조하며, 컴포넌트 코드에
+원시 hex나 임의 픽셀값을 직접 쓰지 않습니다.
 
 미리보기는 [Claude Design](https://claude.ai/design)에 **design-sync**로 업로드해 팀이 함께 보고 리뷰합니다.
 
@@ -11,6 +13,9 @@ K8s Dashboard의 디자인 토큰과 컴포넌트 스타일의 **단일 원천(s
 
 ```text
 design-system/
+├── portal/                     # dhub2-portal 원천의 고정 SHA 스냅숏
+│   ├── UPSTREAM                #   repository / source / ref / commit
+│   └── MANIFEST                #   Git blob SHA별 vendored 파일 목록
 ├── tokens/                     # 디자인 토큰 (원천)
 │   ├── color.css               #   surface/ink/status/series/sequential/diverging
 │   ├── typography.css          #   family/size/weight/leading + composite role
@@ -38,11 +43,18 @@ design-system/
 ## 2. 명령
 
 ```bash
+# 저장소 루트에서 검토할 Portal 커밋을 명시해 갱신
+./scripts/sync-design-system.sh <40-character-commit-sha>
+
 cd design-system
 
 npm run build   # *.preview.html → dist/ (자기완결 HTML)
 npm run check   # 파일을 쓰지 않고 검증만 (CI용)
 ```
+
+동기화 스크립트는 GitHub API에서 `docs/design-system`만 읽고 `UPSTREAM`과 `MANIFEST`에
+출처를 기록합니다. upstream에서 삭제된 파일이 있으면 자동 삭제하지 않고 실패하므로,
+삭제 영향과 로컬 매핑을 검토한 뒤 별도 변경으로 처리합니다. 동일 SHA 재실행은 무차이여야 합니다.
 
 ## 3. 작성 규칙
 

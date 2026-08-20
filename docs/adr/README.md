@@ -14,7 +14,7 @@
 
 | # | 제목 | 상태 | 날짜 |
 |---|---|---|---|
-| [0001](./0001-design-system-with-claude-design.md) | 디자인 시스템을 `design-system/`에서 관리하고 Claude Design으로 동기화한다 | Accepted | 2026-08-13 |
+| [0001](./0001-design-system-with-claude-design.md) | 디자인 시스템을 `design-system/`에서 관리하고 Claude Design으로 동기화한다 | Superseded by 0017 | 2026-08-13 |
 | [0002](./0002-screen-scoped-aggregated-endpoints.md) | 화면 단위 집계 엔드포인트를 BFF의 기본 형태로 삼는다 | Accepted | 2026-08-13 |
 | [0003](./0003-log-cursor-paging-and-server-side-masking.md) | 로그는 커서로 페이징하고, 마스킹은 서버에서만 한다 | Superseded by 0006 | 2026-08-13 |
 | [0004](./0004-backend-language-go.md) | Observability API/BFF는 Go로 구현한다 | Accepted | 2026-08-13 |
@@ -35,6 +35,7 @@
 | 0014 | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | [#34](https://github.com/xenx96/k8s-dashboard/issues/34) |
 | 0015 | Dashboard Builder 위젯 확장·예시 대시보드 갱신·편집 UX 개선 | Accepted | [#35](https://github.com/xenx96/k8s-dashboard/issues/35) |
 | 0016 | Dashboard draft 저장소를 SQLite 파일(PVC)로 선택 지원하고 Import를 추가한다 (0009 확장) | Proposed | [#37](https://github.com/xenx96/k8s-dashboard/issues/37) |
+| 0017 | 디자인 시스템 원천을 dhub2-portal design-system으로 전환한다 | Accepted | [#4](https://github.com/xenx96/k8s-dashboard/issues/4) |
 
 ## 상태 값
 

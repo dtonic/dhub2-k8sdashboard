@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System Preview: D.Hub2 Portal (Dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto:wght@700&family=Fira+Code:wght@400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: #3b82f6; --primary-hover: #2563eb; --primary-container: #2a3575; --on-primary-container: #c7d2fe;
+  --text-primary: #f8fafc; --text-secondary: #94a3b8; --text-tertiary: #64748b; --text-muted: #94a3b8;
+  --heading: #f1f5f9;
+  --surface: #1e293b; --panel: #0f172a; --container: #020617; --chrome: #0f172a; --elevated: #1e293b;
+  --subtle: #334155;
+  --border: #334155; --card-border: #334155;
+  --info-fg: #60a5fa; --info-bg: #1e3a5f;
+  --success-fg: #4ade80; --success-bg: #1a3a2e;
+  --warning-fg: #fbbf24; --warning-bg: #3a2e1a;
+  --danger-fg: #f87171; --danger-bg: #3a1a1a;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 8px 20px rgba(0,0,0,0.4);
+  --shadow-lg: 0 18px 36px rgba(0,0,0,0.5);
+  --font-body: 'Inter', -apple-system, system-ui, Roboto, sans-serif;
+  --font-heading: 'Roboto', -apple-system, system-ui, sans-serif;
+  --font-code: 'Fira Code', Consolas, Monaco, monospace;
+  --radius: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--container); color: var(--text-primary); font-family: var(--font-body); font-size: 14px; font-weight: 400; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+/* Navigation */
+.nav { position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 50px; background: var(--panel); border-bottom: 1px solid var(--card-border); box-shadow: var(--shadow-sm); }
+.nav-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.nav-brand-mark { width: 24px; height: 24px; background: linear-gradient(135deg, var(--primary), var(--primary-hover)); border-radius: 6px; }
+.nav-brand-text { font-family: var(--font-heading); font-size: 14px; font-weight: 700; color: var(--heading); }
+.nav-links { display: flex; gap: 20px; list-style: none; }
+.nav-links a { font-size: 13px; font-weight: 500; color: var(--text-secondary); text-decoration: none; transition: color 0.15s; }
+.nav-links a:hover { color: var(--primary); }
+.nav-pill { display: inline-flex; align-items: center; padding: 6px 14px; background: var(--primary); color: #0f172a; border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none; border: none; }
+.dark-label { display: inline-flex; align-items: center; padding: 4px 10px; background: var(--subtle); color: var(--text-secondary); border-radius: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-left: 8px; }
+
+/* Hero */
+.hero { padding: 56px 24px 48px; text-align: center; background: var(--panel); }
+.hero h1 { font-family: var(--font-heading); font-size: 30px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin-bottom: 12px; color: var(--heading); }
+.hero h1 span { color: var(--primary); }
+.hero p { font-size: 16px; color: var(--text-secondary); max-width: 520px; margin: 0 auto 28px; line-height: 1.6; }
+.hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* Buttons */
+.btn-primary { display: inline-flex; align-items: center; gap: 6px; background: var(--primary); color: #0f172a; padding: 10px 20px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; box-shadow: 0 0 16px rgba(59, 130, 246, 0.3); transition: all 0.2s; }
+.btn-primary:hover { background: var(--primary-hover); box-shadow: 0 0 24px rgba(59, 130, 246, 0.4); }
+.btn-secondary { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); color: var(--text-primary); padding: 10px 20px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; font-weight: 500; text-decoration: none; border: none; cursor: pointer; transition: background 0.15s; }
+.btn-secondary:hover { background: var(--subtle); }
+.btn-outline { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--text-primary); padding: 10px 20px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; font-weight: 500; text-decoration: none; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; font-weight: 500; text-decoration: none; border: none; cursor: pointer; transition: all 0.15s; }
+.btn-ghost:hover { background: var(--subtle); color: var(--text-primary); }
+.btn-destructive { display: inline-flex; align-items: center; gap: 6px; background: var(--danger-fg); color: #0f172a; padding: 10px 20px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; }
+
+/* Section */
+.section { padding: 48px 24px; max-width: 1100px; margin: 0 auto; }
+.section-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+.section-title { font-family: var(--font-heading); font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin-bottom: 24px; color: var(--heading); }
+.section-divider { border: none; border-top: 1px solid var(--card-border); margin: 0; }
+
+/* Color Swatches */
+.color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.color-swatch { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--card-border); background: var(--surface); }
+.color-swatch-block { height: 56px; width: 100%; }
+.color-swatch-info { padding: 8px 10px; }
+.color-swatch-name { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+.color-swatch-hex { font-size: 10px; color: var(--text-secondary); font-family: var(--font-code); }
+.color-swatch-role { font-size: 9px; color: var(--text-tertiary); margin-top: 2px; }
+.color-group-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 24px 0 8px; }
+
+/* Typography */
+.type-sample { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--subtle); }
+.type-sample:last-child { border-bottom: none; }
+.type-meta { font-size: 10px; color: var(--text-tertiary); margin-top: 4px; font-family: var(--font-code); }
+
+/* Cards */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--card-border); box-shadow: var(--shadow-sm); transition: box-shadow 0.2s, transform 0.2s; }
+.card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.card-img { height: 140px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-tertiary); }
+.card-body { padding: 16px; }
+.card h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.card p { font-size: 13px; color: var(--text-secondary); }
+.card-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-top: 8px; }
+
+/* Entity Badges (Dark) */
+.badge-collection { background: #334155; color: #cbd5e1; }
+.badge-dataset { background: #2A3A50; color: #8DA8CC; }
+.badge-code { background: #4A3425; color: #D1A882; }
+.badge-pipeline { background: #263E34; color: #7DB8A2; }
+.badge-document { background: #322546; color: #A893C7; }
+.badge-knowledge { background: #352849; color: #AD96CC; }
+
+/* Status Badges */
+.status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.status-info { background: var(--info-bg); color: var(--info-fg); }
+.status-success { background: var(--success-bg); color: var(--success-fg); }
+.status-warning { background: var(--warning-bg); color: var(--warning-fg); }
+.status-danger { background: var(--danger-bg); color: var(--danger-fg); }
+.status-running { background: #1e3a5f; color: #60a5fa; }
+.status-pending { background: #1e293b; color: #94a3b8; }
+
+/* Forms */
+.form-group { margin-bottom: 16px; max-width: 400px; }
+.form-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary); }
+.form-input { width: 100%; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 12px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; outline: none; transition: all 0.15s; }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); }
+.form-input--focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); }
+.form-input--error { border-color: var(--danger-fg); box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.3); }
+.form-input--disabled { background: var(--panel); border-color: var(--surface); color: var(--text-tertiary); cursor: not-allowed; }
+.form-textarea { width: 100%; min-height: 80px; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 12px; border-radius: var(--radius); font-family: var(--font-body); font-size: 14px; resize: vertical; outline: none; }
+.form-state-label { font-size: 9px; color: var(--text-tertiary); margin-top: 4px; }
+
+/* Spacing */
+.spacing-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.spacing-item { text-align: center; }
+.spacing-block { background: var(--primary); border-radius: 4px; margin-bottom: 4px; height: 24px; opacity: 0.7; }
+.spacing-value { font-size: 9px; color: var(--text-tertiary); font-family: var(--font-code); }
+
+/* Radius */
+.radius-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.radius-item { text-align: center; }
+.radius-box { width: 56px; height: 56px; background: var(--subtle); border: 2px solid var(--border); margin-bottom: 4px; }
+.radius-label { font-size: 9px; color: var(--text-tertiary); font-family: var(--font-code); }
+.radius-context { font-size: 8px; color: var(--text-tertiary); }
+
+/* Elevation */
+.elevation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.elevation-card { background: var(--surface); border-radius: var(--radius); padding: 20px; text-align: center; border: 1px solid var(--card-border); }
+.elevation-label { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.elevation-desc { font-size: 9px; color: var(--text-tertiary); font-family: var(--font-code); }
+
+/* Entity Color Grid */
+.entity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.entity-card { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--card-border); background: var(--surface); }
+.entity-card-header { padding: 12px; display: flex; align-items: center; gap: 8px; }
+.entity-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; }
+.entity-card-name { font-size: 13px; font-weight: 600; }
+.entity-shades { display: flex; height: 32px; }
+.entity-shades > div { flex: 1; }
+
+/* Workflow Nodes (Dark) */
+.wf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.wf-node { border-radius: 12px; padding: 14px; text-align: center; border: 2px solid; }
+.wf-node-label { font-size: 12px; font-weight: 600; }
+.wf-node-meta { font-size: 9px; margin-top: 4px; font-family: var(--font-code); }
+
+/* Chart */
+.chart-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-end; }
+.chart-bar { border-radius: 4px 4px 0 0; min-width: 48px; text-align: center; }
+.chart-bar-label { font-size: 8px; color: #fff; font-weight: 600; padding: 4px 0; }
+.chart-bar-name { font-size: 9px; color: var(--text-tertiary); margin-top: 4px; font-family: var(--font-code); }
+
+/* Alert */
+.alert { padding: 12px 16px; border-radius: var(--radius); border-left: 4px solid; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.alert-text { font-size: 13px; }
+.alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.alert-info { background: var(--info-bg); border-left-color: var(--info-fg); color: var(--text-primary); }
+.alert-success { background: var(--success-bg); border-left-color: var(--success-fg); color: var(--text-primary); }
+.alert-warning { background: var(--warning-bg); border-left-color: var(--warning-fg); color: var(--text-primary); }
+.alert-danger { background: var(--danger-bg); border-left-color: var(--danger-fg); color: var(--text-primary); }
+
+/* Button Row */
+.button-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.button-item { text-align: center; }
+.button-label { font-size: 9px; color: var(--text-tertiary); margin-top: 6px; }
+
+/* Dark Slate Reference */
+.slate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
+.slate-swatch { border-radius: 6px; overflow: hidden; border: 1px solid var(--card-border); }
+.slate-block { height: 40px; }
+.slate-info { padding: 4px 6px; background: var(--surface); }
+.slate-name { font-size: 9px; font-weight: 600; }
+.slate-hex { font-size: 8px; color: var(--text-tertiary); font-family: var(--font-code); }
+
+/* Footer */
+.footer { padding: 24px; text-align: center; border-top: 1px solid var(--card-border); font-size: 12px; color: var(--text-secondary); background: var(--panel); }
+.footer a { color: var(--primary); text-decoration: underline; }
+
+/* Motion demo */
+.motion-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.motion-card { background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 16px; text-align: center; cursor: pointer; }
+.motion-card-label { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.motion-card-meta { font-size: 9px; color: var(--text-tertiary); font-family: var(--font-code); }
+.motion-fast { transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+.motion-fast:hover { transform: scale(1.05); }
+.motion-normal { transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1); }
+.motion-normal:hover { transform: translateY(-4px); }
+.motion-slow { transition: all 400ms cubic-bezier(0.4, 0, 0.2, 1); }
+.motion-slow:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.motion-spring { transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.motion-spring:hover { transform: scale(1.08); }
+
+@media (max-width: 768px) { .nav-links { display: none; } .section { padding: 32px 16px; } .card-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <a class="nav-brand" href="#">
+    <div class="nav-brand-mark"></div>
+    <span class="nav-brand-text">D.Hub2 Portal — Design System</span>
+    <span class="dark-label">Dark Mode</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#colors">Colors</a></li>
+    <li><a href="#typography">Typography</a></li>
+    <li><a href="#buttons">Buttons</a></li>
+    <li><a href="#cards">Cards</a></li>
+    <li><a href="#entities">Entities</a></li>
+    <li><a href="#forms">Forms</a></li>
+    <li><a href="#status">Status</a></li>
+  </ul>
+  <a class="nav-pill" href="#">DESIGN.md</a>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <h1>Design System: <span>D.Hub2 Portal</span></h1>
+  <p>Dark mode token catalog generated from DESIGN.md. Slate-based palette with 11-step tonal hierarchy for premium night-shift aesthetics.</p>
+  <div class="hero-buttons">
+    <a class="btn-primary" href="#">Explore Tokens</a>
+    <a class="btn-outline" href="#">View Source</a>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 01 Dark Slate Palette -->
+<section class="section" id="slate">
+  <div class="section-label">00 / Foundation</div>
+  <div class="section-title">Slate Dark Mode Palette</div>
+  <div class="slate-grid">
+    <div class="slate-swatch"><div class="slate-block" style="background:#020617"></div><div class="slate-info"><div class="slate-name">950</div><div class="slate-hex">#020617</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#0f172a"></div><div class="slate-info"><div class="slate-name">900</div><div class="slate-hex">#0f172a</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#1e293b"></div><div class="slate-info"><div class="slate-name">800</div><div class="slate-hex">#1e293b</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#334155"></div><div class="slate-info"><div class="slate-name">700</div><div class="slate-hex">#334155</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#475569"></div><div class="slate-info"><div class="slate-name">600</div><div class="slate-hex">#475569</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#64748b"></div><div class="slate-info"><div class="slate-name">500</div><div class="slate-hex">#64748b</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#94a3b8"></div><div class="slate-info"><div class="slate-name">400</div><div class="slate-hex">#94a3b8</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#cbd5e1"></div><div class="slate-info"><div class="slate-name">300</div><div class="slate-hex">#cbd5e1</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#e2e8f0"></div><div class="slate-info"><div class="slate-name">200</div><div class="slate-hex">#e2e8f0</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#f1f5f9"></div><div class="slate-info"><div class="slate-name">100</div><div class="slate-hex">#f1f5f9</div></div></div>
+    <div class="slate-swatch"><div class="slate-block" style="background:#f8fafc"></div><div class="slate-info"><div class="slate-name">50</div><div class="slate-hex">#f8fafc</div></div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 01 Colors -->
+<section class="section" id="colors">
+  <div class="section-label">01 / Colors</div>
+  <div class="section-title">Color Palette — Dark</div>
+
+  <div class="color-group-label">Brand</div>
+  <div class="color-grid">
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#3b82f6"></div><div class="color-swatch-info"><div class="color-swatch-name">Primary 600</div><div class="color-swatch-hex">#3b82f6</div><div class="color-swatch-role">Role A — Button, focus, link</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#2563eb"></div><div class="color-swatch-info"><div class="color-swatch-name">Primary Hover</div><div class="color-swatch-hex">#2563eb</div><div class="color-swatch-role">Hover state</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#2a3575"></div><div class="color-swatch-info"><div class="color-swatch-name">Primary Container</div><div class="color-swatch-hex">#2a3575</div><div class="color-swatch-role">Role B — Chips, tags, info bg</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#c7d2fe"></div><div class="color-swatch-info"><div class="color-swatch-name">On Primary Container</div><div class="color-swatch-hex">#c7d2fe</div><div class="color-swatch-role">Text/icon on container</div></div></div>
+  </div>
+
+  <div class="color-group-label">Text</div>
+  <div class="color-grid">
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#f1f5f9"></div><div class="color-swatch-info"><div class="color-swatch-name">Heading</div><div class="color-swatch-hex">#f1f5f9</div><div class="color-swatch-role">Headings</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#f8fafc"></div><div class="color-swatch-info"><div class="color-swatch-name">Primary Text</div><div class="color-swatch-hex">#f8fafc</div><div class="color-swatch-role">Body text</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#94a3b8"></div><div class="color-swatch-info"><div class="color-swatch-name">Secondary</div><div class="color-swatch-hex">#94a3b8</div><div class="color-swatch-role">Descriptions</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#64748b"></div><div class="color-swatch-info"><div class="color-swatch-name">Tertiary</div><div class="color-swatch-hex">#64748b</div><div class="color-swatch-role">Placeholders</div></div></div>
+  </div>
+
+  <div class="color-group-label">Surface</div>
+  <div class="color-grid">
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#1e293b"></div><div class="color-swatch-info"><div class="color-swatch-name">Surface</div><div class="color-swatch-hex">#1e293b</div><div class="color-swatch-role">Cards</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#020617"></div><div class="color-swatch-info"><div class="color-swatch-name">Container</div><div class="color-swatch-hex">#020617</div><div class="color-swatch-role">App bg</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#0f172a"></div><div class="color-swatch-info"><div class="color-swatch-name">Panel</div><div class="color-swatch-hex">#0f172a</div><div class="color-swatch-role">Sidebar, panel</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#334155"></div><div class="color-swatch-info"><div class="color-swatch-name">Subtle</div><div class="color-swatch-hex">#334155</div><div class="color-swatch-role">Hover states</div></div></div>
+  </div>
+
+  <div class="color-group-label">Status</div>
+  <div class="color-grid">
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#60a5fa"></div><div class="color-swatch-info"><div class="color-swatch-name">Info</div><div class="color-swatch-hex">#60a5fa</div><div class="color-swatch-role">Information</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#4ade80"></div><div class="color-swatch-info"><div class="color-swatch-name">Success</div><div class="color-swatch-hex">#4ade80</div><div class="color-swatch-role">Completed</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#fbbf24"></div><div class="color-swatch-info"><div class="color-swatch-name">Warning</div><div class="color-swatch-hex">#fbbf24</div><div class="color-swatch-role">Attention</div></div></div>
+    <div class="color-swatch"><div class="color-swatch-block" style="background:#f87171"></div><div class="color-swatch-info"><div class="color-swatch-name">Danger</div><div class="color-swatch-hex">#f87171</div><div class="color-swatch-role">Errors</div></div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 02 Typography -->
+<section class="section" id="typography">
+  <div class="section-label">02 / Typography</div>
+  <div class="section-title">Typography Scale</div>
+  <div class="type-sample">
+    <div style="font-family:var(--font-heading);font-size:30px;font-weight:700;line-height:1.2;letter-spacing:-0.02em;color:var(--heading)">Page Title — Dashboard Overview</div>
+    <div class="type-meta">Roboto — 30px / 700 / 1.2 / -0.02em</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-family:var(--font-heading);font-size:24px;font-weight:700;line-height:1.2;letter-spacing:-0.02em;color:var(--heading)">Section Heading</div>
+    <div class="type-meta">Roboto — 24px / 700 / 1.2 / -0.02em</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:20px;font-weight:600;line-height:1.35;letter-spacing:-0.01em">Sub-heading — Card Group</div>
+    <div class="type-meta">Inter — 20px / 600 / 1.35 / -0.01em</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:18px;font-weight:600;line-height:1.35;letter-spacing:-0.01em">Card Title — Resource Name</div>
+    <div class="type-meta">Inter — 18px / 600 / 1.35 / -0.01em</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:16px;font-weight:500;line-height:1.5">Label — Navigation Item, Emphasized Body</div>
+    <div class="type-meta">Inter — 16px / 500 / 1.5</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:14px;font-weight:400;line-height:1.5">Body — A dataset containing customer transaction records from 2024. Updated daily via pipeline.</div>
+    <div class="type-meta">Inter — 14px / 400 / 1.5</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:13px;font-weight:400;line-height:1.5;color:var(--text-secondary)">Compact — Pipeline executed 42 steps in 3.2 seconds</div>
+    <div class="type-meta">Inter — 13px / 400 / 1.5</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:12px;font-weight:400;line-height:1.5;color:var(--text-secondary)">Small — Last modified 2 hours ago by admin</div>
+    <div class="type-meta">Inter — 12px / 400 / 1.5</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-size:11px;font-weight:600;line-height:1.5;color:var(--text-muted)">MICRO BADGE LABEL</div>
+    <div class="type-meta">Inter — 11px / 600 / 1.5</div>
+  </div>
+  <div class="type-sample">
+    <div style="font-family:var(--font-code);font-size:14px;font-weight:400;line-height:1.5;color:var(--primary);background:var(--panel);padding:8px 12px;border-radius:6px;border:1px solid var(--card-border)">const pipeline = await api.get("/pipelines/p-001")</div>
+    <div class="type-meta">Fira Code — 14px / 400 / 1.5</div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 03 Buttons -->
+<section class="section" id="buttons">
+  <div class="section-label">03 / Buttons</div>
+  <div class="section-title">Button Variants</div>
+  <div class="button-row">
+    <div class="button-item"><button class="btn-primary">Create Dataset</button><div class="button-label">Primary</div></div>
+    <div class="button-item"><button class="btn-secondary">Cancel</button><div class="button-label">Secondary</div></div>
+    <div class="button-item"><button class="btn-outline">Import</button><div class="button-label">Outline</div></div>
+    <div class="button-item"><button class="btn-ghost">View All</button><div class="button-label">Ghost</div></div>
+    <div class="button-item"><button class="btn-destructive">Delete</button><div class="button-label">Destructive</div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 04 Entity Colors (Dark) -->
+<section class="section" id="entities">
+  <div class="section-label">04 / Entities</div>
+  <div class="section-title">Entity Type Colors — Dark</div>
+  <div class="entity-grid">
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#334155;color:#cbd5e1">C</div><div class="entity-card-name">Collection</div></div>
+      <div class="entity-shades"><div style="background:#e2e8f0" title="100"></div><div style="background:#cbd5e1" title="300"></div><div style="background:#475569" title="600"></div><div style="background:#0f172a" title="900"></div></div>
+    </div>
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#2A3A50;color:#8DA8CC">D</div><div class="entity-card-name">Dataset</div></div>
+      <div class="entity-shades"><div style="background:#E6ECF3" title="100"></div><div style="background:#8DA8CC" title="300"></div><div style="background:#5E7BAE" title="600"></div><div style="background:#2A3A50" title="900"></div></div>
+    </div>
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#4A3425;color:#D1A882">&#60;/&#62;</div><div class="entity-card-name">Code</div></div>
+      <div class="entity-shades"><div style="background:#F2E8E0" title="100"></div><div style="background:#D1A882" title="300"></div><div style="background:#B87F56" title="600"></div><div style="background:#4A3425" title="900"></div></div>
+    </div>
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#263E34;color:#7DB8A2">P</div><div class="entity-card-name">Pipeline</div></div>
+      <div class="entity-shades"><div style="background:#E2F0EA" title="100"></div><div style="background:#7DB8A2" title="300"></div><div style="background:#52917A" title="600"></div><div style="background:#263E34" title="900"></div></div>
+    </div>
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#322546;color:#A893C7">&#9776;</div><div class="entity-card-name">Document</div></div>
+      <div class="entity-shades"><div style="background:#EBE5F2" title="100"></div><div style="background:#A893C7" title="300"></div><div style="background:#7E63A5" title="600"></div><div style="background:#322546" title="900"></div></div>
+    </div>
+    <div class="entity-card">
+      <div class="entity-card-header"><div class="entity-card-icon" style="background:#352849;color:#AD96CC">K</div><div class="entity-card-name">Knowledge</div></div>
+      <div class="entity-shades"><div style="background:#ECE5F3" title="100"></div><div style="background:#AD96CC" title="300"></div><div style="background:#876BAF" title="600"></div><div style="background:#352849" title="900"></div></div>
+    </div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 05 Workflow Nodes (Dark) -->
+<section class="section" id="workflow">
+  <div class="section-label">05 / Workflow</div>
+  <div class="section-title">Pipeline Node Categories — Dark</div>
+  <div class="wf-grid">
+    <div class="wf-node" style="border-color:#818cf8;background:rgba(99,102,241,0.15);color:#c7d2fe"><div class="wf-node-label">Flow</div><div class="wf-node-meta">Indigo #818cf8</div></div>
+    <div class="wf-node" style="border-color:#a78bfa;background:rgba(139,92,246,0.15);color:#ddd6fe"><div class="wf-node-label">AI</div><div class="wf-node-meta">Violet #a78bfa</div></div>
+    <div class="wf-node" style="border-color:#38bdf8;background:rgba(14,165,233,0.15);color:#bae6fd"><div class="wf-node-label">Data</div><div class="wf-node-meta">Sky #38bdf8</div></div>
+    <div class="wf-node" style="border-color:#fbbf24;background:rgba(245,158,11,0.15);color:#fde68a"><div class="wf-node-label">Integration</div><div class="wf-node-meta">Amber #fbbf24</div></div>
+    <div class="wf-node" style="border-color:#34d399;background:rgba(16,185,129,0.15);color:#a7f3d0"><div class="wf-node-label">Control</div><div class="wf-node-meta">Emerald #34d399</div></div>
+    <div class="wf-node" style="border-color:#f87171;background:rgba(239,68,68,0.15);color:#fecaca"><div class="wf-node-label">Advanced</div><div class="wf-node-meta">Red #f87171</div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 06 Cards -->
+<section class="section" id="cards">
+  <div class="section-label">06 / Cards</div>
+  <div class="section-title">Card Examples</div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-img" style="background:#2A3A50">Dataset Preview</div>
+      <div class="card-body">
+        <h3>Customer Transactions</h3>
+        <p>CSV &middot; 2.4M rows &middot; 12 columns &middot; Updated 2h ago</p>
+        <span class="card-badge badge-dataset">Dataset</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-img" style="background:#263E34">Pipeline Preview</div>
+      <div class="card-body">
+        <h3>ETL Daily Ingest</h3>
+        <p>5 steps &middot; Prefect &middot; Last run: 12 min ago</p>
+        <span class="card-badge badge-pipeline">Pipeline</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-img" style="background:#352849">Knowledge Preview</div>
+      <div class="card-body">
+        <h3>Product Catalog KB</h3>
+        <p>RAG-enabled &middot; 156 documents &middot; Qdrant vectors</p>
+        <span class="card-badge badge-knowledge">Knowledge</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 07 Status -->
+<section class="section" id="status">
+  <div class="section-label">07 / Status</div>
+  <div class="section-title">Status & Alerts</div>
+
+  <div class="color-group-label" style="margin-top:0">Status Badges</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px">
+    <span class="status-badge status-info">&#9432; Info</span>
+    <span class="status-badge status-success">&#10003; Success</span>
+    <span class="status-badge status-warning">&#9888; Warning</span>
+    <span class="status-badge status-danger">&#10007; Danger</span>
+    <span class="status-badge status-running">&#9654; Running</span>
+    <span class="status-badge status-pending">&#9679; Pending</span>
+  </div>
+
+  <div class="color-group-label">Alerts</div>
+  <div class="alert alert-info"><span class="alert-icon">&#9432;</span><span class="alert-text">Dataset schema has been updated. Review the new columns before running pipelines.</span></div>
+  <div class="alert alert-success"><span class="alert-icon">&#10003;</span><span class="alert-text">Pipeline "ETL Daily Ingest" completed successfully in 3.2 seconds.</span></div>
+  <div class="alert alert-warning"><span class="alert-icon">&#9888;</span><span class="alert-text">Knowledge base index is 3 days old. Consider re-indexing for fresh results.</span></div>
+  <div class="alert alert-danger"><span class="alert-icon">&#10007;</span><span class="alert-text">Failed to connect to ClickHouse. Check credentials and network configuration.</span></div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 08 Forms -->
+<section class="section" id="forms">
+  <div class="section-label">08 / Forms</div>
+  <div class="section-title">Form Elements</div>
+  <div class="form-group"><label class="form-label">Dataset Name</label><input class="form-input" type="text" value="customer_transactions" readonly><div class="form-state-label">Default</div></div>
+  <div class="form-group"><label class="form-label">Description</label><input class="form-input form-input--focus" type="text" value="Daily transaction records" readonly><div class="form-state-label">Focus (primary ring)</div></div>
+  <div class="form-group"><label class="form-label">S3 Path</label><input class="form-input form-input--error" type="text" value="invalid://path" readonly><div class="form-state-label">Error (danger ring)</div></div>
+  <div class="form-group"><label class="form-label">Owner</label><input class="form-input form-input--disabled" type="text" value="system" disabled><div class="form-state-label">Disabled</div></div>
+  <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" readonly>Pipeline configuration notes and additional metadata for the dataset processing workflow.</textarea></div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 09 Spacing -->
+<section class="section" id="spacing">
+  <div class="section-label">09 / Spacing</div>
+  <div class="section-title">Spacing Scale</div>
+  <div class="spacing-row">
+    <div class="spacing-item"><div class="spacing-block" style="width:8px"></div><div class="spacing-value">2</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:16px"></div><div class="spacing-value">4</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:32px"></div><div class="spacing-value">8</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:48px"></div><div class="spacing-value">12</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:64px"></div><div class="spacing-value">16</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:96px"></div><div class="spacing-value">24</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:128px"></div><div class="spacing-value">32</div></div>
+    <div class="spacing-item"><div class="spacing-block" style="width:192px"></div><div class="spacing-value">48</div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 10 Radius -->
+<section class="section" id="radius">
+  <div class="section-label">10 / Radius</div>
+  <div class="section-title">Border Radius</div>
+  <div class="radius-row">
+    <div class="radius-item"><div class="radius-box" style="border-radius:4px"></div><div class="radius-label">4px</div><div class="radius-context">Inputs</div></div>
+    <div class="radius-item"><div class="radius-box" style="border-radius:6px"></div><div class="radius-label">6px</div><div class="radius-context">Tags</div></div>
+    <div class="radius-item"><div class="radius-box" style="border-radius:8px"></div><div class="radius-label">8px</div><div class="radius-context">Cards (default)</div></div>
+    <div class="radius-item"><div class="radius-box" style="border-radius:12px"></div><div class="radius-label">12px</div><div class="radius-context">Workflow Nodes</div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 11 Elevation -->
+<section class="section" id="elevation">
+  <div class="section-label">11 / Elevation</div>
+  <div class="section-title">Depth & Shadow</div>
+  <div class="elevation-grid">
+    <div class="elevation-card" style="box-shadow:none"><div class="elevation-label">Flat</div><div class="elevation-desc">No shadow</div></div>
+    <div class="elevation-card" style="box-shadow:var(--shadow-sm)"><div class="elevation-label">Subtle (sm)</div><div class="elevation-desc">0 1px 2px rgba(…0.2)</div></div>
+    <div class="elevation-card" style="box-shadow:var(--shadow-md)"><div class="elevation-label">Default (md)</div><div class="elevation-desc">0 8px 20px rgba(…0.4)</div></div>
+    <div class="elevation-card" style="box-shadow:var(--shadow-lg)"><div class="elevation-label">Elevated (lg)</div><div class="elevation-desc">0 18px 36px rgba(…0.5)</div></div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 12 Chart Colors -->
+<section class="section" id="charts">
+  <div class="section-label">12 / Charts</div>
+  <div class="section-title">Categorical Palette</div>
+  <div class="chart-row">
+    <div class="chart-bar" style="background:rgba(102,136,187,0.85);width:48px;height:90px"><div class="chart-bar-label">0</div></div>
+    <div class="chart-bar" style="background:rgba(85,170,170,0.85);width:48px;height:75px"><div class="chart-bar-label">1</div></div>
+    <div class="chart-bar" style="background:rgba(221,170,68,0.85);width:48px;height:110px"><div class="chart-bar-label">2</div></div>
+    <div class="chart-bar" style="background:rgba(217,123,123,0.85);width:48px;height:60px"><div class="chart-bar-label">3</div></div>
+    <div class="chart-bar" style="background:rgba(119,187,136,0.85);width:48px;height:85px"><div class="chart-bar-label">4</div></div>
+    <div class="chart-bar" style="background:rgba(136,153,170,0.85);width:48px;height:50px"><div class="chart-bar-label">5</div></div>
+    <div class="chart-bar" style="background:rgba(204,136,153,0.85);width:48px;height:70px"><div class="chart-bar-label">6</div></div>
+    <div class="chart-bar" style="background:rgba(153,187,221,0.85);width:48px;height:95px"><div class="chart-bar-label">7</div></div>
+    <div class="chart-bar" style="background:rgba(232,166,69,0.85);width:48px;height:80px"><div class="chart-bar-label">8</div></div>
+    <div class="chart-bar" style="background:rgba(184,184,184,0.85);width:48px;height:45px"><div class="chart-bar-label">9</div></div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+    <div class="chart-bar-name">Blue</div>
+    <div class="chart-bar-name">Teal</div>
+    <div class="chart-bar-name">Amber</div>
+    <div class="chart-bar-name">Coral</div>
+    <div class="chart-bar-name">Green</div>
+    <div class="chart-bar-name">Slate</div>
+    <div class="chart-bar-name">Pink</div>
+    <div class="chart-bar-name">LtBlue</div>
+    <div class="chart-bar-name">Orange</div>
+    <div class="chart-bar-name">Gray</div>
+  </div>
+</section>
+
+<hr class="section-divider">
+
+<!-- 13 Motion -->
+<section class="section" id="motion">
+  <div class="section-label">13 / Motion</div>
+  <div class="section-title">Timing & Easing</div>
+  <div class="motion-grid">
+    <div class="motion-card motion-fast"><div class="motion-card-label">Fast</div><div class="motion-card-meta">150ms ease-in-out</div></div>
+    <div class="motion-card motion-normal"><div class="motion-card-label">Normal</div><div class="motion-card-meta">250ms ease-in-out</div></div>
+    <div class="motion-card motion-slow"><div class="motion-card-label">Slow</div><div class="motion-card-meta">400ms ease-in-out</div></div>
+    <div class="motion-card motion-spring"><div class="motion-card-label">Spring</div><div class="motion-card-meta">300ms cubic-bezier(0.34,1.56,0.64,1)</div></div>
+  </div>
+</section>
+
+<footer class="footer">
+  Generated from <a href="DESIGN.md">DESIGN.md</a> — D.Hub2 Portal Design System (Dark Mode)
+</footer>
+
+</body>
+</html>

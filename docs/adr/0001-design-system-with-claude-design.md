@@ -1,9 +1,10 @@
 # ADR 0001 — 디자인 시스템을 `design-system/`에서 관리하고 Claude Design으로 동기화한다
 
-- 상태: Accepted
+- 상태: Superseded by ADR 0017 (#4)
 - 날짜: 2026-08-13
 - 결정자: @xenx96
 - 관련: README §6 기술 스택, §7 저장소 구조, §12 로드맵 Phase 1
+- 대체 결정: [ADR 0017 — dhub2-portal 디자인 시스템 원천 전환](https://github.com/xenx96/k8s-dashboard/issues/4)
 
 ## 배경
 
