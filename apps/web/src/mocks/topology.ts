@@ -164,6 +164,40 @@ export function topologyGraph(range: RangeKey) {
   return { nodes: nodeList, edges };
 }
 
+/** #3 회귀 시나리오: 수백 개 워크로드를 React Flow에서 실제로 렌더합니다. */
+export function largeTopologyGraph(workloadCount = 500): { nodes: TopologyNode[]; edges: TopologyEdge[] } {
+  const columns = Math.ceil(Math.sqrt(workloadCount));
+  const nodeList: TopologyNode[] = Array.from({ length: workloadCount }, (_, i) => ({
+    id: `large-${i}`,
+    ref: {
+      clusterId: "prod-seoul",
+      namespace: `ns-${String(i % 10).padStart(2, "0")}`,
+      workloadKind: "Deployment",
+      workloadName: `workload-${String(i).padStart(3, "0")}`,
+      workloadUid: `workload-uid-${i}`,
+      podName: `workload-${String(i).padStart(3, "0")}-pod-0`,
+      podUid: `pod-uid-${i}-0`,
+    },
+    name: `workload-${String(i).padStart(3, "0")}-pod-0`,
+    namespace: `ns-${String(i % 10).padStart(2, "0")}`,
+    severity: "healthy",
+    column: 1 + (i % columns),
+    row: Math.floor(i / columns),
+    podCount: 2,
+  }));
+  const edges: TopologyEdge[] = nodeList.slice(1).map((node, i) => ({
+    id: `${nodeList[i]!.id}->${node.id}`,
+    from: nodeList[i]!.id,
+    to: node.id,
+    severity: "healthy",
+    totalCount: 1_000,
+    errorRate: 0,
+    protocols: ["HTTP"],
+    routes: [{ protocol: "HTTP", route: "GET /healthz", count: 1_000, errorCount: 0 }],
+  }));
+  return { nodes: nodeList, edges };
+}
+
 function rangeHours(range: RangeKey) {
   return range === "1h" ? 1 : range === "1d" ? 24 : range === "7d" ? 168 : range === "30d" ? 720 : 72;
 }

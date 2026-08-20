@@ -29,7 +29,7 @@ import type {
 import { buildOverview, EVENTS, NOW_MS, rangeWindow, SCOPE, type Scenario } from "./data";
 import { afterCursor, encodeCursor, logCorpus } from "./logs";
 import { nodeSummaries } from "./nodes";
-import { edgeSeries, topologyGraph, topologyUnhealthy } from "./topology";
+import { edgeSeries, largeTopologyGraph, topologyGraph, topologyUnhealthy } from "./topology";
 import { alertList, GROUPING_RULE } from "./alerts";
 import {
   containersOf,
@@ -493,11 +493,12 @@ export const handlers = [
     await delay(260);
     const range = rangeOf(request);
     const scenario = scenarioOf(request);
-    const graph = topologyGraph(range);
+    const large = url.searchParams.get("scenario") === "large-topology";
+    const graph = large ? largeTopologyGraph() : topologyGraph(range);
     const nodes = ns ? graph.nodes.filter((n) => n.namespace === ns) : graph.nodes;
     const ids = new Set(nodes.map((n) => n.id));
     const edges = graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-    const unhealthy = topologyUnhealthy().filter((u) => !ns || u.namespace === ns);
+    const unhealthy = large ? [] : topologyUnhealthy().filter((u) => !ns || u.namespace === ns);
 
     const body: TopologyResponse = {
       ...meta(clusterId, range),

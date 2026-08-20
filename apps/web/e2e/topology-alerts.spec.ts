@@ -96,6 +96,16 @@ test.describe("Pod Topology", () => {
     expect(Math.abs(after!.x - afterDrag!.x)).toBeLessThan(2);
     expect(Math.abs(after!.y - afterDrag!.y)).toBeLessThan(2);
   });
+
+  test("500개 워크로드를 절단 없이 10초 안에 렌더한다 (#3)", async ({ page }) => {
+    const startedAt = Date.now();
+    await page.goto("/topology?range=1h&refresh=0&scenario=large-topology");
+    await waitForData(page);
+
+    await expect(page.locator(".react-flow__node")).toHaveCount(500);
+    await expect(page.getByText("워크로드 노드 500개 · Pod 1,000개를 접어서 표시", { exact: true })).toBeVisible();
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
 });
 
 test.describe("Alerts (#17)", () => {

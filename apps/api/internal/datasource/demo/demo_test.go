@@ -2,6 +2,7 @@ package demo_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -255,5 +256,103 @@ func TestTopologyGraphRules(t *testing.T) {
 	series, err := d.EdgeSeries(ctx, testcluster.ClusterID, g.Edges[0].ID, window())
 	if err != nil || len(series) != 2 {
 		t.Fatalf("엣지 시계열: %d err=%v", len(series), err)
+	}
+}
+
+type staticPodCatalog []datasource.CatalogPod
+
+func (c staticPodCatalog) CatalogPods(clusterID, namespace string, limit int) []datasource.CatalogPod {
+	if clusterID != testcluster.ClusterID {
+		return nil
+	}
+	out := make([]datasource.CatalogPod, 0, len(c))
+	for _, pod := range c {
+		if namespace != "" && pod.Namespace != namespace {
+			continue
+		}
+		out = append(out, pod)
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+func largeTopologyCatalog(workloads, podsPerWorkload int) staticPodCatalog {
+	pods := make(staticPodCatalog, 0, workloads*podsPerWorkload)
+	for workload := 0; workload < workloads; workload++ {
+		for pod := 0; pod < podsPerWorkload; pod++ {
+			pods = append(pods, datasource.CatalogPod{
+				Namespace:    fmt.Sprintf("ns-%02d", workload%10),
+				Name:         fmt.Sprintf("workload-%03d-pod-%d", workload, pod),
+				UID:          fmt.Sprintf("pod-uid-%03d-%d", workload, pod),
+				WorkloadKind: "Deployment",
+				WorkloadName: fmt.Sprintf("workload-%03d", workload),
+				WorkloadUID:  fmt.Sprintf("workload-uid-%03d", workload),
+				Node:         fmt.Sprintf("node-%02d", workload%25),
+			})
+		}
+	}
+	return pods
+}
+
+// TestTopologyGraphDoesNotTruncateWorkloads — 전체 scope의 워크로드가 20개를
+// 넘어도 알파벳 앞쪽 namespace만 남기지 않고, Pod 수를 접어서 모두 표시합니다. (#3)
+func TestTopologyGraphDoesNotTruncateWorkloads(t *testing.T) {
+	const (
+		workloads       = 500
+		podsPerWorkload = 2
+	)
+	d := demo.New(largeTopologyCatalog(workloads, podsPerWorkload))
+	g, err := d.Graph(context.Background(), target(""), window())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	internal := 0
+	foldedPods := 0
+	maxColumn := 0
+	namespaces := map[string]int{}
+	workloadNames := map[string]bool{}
+	for _, node := range g.Nodes {
+		if node.External {
+			continue
+		}
+		internal++
+		foldedPods += node.PodCount
+		namespaces[node.Namespace]++
+		workloadNames[node.Ref.WorkloadName] = true
+		if node.Column > maxColumn {
+			maxColumn = node.Column
+		}
+	}
+	if internal != workloads || len(workloadNames) != workloads {
+		t.Fatalf("워크로드 노드가 절단됐습니다: nodes=%d unique=%d", internal, len(workloadNames))
+	}
+	if foldedPods != workloads*podsPerWorkload {
+		t.Fatalf("접힌 Pod 합계: got=%d want=%d", foldedPods, workloads*podsPerWorkload)
+	}
+	if len(g.Nodes) != workloads+3 {
+		t.Fatalf("외부 노드를 포함한 전체 노드: got=%d want=%d", len(g.Nodes), workloads+3)
+	}
+	for namespace := 0; namespace < 10; namespace++ {
+		name := fmt.Sprintf("ns-%02d", namespace)
+		if namespaces[name] != workloads/10 {
+			t.Fatalf("namespace %s 워크로드 수: got=%d want=%d", name, namespaces[name], workloads/10)
+		}
+	}
+	if maxColumn != 23 {
+		t.Fatalf("대규모 동적 열 배치: max column=%d want=23", maxColumn)
+	}
+}
+
+func BenchmarkTopologyGraph500Workloads(b *testing.B) {
+	d := demo.New(largeTopologyCatalog(500, 2))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := d.Graph(context.Background(), target(""), window()); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
