@@ -4,6 +4,7 @@ import type {
   ClusterOverviewResponse,
   NamespaceDetailResponse,
   NamespaceListResponse,
+  NodeListResponse,
   LogSearchResponse,
   ManagedActionResult,
   ManagedDeploymentDetail,
@@ -143,6 +144,7 @@ const common = {
 } as const;
 
 export const drillKeys = {
+  nodes: (clusterId: string) => ["nodes", clusterId] as const,
   namespaces: (clusterId: string, range: RangeKey) => ["namespaces", clusterId, range] as const,
   namespace: (clusterId: string, ns: string, range: RangeKey) => ["namespace", clusterId, ns, range] as const,
   workload: (clusterId: string, ns: string, kind: string, name: string, range: RangeKey) =>
@@ -151,6 +153,15 @@ export const drillKeys = {
   pod: (clusterId: string, ns: string, name: string, uid: string, range: RangeKey) =>
     ["pod", clusterId, ns, name, uid, range] as const,
 };
+
+export function useNodeList(clusterId: string, refreshMs: number) {
+  return useQuery({
+    ...common,
+    queryKey: drillKeys.nodes(clusterId),
+    queryFn: ({ signal }) => apiGet<NodeListResponse>(`/api/v1/clusters/${encodeURIComponent(clusterId)}/nodes`, {}, signal),
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+  });
+}
 
 export function useNamespaceList(clusterId: string, range: RangeKey, refreshMs: number) {
   return useQuery({

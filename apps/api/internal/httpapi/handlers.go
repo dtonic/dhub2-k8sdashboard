@@ -162,6 +162,29 @@ func topologySummary(g contract.TopologyGraph) contract.TopologySummary {
 	return sum
 }
 
+/* ── Nodes ──────────────────────────────────────────────────────────────── */
+
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
+	serve(s, w, r, func(ctx context.Context) (contract.NodeListResponse, error) {
+		var out contract.NodeListResponse
+		store := providerFrom(ctx, s.deps.Store)
+		c, _, _, err := s.resolve(ctx, r, "")
+		if err != nil {
+			return out, err
+		}
+		out = contract.NodeListResponse{ClusterID: c.ID, GeneratedAt: s.nowRFC3339()}
+		// 노드는 클러스터 스코프 리소스입니다 — namespace로 제한된 사용자에게는
+		// 빈 목록 대신 "권한 없음"으로 구분해 알립니다. (Overview NodeHealth와 같은 규칙)
+		if !c.All {
+			out.Nodes = contract.Forbidden[[]contract.NodeSummary]("노드 목록은 클러스터 범위 권한이 필요합니다.")
+			return out, nil
+		}
+		v, errN := store.NodeSummaries()
+		out.Nodes = kubeSection(store, v, errN)
+		return out, nil
+	})
+}
+
 /* ── Namespace ──────────────────────────────────────────────────────────── */
 
 func (s *Server) handleNamespaceList(w http.ResponseWriter, r *http.Request) {

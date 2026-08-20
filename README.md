@@ -140,6 +140,7 @@ Go로 구현하며 다음 책임을 가집니다.
 React와 TypeScript를 기반으로 구축합니다.
 
 - Cluster Overview
+- Nodes Overview (노드 목록 · 용량 대비 요청량 · 노드별 Pod 배치) *(구현됨)*
 - Namespace Overview
 - Workload/Pod 상세 화면
 - Pod Topology (Pod 간 통신 현황 및 방향별 요청 분석) *(구현됨 — mock API 기준)*
@@ -292,7 +293,7 @@ Pod Name
 | Alerting | Grafana Alerting 또는 Alertmanager |
 | Cache | Redis |
 | Dashboard Metadata | 표준은 Git, 사용자 draft는 외부 PostgreSQL (#24) |
-| Authentication | OIDC / MS Entra |
+| Authentication | OIDC — Dhub2.0(dhub2-auth) 위임이 기본, 표준 OIDC provider(Keycloak/MS Entra) 호환 |
 | Telemetry | OpenTelemetry |
 | Deployment | Helm 또는 Kustomize |
 
@@ -353,6 +354,7 @@ k8s-dashboard/
 - Query Catalog
 - Redis 캐시와 쿼리 보호 정책
 - Cluster Overview *(구현됨 — mock API 기준)*
+- Nodes Overview *(구현됨 — 노드 목록·용량 대비 요청량·노드별 Pod. 클러스터 범위 권한 필요)*
 - Namespace Overview
 - Workload/Pod 상세
 - Pod Topology 및 방향별 요청 집계
@@ -501,7 +503,9 @@ Custom Range의 최대 폭은 30일입니다.
 - GreptimeDB Adapter *(완료 — Prometheus 호환 API · 서버 측 쿼리 카탈로그 · Step 상한)*
 - Quickwit Adapter *(완료 — ES 호환 검색 · 커서 페이징 · 서버 마스킹)*
 - Query Catalog *(완료 — `apps/api/internal/querycatalog`. Git 임베디드 YAML, $__scope 강제, 변수 allowlist, 시작·CI 검증)*
-- OIDC/RBAC *(완료 — `apps/api/internal/auth`. 표준 OIDC JWT 검증, 역할 4종 → Scope, 401/403 구분, 감사 로그, mock IdP)*
+- OIDC/RBAC *(완료 — `apps/api/internal/auth`. 표준 OIDC JWT 검증, 역할 4종 → Scope, 401/403 구분,
+  감사 로그, mock IdP. `OIDC_ROLE_MAP`으로 IdP 역할 이름 변환, `OIDC_USERINFO_ROLES`로
+  access token에 역할이 없는 provider(Dhub2.0 dhub2-auth) 지원 — 배포 기본은 Dhub2.0 인증 위임)*
 - Redis Cache 및 Query Guardrail *(완료 — #11. 유계 L1 + Redis L2 캐시, Scope 포함 캐시 키,
   사용자·화면별 rate/동시성 상한, 12s 질의 budget)*
 - 상태 변경 SSE *(백엔드 구현됨 — #12. `/events/stream`, 프로세스 로컬 재생 링과 Last-Event-ID

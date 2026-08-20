@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { ClusterOverview } from "@/features/overview/ClusterOverview";
+import { NodesView } from "@/features/nodes/NodesView";
 import { NamespaceList } from "@/features/drill/NamespaceList";
 import { NamespaceDetail } from "@/features/drill/NamespaceDetail";
 import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
@@ -44,6 +45,7 @@ async function bootstrap() {
           <Routes>
             <Route element={<AppShell />}>
               <Route path="/" element={<ClusterOverview />} />
+              <Route path="/nodes" element={<NodesView />} />
               <Route path="/namespaces" element={<NamespaceList />} />
               <Route path="/namespaces/:namespace" element={<NamespaceDetail />} />
               <Route path="/workloads/:kind/:name" element={<WorkloadDetail />} />

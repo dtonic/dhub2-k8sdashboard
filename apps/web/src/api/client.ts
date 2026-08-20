@@ -25,6 +25,17 @@ export function setManagerTokenRefresher(fn?: () => Promise<boolean>) {
 	managerRefresh = fn;
 }
 
+export function getManagerToken() {
+	return managerToken;
+}
+
+// refreshAuth는 활성 인증 모드(manager Bearer 또는 세션 쿠키)에 맞는 갱신을 수행합니다.
+// SSE처럼 두 모드를 구분하고 싶지 않은 호출자용입니다.
+export async function refreshAuth(): Promise<RefreshResult> {
+	if (managerRefresh) return (await managerRefresh().catch(() => false)) ? "refreshed" : "expired";
+	return refreshSession();
+}
+
 export function setSessionCSRF(value: string) {
   csrfToken = value;
 }

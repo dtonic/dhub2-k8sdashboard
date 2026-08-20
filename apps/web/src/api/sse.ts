@@ -1,4 +1,4 @@
-import { refreshSession } from "./client";
+import { getManagerToken, refreshAuth } from "./client";
 
 export type SSEMessage = { id: string; event: string; data: string; retry?: number };
 const MAX_LINE = 8 * 1024, MAX_DATA = 64 * 1024, MAX_BUFFER = 128 * 1024;
@@ -64,8 +64,9 @@ export async function streamEvents(path: string, onMessage: (message: SSEMessage
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined; let messages = 0;
     try {
       const headers: Record<string, string> = { accept: "text/event-stream" }; if (lastEventID) headers["Last-Event-ID"] = lastEventID;
+		const bearer = getManagerToken(); if (bearer) headers.Authorization = `Bearer ${bearer}`;
 		const res = await fetch(new URL(path, window.location.origin), { credentials: "same-origin", headers, signal: attempt.signal }); window.clearTimeout(headerTimer); headerTimer = 0;
-	  if (res.status === 401) { await res.body?.cancel(); if (!authRefreshUsed) { const refreshed=await refreshSession(); if (refreshed==="refreshed") { authRefreshUsed=true; continue; } if (refreshed==="unavailable") throw new Error("SSE authentication unavailable"); } throw new Error("SSE authentication expired"); }
+	  if (res.status === 401) { await res.body?.cancel(); if (!authRefreshUsed) { const refreshed=await refreshAuth(); if (refreshed==="refreshed") { authRefreshUsed=true; continue; } if (refreshed==="unavailable") throw new Error("SSE authentication unavailable"); } throw new Error("SSE authentication expired"); }
       if (res.status === 403) { await res.body?.cancel(); throw new Error("SSE authorization failed"); }
       if (res.status === 429) { const retry = retryAfter(res); await res.body?.cancel(); await delay(retry, signal); continue; }
       if (res.status >= 400 && res.status < 500) { await res.body?.cancel(); throw new Error(`SSE terminal response (${res.status})`); }

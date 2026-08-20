@@ -390,6 +390,34 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/clusters/{clusterId}/nodes:
+    get:
+      operationId: listNodes
+      summary: Nodes 화면 집계 — 노드 목록·용량 대비 요청량·노드별 Pod
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+      responses:
+        "200":
+          description: "NodeListResponse — 원본: packages/contracts/src/index.ts. 노드는 클러스터 스코프이므로 namespace 제한 사용자는 forbidden 섹션을 받습니다."
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/clusters/{clusterId}/namespaces:
     get:
       operationId: listNamespaces
@@ -1333,6 +1361,9 @@ components:
     ClusterOverviewResponse:
       type: object
       description: "원본: src/index.ts의 ClusterOverviewResponse"
+    NodeListResponse:
+      type: object
+      description: "원본: src/index.ts의 NodeListResponse"
     NamespaceListResponse:
       type: object
       description: "원본: src/index.ts의 NamespaceListResponse"

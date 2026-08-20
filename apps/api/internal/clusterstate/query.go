@@ -90,6 +90,133 @@ func (s *Store) NodeHealth() (contract.NodeHealth, error) {
 	return h, nil
 }
 
+// NodeSummaries는 Nodes 화면용 노드 목록입니다. 노드는 클러스터 스코프이므로
+// 핸들러가 클러스터 전체 권한을 요구합니다(Overview의 NodeHealth와 같은 규칙).
+// requested/limits와 pods 목록은 스케줄러 관점(종료되지 않은 Pod 전체)입니다.
+func (s *Store) NodeSummaries() ([]contract.NodeSummary, error) {
+	nodes, err := s.nodes.List(labelsEverything)
+	if err != nil {
+		return nil, err
+	}
+	pods, err := s.listPods("")
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+
+	byNode := map[string][]*corev1.Pod{}
+	for _, p := range pods {
+		if p.Spec.NodeName == "" || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		byNode[p.Spec.NodeName] = append(byNode[p.Spec.NodeName], p)
+	}
+
+	out := make([]contract.NodeSummary, 0, len(nodes))
+	for _, n := range nodes {
+		ready, pressure, unschedulable := NormalizeNode(n)
+		sum := contract.NodeSummary{
+			Name:           n.Name,
+			Roles:          nodeRoles(n),
+			Ready:          ready,
+			Unschedulable:  unschedulable,
+			Pressure:       pressure,
+			Severity:       nodeSeverity(ready, pressure, unschedulable),
+			KubeletVersion: n.Status.NodeInfo.KubeletVersion,
+			OSImage:        n.Status.NodeInfo.OSImage,
+			InternalIP:     nodeInternalIP(n),
+			AgeSeconds:     int(now.Sub(n.CreationTimestamp.Time).Seconds()),
+			Capacity:       nodeCapacity(n.Status.Capacity),
+			Allocatable:    nodeCapacity(n.Status.Allocatable),
+			Pods:           []contract.NodePodSummary{},
+		}
+		for _, p := range byNode[n.Name] {
+			u := PodRequests(p)
+			sum.Requested.CPUMilli += u.CPURequestMilli
+			sum.Requested.MemoryMib += u.MemoryRequestMib
+			// 노드 합계는 kubectl describe node처럼 컨테이너별로 존재하는 limit만 더합니다.
+			for _, c := range p.Spec.Containers {
+				sum.Limits.CPUMilli += int(c.Resources.Limits.Cpu().MilliValue())
+				sum.Limits.MemoryMib += int(c.Resources.Limits.Memory().Value() / (1 << 20))
+			}
+			st := NormalizePod(p, now)
+			sum.Pods = append(sum.Pods, contract.NodePodSummary{
+				UID:              string(p.UID),
+				Name:             p.Name,
+				Namespace:        p.Namespace,
+				Phase:            string(p.Status.Phase),
+				Severity:         st.Severity,
+				Restarts:         st.Restarts,
+				CPURequestMilli:  u.CPURequestMilli,
+				MemoryRequestMib: u.MemoryRequestMib,
+			})
+		}
+		sum.PodsTotal = len(sum.Pods)
+		sort.Slice(sum.Pods, func(a, b int) bool {
+			ra, rb := severityRank(sum.Pods[a].Severity), severityRank(sum.Pods[b].Severity)
+			if ra != rb {
+				return ra > rb
+			}
+			if sum.Pods[a].Namespace != sum.Pods[b].Namespace {
+				return sum.Pods[a].Namespace < sum.Pods[b].Namespace
+			}
+			return sum.Pods[a].Name < sum.Pods[b].Name
+		})
+		out = append(out, sum)
+	}
+	sort.Slice(out, func(a, b int) bool {
+		ra, rb := severityRank(out[a].Severity), severityRank(out[b].Severity)
+		if ra != rb {
+			return ra > rb
+		}
+		return out[a].Name < out[b].Name
+	})
+	return out, nil
+}
+
+// nodeSeverity는 노드 상태를 화면 심각도로 접습니다. NotReady가 최우선입니다.
+func nodeSeverity(ready, pressure, unschedulable bool) contract.Severity {
+	switch {
+	case !ready:
+		return contract.SeverityCritical
+	case pressure:
+		return contract.SeverityDegraded
+	case unschedulable:
+		return contract.SeverityWarning
+	default:
+		return contract.SeverityHealthy
+	}
+}
+
+// nodeRoles는 node-role.kubernetes.io/<role> 라벨에서 역할 이름을 뽑습니다.
+func nodeRoles(n *corev1.Node) []string {
+	out := []string{}
+	for k := range n.Labels {
+		if role, ok := strings.CutPrefix(k, "node-role.kubernetes.io/"); ok && role != "" {
+			out = append(out, role)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func nodeInternalIP(n *corev1.Node) string {
+	for _, a := range n.Status.Addresses {
+		if a.Type == corev1.NodeInternalIP {
+			return a.Address
+		}
+	}
+	return ""
+}
+
+func nodeCapacity(rl corev1.ResourceList) contract.NodeCapacity {
+	return contract.NodeCapacity{
+		CPUMilli:  int(rl.Cpu().MilliValue()),
+		MemoryMib: int(rl.Memory().Value() / (1 << 20)),
+		Pods:      int(rl.Pods().Value()),
+	}
+}
+
 // PodHealth는 Pod 상태 집계입니다.
 func (s *Store) PodHealth(f NamespaceFilter) (contract.PodHealth, error) {
 	pods, err := s.scopedPods(f)
@@ -393,6 +520,10 @@ func (s *Store) NamespaceSummaries(f NamespaceFilter) ([]contract.NamespaceSumma
 	out := make([]contract.NamespaceSummary, 0, len(byNS))
 	for _, v := range byNS {
 		v.Usage.Normalize()
+		if v.Issues == nil {
+			// 계약은 배열입니다 — nil이 JSON null로 나가면 UI의 필터/렌더가 깨집니다.
+			v.Issues = []contract.IssueReason{}
+		}
 		sortIssues(v.Issues)
 		out = append(out, *v)
 	}

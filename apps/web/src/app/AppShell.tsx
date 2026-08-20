@@ -9,6 +9,7 @@ import { usingMockApi } from "@/lib/env";
 
 const NAV = [
   { to: "/", label: "Cluster Overview", end: true },
+  { to: "/nodes", label: "Nodes" },
   { to: "/namespaces", label: "Namespaces" },
   { to: "/topology", label: "Pod Topology" },
   { to: "/logs", label: "Logs Explorer" },

@@ -385,6 +385,59 @@ export type IssueReason =
   | "OOMKilled"
   | "ProbeFailed";
 
+/** Nodes 화면의 노드별 Pod 행. 신원은 UID입니다. */
+export interface NodePodSummary {
+  uid: string;
+  name: string;
+  namespace: string;
+  phase: string;
+  severity: Severity;
+  restarts: number;
+  cpuRequestMilli: number;
+  memoryRequestMib: number;
+}
+
+export interface NodeCapacity {
+  cpuMilli: number;
+  memoryMib: number;
+  pods: number;
+}
+
+export interface NodeRequested {
+  cpuMilli: number;
+  memoryMib: number;
+}
+
+/**
+ * Nodes 화면의 노드 하나 요약. requested/limits와 pods 목록은 스케줄러 관점
+ * (종료되지 않은 Pod 전체)입니다. 실측 사용량은 메트릭 데이터소스 몫입니다.
+ */
+export interface NodeSummary {
+  name: string;
+  roles: string[];
+  ready: boolean;
+  unschedulable: boolean;
+  pressure: boolean;
+  severity: Severity;
+  kubeletVersion: string;
+  osImage: string;
+  internalIP: string;
+  ageSeconds: number;
+  capacity: NodeCapacity;
+  allocatable: NodeCapacity;
+  requested: NodeRequested;
+  limits: NodeRequested;
+  podsTotal: number;
+  pods: NodePodSummary[];
+}
+
+/** Nodes 화면 응답. 화면 하나 = 요청 하나. (ADR 0002) */
+export interface NodeListResponse {
+  clusterId: string;
+  generatedAt: string;
+  nodes: Section<NodeSummary[]>;
+}
+
 export interface NamespaceSummary {
   name: string;
   severity: Severity;

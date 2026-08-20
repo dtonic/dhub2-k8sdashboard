@@ -195,6 +195,7 @@ Deployment → Pod 조회가 전체 순회 대신 인덱스 두 번으로 끝납
 ```text
 GET /api/v1/scope
 GET /api/v1/clusters/{clusterId}/overview
+GET /api/v1/clusters/{clusterId}/nodes                (클러스터 범위 권한 필요 · Nodes 화면)
 GET /api/v1/clusters/{clusterId}/namespaces
 GET /api/v1/clusters/{clusterId}/namespaces/{namespace}
 GET /api/v1/clusters/{clusterId}/workloads/{kind}/{name}?ns=

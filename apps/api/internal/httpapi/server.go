@@ -28,10 +28,10 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
-	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
-	"k8s.io/client-go/kubernetes"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Deps는 서버가 쓰는 바깥 세계 전부입니다. 테스트에서는 전부 대체할 수 있습니다.
@@ -170,6 +170,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/dashboard-drafts/{id}/clone", s.handleDashboardClone)
 	m.HandleFunc("GET /api/v1/dashboard-drafts/{id}/export", s.handleDashboardExport)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/overview", s.withProvider("overview", s.handleOverview))
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/nodes", s.withProvider("nodes", s.handleNodes))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces", s.withProvider("namespace-list", s.handleNamespaceList))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/namespaces/{namespace}", s.withProvider("namespace", s.handleNamespaceDetail))
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/workloads/{kind}/{name}", s.withProvider("workload", s.handleWorkloadDetail))

@@ -15,6 +15,7 @@ import type {
   LogSearchResponse,
   NamespaceDetailResponse,
   NamespaceListResponse,
+  NodeListResponse,
   PodDetailResponse,
   RangeKey,
   Section,
@@ -27,6 +28,7 @@ import type {
 } from "@k8s-dashboard/contracts";
 import { buildOverview, EVENTS, NOW_MS, rangeWindow, SCOPE, type Scenario } from "./data";
 import { afterCursor, encodeCursor, logCorpus } from "./logs";
+import { nodeSummaries } from "./nodes";
 import { edgeSeries, topologyGraph, topologyUnhealthy } from "./topology";
 import { alertList, GROUPING_RULE } from "./alerts";
 import {
@@ -108,6 +110,40 @@ export const handlers = [
     await delay(slow ? 1_500 : 220);
     const body = buildOverview(rangeOf(request), scenarioOf(request));
     return HttpResponse.json({ ...body, clusterId: auth.cluster.id, clusterName: auth.cluster.name });
+  }),
+
+  /* ── Nodes (노드 목록·용량 대비 요청량·노드별 Pod) ────────────────────── */
+  http.get("/api/v1/clusters/:clusterId/nodes", async ({ request, params }) => {
+    const clusterId = String(params.clusterId);
+    const auth = authorize(clusterId);
+    if (!auth.ok) {
+      await delay(60);
+      return denied(auth.message);
+    }
+    await delay(160);
+    const scenario = scenarioOf(request);
+    /* 노드는 클러스터 스코프 리소스입니다 — namespace 제한 Scope는 서버처럼
+       빈 목록이 아니라 "권한 없음" 섹션을 받습니다. */
+    const clusterWide = auth.cluster.namespaces === "all";
+    const body: NodeListResponse = {
+      clusterId,
+      generatedAt: new Date(NOW_MS).toISOString(),
+      nodes:
+        !clusterWide || scenario === "forbidden"
+          ? { status: "forbidden", reason: "노드 목록은 클러스터 범위 권한이 필요합니다." }
+          : scenario === "empty"
+            ? empty()
+            : scenario === "degraded"
+              ? {
+                  status: "degraded",
+                  source: "kubernetes",
+                  reason: "Informer 재동기화 중 · 목록이 최신이 아닐 수 있습니다",
+                  observedAt: new Date(NOW_MS - 5 * 60 * 1000).toISOString(),
+                  data: nodeSummaries(auth.allowed),
+                }
+              : ok(nodeSummaries(auth.allowed)),
+    };
+    return HttpResponse.json(body);
   }),
 
   /* ── Namespace 목록 (이슈 #15) ────────────────────────────────────────── */

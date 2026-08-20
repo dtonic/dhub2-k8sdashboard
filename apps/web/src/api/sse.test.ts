@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({ refreshSession: vi.fn() }));
-import { refreshSession } from "./client";
+vi.mock("./client", () => ({ refreshAuth: vi.fn(), getManagerToken: () => "" }));
+import { refreshAuth } from "./client";
 import { delay, SSEParser, streamEvents, type SSEMessage } from "./sse";
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -48,7 +48,7 @@ describe("SSE transport lifecycle", () => {
 	});
 
 	it.each([401,403,418])("cancels terminal %s response bodies", async (status) => {
-		vi.mocked(refreshSession).mockResolvedValue("expired"); let canceled=false;
+		vi.mocked(refreshAuth).mockResolvedValue("expired"); let canceled=false;
 		const body=new ReadableStream<Uint8Array>({cancel(){canceled=true;}}); vi.spyOn(globalThis,"fetch").mockResolvedValue(new Response(body,{status}));
 		await expect(streamEvents("/events/stream",()=>undefined,new AbortController().signal)).rejects.toThrow(); expect(canceled).toBe(true); expect(body.locked).toBe(false);
 	});

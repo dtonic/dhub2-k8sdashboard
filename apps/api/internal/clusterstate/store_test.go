@@ -179,6 +179,73 @@ func TestNamespaceFilterKeepsOtherNamespacesOut(t *testing.T) {
 	}
 }
 
+// TestNodeSummariesGroupPodsByNode — Nodes 화면 집계: 노드가 심각도순으로 정렬되고,
+// Pod가 스케줄된 노드로 묶이며(신원은 UID), Pod 없는 노드도 pods가 null이 아닌
+// 빈 배열이어야 합니다(계약은 배열 — null이면 UI가 깨집니다).
+func TestNodeSummariesGroupPodsByNode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store, _ := testcluster.NewStore(t, ctx)
+
+	nodes, err := store.NodeSummaries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("fixture 노드는 2개여야 합니다: %d", len(nodes))
+	}
+	if nodes[0].Name != "node-2" || !nodes[0].Ready == false {
+		// node-2는 NotReady(critical)라 심각도 정렬에서 먼저 와야 합니다.
+		if nodes[0].Name != "node-2" {
+			t.Fatalf("심각도 정렬이 틀렸습니다: 첫 노드 %q", nodes[0].Name)
+		}
+	}
+	byName := map[string]int{}
+	for i, n := range nodes {
+		byName[n.Name] = i
+		if n.Pods == nil {
+			t.Errorf("노드 %q의 pods가 nil입니다 — JSON null로 마샬됩니다", n.Name)
+		}
+		if n.PodsTotal != len(n.Pods) {
+			t.Errorf("노드 %q podsTotal(%d) != len(pods)(%d)", n.Name, n.PodsTotal, len(n.Pods))
+		}
+	}
+	n1 := nodes[byName["node-1"]]
+	if len(n1.Pods) == 0 {
+		t.Fatal("node-1에 스케줄된 fixture Pod가 보여야 합니다")
+	}
+	for _, p := range n1.Pods {
+		if p.UID == "" {
+			t.Errorf("pod %s/%s의 UID가 비었습니다 — 신원은 UID여야 합니다", p.Namespace, p.Name)
+		}
+	}
+	n2 := nodes[byName["node-2"]]
+	if n2.Severity != contract.SeverityCritical || n2.Ready {
+		t.Fatalf("NotReady 노드는 critical이어야 합니다: %+v", n2.Severity)
+	}
+}
+
+// TestNamespaceIssuesAreNeverNil — 문제 없는 namespace의 issues가 nil로 남으면
+// JSON null이 되어(계약은 배열) UI의 필터·렌더가 깨집니다. 항상 배열이어야 합니다.
+func TestNamespaceIssuesAreNeverNil(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store, _ := testcluster.NewStore(t, ctx)
+
+	summaries, err := store.NamespaceSummaries(clusterstate.NamespaceFilter{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) == 0 {
+		t.Fatal("fixture namespace가 없습니다")
+	}
+	for _, s := range summaries {
+		if s.Issues == nil {
+			t.Errorf("namespace %q의 issues가 nil입니다 — JSON null로 마샬됩니다", s.Name)
+		}
+	}
+}
+
 func TestUnhealthyIsSortedBySeverityThenDuration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

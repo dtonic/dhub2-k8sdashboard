@@ -1,13 +1,19 @@
 # apps/web
 
-브라우저 세션 UI는 같은 immutable image를 사용합니다. Helm `authSession.enabled`일 때만 nginx가 최초 HTML에 비밀이 아닌 `k8s-auth-session` meta를 삽입합니다. 기본/direct 렌더에는 meta와 session bootstrap 요청이 없고 rollback 시 nginx 설정과 함께 즉시 제거됩니다.
+인증 UI는 같은 immutable image를 사용하며, 활성 모드는 nginx가 최초 HTML에 삽입하는
+비밀이 아닌 meta로 결정됩니다. Helm `authSession.enabled`이면 `k8s-auth-session` meta
+(BFF 세션 로그인, ADR 0011), `managerAuth.enabled`이면 `k8s-auth-manager-origin`/`-login`
+meta(Dhub2.0 인증 위임 — UI가 dhub2-manager 로그인 세션에서 access token을 조용히 받아
+Bearer로 사용, 자체 로그인 화면 없음)가 삽입됩니다. 기본/direct 렌더에는 meta와 인증
+bootstrap 요청이 없고 rollback 시 nginx 설정과 함께 즉시 제거됩니다. 두 모드는 상호
+배타이며 SSE(`sse.ts`)도 같은 토큰/세션 갱신 경로(`refreshAuth`)를 공유합니다.
 
 ## Dashboard Builder (#24)
 
 `/dashboard-builder`는 embedded 표준 dashboard와 분리된 사용자 draft 목록입니다. 서버 capability가 enabled이고 `dashboard.editor`일 때만 자기 draft 편집·clone·submit controls를 노출하며 `platform.admin`은 제출본 approve controls만 봅니다. drag 중에는 네트워크를 호출하지 않고 pointer 종료 시 한 번 저장합니다. 키보드 이동/가로·세로 resize controls도 같은 deterministic 12x96 overlap 검사를 사용합니다. 409 충돌은 로컬 편집을 유지하고 최신본 reload 또는 로컬본 fork를 명시적으로 선택합니다. preview는 기존 aggregate `/overview` 한 건을 재사용합니다.
 
 React + TypeScript 기반 Custom Observability UI입니다.
-**MVP UI 화면이 모두 구현되어 있습니다** — Cluster Overview(#14),
+**MVP UI 화면이 모두 구현되어 있습니다** — Cluster Overview(#14), Nodes,
 Namespace / Workload / Pod Drill-down(#15), Logs Explorer와 상관분석(#16),
 Pod Topology, Alerts(#17).
 
@@ -72,6 +78,7 @@ src/
 | 경로 | 화면 | 이슈 |
 |---|---|---|
 | `/` | Cluster Overview | #14 |
+| `/nodes` | Nodes (노드 목록 · 용량 대비 요청량 · 노드별 Pod, 클러스터 범위 권한 필요) | — |
 | `/namespaces` | Namespace 목록 | #15 |
 | `/namespaces/:namespace` | Namespace 상세 (Workload 표 · 추세 · 이벤트) | #15 |
 | `/workloads/:kind/:name?ns=` | Workload 상세 (replica · rollout · OwnerReference · Pod) | #15 |

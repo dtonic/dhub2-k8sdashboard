@@ -179,6 +179,62 @@ type NodeHealth struct {
 	Unschedulable int `json:"unschedulable"`
 }
 
+/* ── Nodes 화면 ─────────────────────────────────────────────────────────── */
+
+// NodePodSummary는 Nodes 화면의 노드별 Pod 행입니다. 신원은 UID입니다.
+type NodePodSummary struct {
+	UID              string   `json:"uid"`
+	Name             string   `json:"name"`
+	Namespace        string   `json:"namespace"`
+	Phase            string   `json:"phase"`
+	Severity         Severity `json:"severity"`
+	Restarts         int      `json:"restarts"`
+	CPURequestMilli  int      `json:"cpuRequestMilli"`
+	MemoryRequestMib int      `json:"memoryRequestMib"`
+}
+
+// NodeCapacity는 노드의 용량 또는 할당 가능량입니다.
+type NodeCapacity struct {
+	CPUMilli  int `json:"cpuMilli"`
+	MemoryMib int `json:"memoryMib"`
+	Pods      int `json:"pods"`
+}
+
+// NodeRequested는 노드에 스케줄된(종료되지 않은) Pod들의 요청·상한 합계입니다.
+type NodeRequested struct {
+	CPUMilli  int `json:"cpuMilli"`
+	MemoryMib int `json:"memoryMib"`
+}
+
+// NodeSummary는 Nodes 화면의 노드 하나 요약입니다. requested/limits와 pods
+// 목록은 스케줄러와 같은 관점(종료되지 않은 Pod 전체)입니다. 실측 사용량은
+// 메트릭 데이터소스 몫이며 이 타입에 없습니다.
+type NodeSummary struct {
+	Name           string           `json:"name"`
+	Roles          []string         `json:"roles"`
+	Ready          bool             `json:"ready"`
+	Unschedulable  bool             `json:"unschedulable"`
+	Pressure       bool             `json:"pressure"`
+	Severity       Severity         `json:"severity"`
+	KubeletVersion string           `json:"kubeletVersion"`
+	OSImage        string           `json:"osImage"`
+	InternalIP     string           `json:"internalIP"`
+	AgeSeconds     int              `json:"ageSeconds"`
+	Capacity       NodeCapacity     `json:"capacity"`
+	Allocatable    NodeCapacity     `json:"allocatable"`
+	Requested      NodeRequested    `json:"requested"`
+	Limits         NodeRequested    `json:"limits"`
+	PodsTotal      int              `json:"podsTotal"`
+	Pods           []NodePodSummary `json:"pods"`
+}
+
+// NodeListResponse는 Nodes 화면 응답입니다. 화면 하나 = 요청 하나. (ADR 0002)
+type NodeListResponse struct {
+	ClusterID   string                 `json:"clusterId"`
+	GeneratedAt string                 `json:"generatedAt"`
+	Nodes       Section[[]NodeSummary] `json:"nodes"`
+}
+
 type PodHealth struct {
 	Total            int `json:"total"`
 	Running          int `json:"running"`
@@ -346,12 +402,12 @@ type ManagedPod struct {
 
 // ManagedDeploymentDetail은 Deployment 관리 상세입니다.
 type ManagedDeploymentDetail struct {
-	ClusterID   string       `json:"clusterId"`
-	Namespace   string       `json:"namespace"`
-	Name        string       `json:"name"`
-	GeneratedAt string       `json:"generatedAt"`
-	Ready       int32        `json:"ready"`
-	Desired     int32        `json:"desired"`
+	ClusterID   string `json:"clusterId"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	GeneratedAt string `json:"generatedAt"`
+	Ready       int32  `json:"ready"`
+	Desired     int32  `json:"desired"`
 	// Manifest는 관리자용 정제 매니페스트(JSON 문자열). managedFields·status는 제거됩니다.
 	Manifest string       `json:"manifest"`
 	Pods     []ManagedPod `json:"pods"`
@@ -359,11 +415,11 @@ type ManagedDeploymentDetail struct {
 
 // ManagedSecretDetail은 Secret 관리 상세입니다. 값은 평문(디코딩)으로 내려갑니다.
 type ManagedSecretDetail struct {
-	ClusterID   string            `json:"clusterId"`
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	GeneratedAt string            `json:"generatedAt"`
-	SecretType  string            `json:"secretType"`
+	ClusterID   string `json:"clusterId"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	GeneratedAt string `json:"generatedAt"`
+	SecretType  string `json:"secretType"`
 	// Data는 key → 평문 값입니다. base64는 서버에서 디코딩합니다. (ADR 0014)
 	Data map[string]string `json:"data"`
 	// Pods는 이 Secret을 참조(envFrom·volume·env)하는 pod입니다.

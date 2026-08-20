@@ -21,6 +21,7 @@ type Provider interface {
 	Unhealthy(NamespaceFilter, int) ([]contract.UnhealthyEntity, error)
 	Events(NamespaceFilter, time.Time, int) ([]contract.ClusterEvent, error)
 	EventsForUID(string, time.Time, int) ([]contract.ClusterEvent, error)
+	NodeSummaries() ([]contract.NodeSummary, error)
 	NamespaceSummaries(NamespaceFilter) ([]contract.NamespaceSummary, error)
 	NamespaceSummary(string) (contract.NamespaceSummary, bool, error)
 	Workloads(NamespaceFilter) ([]contract.WorkloadSummary, error)

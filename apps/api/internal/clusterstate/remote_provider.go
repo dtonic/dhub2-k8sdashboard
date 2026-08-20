@@ -291,6 +291,10 @@ func ProjectScreenContext(ctx context.Context, req ScreenRequest, resources map[
 	}
 	for _, n := range byNS {
 		n.Usage.Normalize()
+		if n.Issues == nil {
+			// 계약은 배열입니다 — direct 경로와 같은 보장(JSON null 금지)입니다.
+			n.Issues = []contract.IssueReason{}
+		}
 		sortIssues(n.Issues)
 		out.Namespaces = append(out.Namespaces, *n)
 	}
@@ -792,6 +796,10 @@ func (p *RemoteProvider) NodeHealth() (contract.NodeHealth, error) {
 		return contract.NodeHealth{}, fmt.Errorf("screen field unavailable")
 	}
 	return *p.Data.Nodes, nil
+}
+func (p *RemoteProvider) NodeSummaries() ([]contract.NodeSummary, error) {
+	// central 화면 projection에는 노드 상세가 실리지 않습니다 — 섹션 degraded로 알립니다.
+	return nil, fmt.Errorf("screen field unavailable")
 }
 func (p *RemoteProvider) PodHealth(f NamespaceFilter) (contract.PodHealth, error) {
 	if !sameFilter(f, p.Data.Request.Namespaces) {
