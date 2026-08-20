@@ -80,6 +80,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- /* CA 번들은 마운트만으로는 효력이 없습니다 — Go가 읽도록 SSL_CERT_FILE 경로와 짝이 맞아야 합니다. */}}
 {{- if ne (printf "/etc/dashboard-ca/%s" .Values.api.caBundle.key) (toString (get .Values.api.config "SSL_CERT_FILE")) }}{{ fail "api.caBundle requires api.config.SSL_CERT_FILE=/etc/dashboard-ca/<key>" }}{{ end -}}
 {{- end -}}
+{{- if .Values.managerAuth.enabled -}}
+{{- /* Dhub2.0 인증 위임(managerAuth): Bearer 검증은 AUTH_MODE=oidc가, 역할 보충은 OIDC_USERINFO_ROLES가 맡습니다. 자체 로그인(authSession)과는 상호 배타입니다. */}}
+{{- if .Values.authSession.enabled }}{{ fail "managerAuth and authSession are mutually exclusive" }}{{ end -}}
+{{- if or (ne .Values.api.config.AUTH_MODE "oidc") (ne (toString (get .Values.api.config "OIDC_USERINFO_ROLES")) "true") (not (regexMatch "^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" .Values.managerAuth.origin)) (not (hasPrefix "https://" .Values.managerAuth.loginURL)) }}{{ fail "managerAuth requires AUTH_MODE=oidc, api.config.OIDC_USERINFO_ROLES=true, an https origin, and an https loginURL" }}{{ end -}}
+{{- end -}}
 {{- if .Values.authSession.enabled -}}
 {{- if .Values.authSession.externalIngress -}}
 {{- /* externalIngress: OpenShift Route 등 chart 밖 계층이 publicOrigin을 TLS로 게시함을 운영자가 선언합니다. HTTPS origin 형식과 정확한 callback은 여기서도 강제합니다. */}}

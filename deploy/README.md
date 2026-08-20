@@ -78,13 +78,16 @@ HTTPS여야 하고 `redirectURI`는 정확히 `<publicOrigin>/api/v1/auth/callba
   fail-closed 됩니다)
 
 deploy.sh의 issuer 자동 발견은 **dhub2-auth(DHubManager 내장 OIDC provider) Route를
-우선**하고, 없으면 keycloak Route로 fallback합니다. dhub2-auth를 쓰면 플랫폼 계정을
-그대로 사용하며, `type=admin` 사용자의 토큰 `groups` 클레임에 실리는 `dhub2-admin`이
-`OIDC_ROLE_MAP=dhub2-admin=platform.admin` 기본값으로 대시보드 전체 접근으로 해석됩니다.
+우선**하고, 없으면 keycloak Route로 fallback합니다. dhub2-auth 발견 시에는 자체
+로그인(authSession) 대신 **managerAuth 위임 모드**로 배포됩니다: UI가 manager 로그인
+세션(refresh_token 쿠키)에서 access token을 조용히 받아 Bearer로 쓰고, API는 그 토큰을
+검증한 뒤 역할 클레임이 비어 있으면 issuer `/userinfo`의 `groups`(dhub2의
+`type=admin` → `dhub2-admin`)를 `OIDC_ROLE_MAP`으로 해석합니다. IdP에 client 등록은
+필요 없고, **manager의 `CORS_ORIGINS`에 대시보드 origin 등록** 1건만 선행 조건입니다.
 
-lnode 시험 클러스터: dhub2-manager(`manager.apps.okd.dtonic.io`)에 public PKCE client
-`k8s-dashboard`가 2026-08-20에 등록되어 있습니다(Keycloak dhub2 realm의 동명 client는
-전환기 임시 구성으로, dhub2-auth 안정화 후 제거 대상입니다).
+lnode 시험 클러스터는 이 위임 모드로 배포되어 있습니다(issuer
+`https://manager.apps.okd.dtonic.io`, 미로그인 안내는 포털 `lnode.apps.okd.dtonic.io`).
+Keycloak dhub2 realm에 만들었던 전환기 임시 client는 2026-08-20 제거했습니다.
 
 ## Dashboard Builder PostgreSQL
 

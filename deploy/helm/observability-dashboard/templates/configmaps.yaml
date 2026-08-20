@@ -49,6 +49,15 @@ data:
       sub_filter '<meta name="k8s-auth-session" content="disabled" />' '<meta name="k8s-auth-session" content="enabled" />';
       sub_filter_once on;
       {{- end }}
+      {{- if .Values.managerAuth.enabled }}
+      {{- /* Dhub2.0 인증 위임: UI가 manager origin으로 XHR하므로 connect-src에 허용합니다. */}}
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' {{ .Values.managerAuth.origin }}; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Referrer-Policy "no-referrer" always;
+      sub_filter '<meta name="k8s-auth-manager-origin" content="" />' '<meta name="k8s-auth-manager-origin" content="{{ .Values.managerAuth.origin }}" />';
+      sub_filter '<meta name="k8s-auth-manager-login" content="" />' '<meta name="k8s-auth-manager-login" content="{{ .Values.managerAuth.loginURL }}" />';
+      sub_filter_once on;
+      {{- end }}
 
       location = /healthz {
         access_log off;

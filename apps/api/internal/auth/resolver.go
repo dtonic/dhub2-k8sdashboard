@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,10 @@ type Config struct {
 	RolesClaim string
 	// RoleMap은 IdP 역할 이름 → 내부 역할 이름 변환표입니다. 비우면 변환하지 않습니다.
 	RoleMap map[string]string
+	// UserinfoRoles가 켜지면 역할 클레임이 빈 Bearer 토큰에 한해 issuer의
+	// userinfo 엔드포인트에서 역할을 보충 조회합니다(access token에 identity
+	// claim을 싣지 않는 Dhub2.0 같은 provider용). 조회 실패는 fail-closed입니다.
+	UserinfoRoles bool
 	// Leeway는 시계 오차 허용입니다. 기본 60초입니다.
 	Leeway time.Duration
 	// JWKSMinRefresh는 모르는 kid로 인한 JWKS 재조회의 하한입니다. 기본 5분입니다.
@@ -51,6 +56,7 @@ type Config struct {
 type Resolver struct {
 	cfg       Config
 	keys      *keyStore
+	userinfo  *userinfoRoles
 	logger    *slog.Logger
 	flow      *sessionFlow
 	closeOnce sync.Once
@@ -130,7 +136,27 @@ func NewResolver(ctx context.Context, cfg Config, logger *slog.Logger) (*Resolve
 	if err := ks.refresh(ctx); err != nil {
 		return nil, fmt.Errorf("JWKS를 받아오지 못했습니다: %w", err)
 	}
-	r := &Resolver{cfg: cfg, keys: ks, logger: logger}
+	var userinfo *userinfoRoles
+	if cfg.UserinfoRoles {
+		if doc.UserinfoEndpoint == "" {
+			return nil, fmt.Errorf("OIDC_USERINFO_ROLES에는 issuer discovery의 userinfo_endpoint가 필요합니다")
+		}
+		endpointURL, err := url.Parse(doc.UserinfoEndpoint)
+		if err != nil {
+			return nil, fmt.Errorf("userinfo_endpoint가 유효한 URL이 아닙니다: %w", err)
+		}
+		if err := validateProviderURL(endpointURL, cfg.IssuerURL); err != nil {
+			return nil, fmt.Errorf("userinfo_endpoint 검증 실패: %w", err)
+		}
+		userinfo = &userinfoRoles{
+			client:   client,
+			endpoint: doc.UserinfoEndpoint,
+			claim:    cfg.RolesClaim,
+			now:      cfg.Now,
+			cache:    map[[32]byte]userinfoCached{},
+		}
+	}
+	r := &Resolver{cfg: cfg, keys: ks, userinfo: userinfo, logger: logger}
 	if cfg.Session.Enabled {
 		tokenClient := *client
 		tokenClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -181,6 +207,16 @@ func (r *Resolver) Resolve(req *http.Request) (scope.Scope, error) {
 		return scope.Scope{}, err
 	}
 	claims.Roles = MapRoles(claims.Roles, r.cfg.RoleMap)
+	if len(claims.Roles) == 0 && r.userinfo != nil {
+		fetched, err := r.userinfo.rolesFor(req.Context(), raw, claims.ExpiresAt)
+		if err != nil {
+			// 역할을 확인할 수 없으면 빈 Scope(403)가 아니라 인증 실패(401)로 접습니다 —
+			// upstream 장애와 권한 없음을 같은 화면으로 만들지 않기 위해서입니다.
+			r.logger.Warn("userinfo 역할 조회 실패", "reason", err.Error())
+			return scope.Scope{}, ErrInvalidToken
+		}
+		claims.Roles = MapRoles(fetched, r.cfg.RoleMap)
+	}
 	return r.scopeFor(claims), nil
 }
 

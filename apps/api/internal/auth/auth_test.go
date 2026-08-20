@@ -316,6 +316,58 @@ func TestRoleMapTranslatesProviderRoles(t *testing.T) {
 	}
 }
 
+// TestUserinfoRolesFallback — 역할 클레임이 빈 토큰은 OIDC_USERINFO_ROLES가 켜져
+// 있을 때 issuer userinfo에서 역할을 보충 조회합니다(Dhub2.0 access token 패턴).
+// 결과는 캐시되어 같은 토큰의 반복 요청이 upstream을 다시 두드리지 않고,
+// userinfo 장애는 빈 Scope(403)가 아니라 인증 실패(401)로 접힙니다.
+func TestUserinfoRolesFallback(t *testing.T) {
+	idp, err := StartMockIDP("", "k8s-dashboard", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idp.Close() })
+	r, err := NewResolver(context.Background(), Config{
+		IssuerURL:     idp.Issuer,
+		Audience:      "k8s-dashboard",
+		RolesClaim:    "groups",
+		RoleMap:       map[string]string{"dhub2-admin": RolePlatformAdmin},
+		UserinfoRoles: true,
+		ClusterID:     "seoul",
+		ClusterName:   "Seoul Production",
+		Now:           fixedNow,
+	}, slog.New(slog.NewTextHandler(new(strings.Builder), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp.SetUserinfoGroups("daesun", []string{"dhub2-admin"})
+	token, err := idp.Token("daesun", nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := r.Resolve(request(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := sc.Cluster("seoul"); !ok || !c.All {
+		t.Fatalf("userinfo groups가 platform.admin으로 해석되어야 합니다: %+v", sc)
+	}
+	if _, err := r.Resolve(request(token)); err != nil {
+		t.Fatal(err)
+	}
+	if calls := idp.UserinfoCalls(); calls != 1 {
+		t.Fatalf("두 번째 요청은 캐시를 써야 합니다: userinfo 호출 %d회", calls)
+	}
+	// 장애 시 fail-closed — 캐시에 없는 새 토큰이어야 upstream을 다시 봅니다.
+	idp.FailUserinfo(true)
+	fresh, err := idp.Token("someone-else", nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve(request(fresh)); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("userinfo 장애는 ErrInvalidToken이어야 합니다: %v", err)
+	}
+}
+
 // TestNoRolesMeansEmptyButAuthenticatedScope — 역할이 없으면 빈 Scope로
 // **성공**합니다. 401(인증 실패)이 아니라 403(권한 없음)으로 가는 길입니다.
 func TestNoRolesMeansEmptyButAuthenticatedScope(t *testing.T) {

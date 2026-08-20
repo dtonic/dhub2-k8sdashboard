@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,12 @@ type MockIDP struct {
 	audience string
 	server   *http.Server
 	now      func() time.Time
+
+	// userinfo는 access token에 역할을 싣지 않는 provider(Dhub2.0 등)를 흉내냅니다.
+	mu             sync.Mutex
+	userinfoGroups map[string][]string
+	userinfoFail   bool
+	userinfoCalls  int
 }
 
 // StartMockIDP는 addr(비우면 127.0.0.1의 임의 포트)에 mock IdP를 띄웁니다.
@@ -77,6 +84,7 @@ func StartMockIDP(addr, audience string, now func() time.Time) (*MockIDP, error)
 	mux.HandleFunc("GET /.well-known/openid-configuration", m.handleDiscovery)
 	mux.HandleFunc("GET /jwks", m.handleJWKS)
 	mux.HandleFunc("POST /token", m.handleToken)
+	mux.HandleFunc("GET /userinfo", m.handleUserinfo)
 	m.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go m.server.Serve(ln) //nolint:errcheck // Close 시 ErrServerClosed
 
@@ -113,7 +121,68 @@ func (m *MockIDP) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 		"jwks_uri":               m.Issuer + "/jwks",
 		"authorization_endpoint": m.Issuer + "/authorize",
 		"token_endpoint":         m.Issuer + "/token",
+		"userinfo_endpoint":      m.Issuer + "/userinfo",
 	})
+}
+
+// SetUserinfoGroups는 subject의 userinfo groups 응답을 설정합니다.
+func (m *MockIDP) SetUserinfoGroups(sub string, groups []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userinfoGroups == nil {
+		m.userinfoGroups = map[string][]string{}
+	}
+	m.userinfoGroups[sub] = groups
+}
+
+// FailUserinfo는 userinfo 엔드포인트를 강제로 500으로 만듭니다(장애 시험용).
+func (m *MockIDP) FailUserinfo(fail bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.userinfoFail = fail
+}
+
+// UserinfoCalls는 userinfo 호출 횟수입니다(캐시 검증용).
+func (m *MockIDP) UserinfoCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.userinfoCalls
+}
+
+// handleUserinfo는 Bearer 토큰의 sub에 설정된 groups를 돌려줍니다. mock이므로
+// 서명은 다시 검증하지 않고 payload의 sub만 읽습니다.
+func (m *MockIDP) handleUserinfo(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	m.userinfoCalls++
+	fail := m.userinfoFail
+	m.mu.Unlock()
+	if fail {
+		http.Error(w, "forced failure", http.StatusInternalServerError)
+		return
+	}
+	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	parts := strings.Split(raw, ".")
+	if !ok || len(parts) != 3 {
+		http.Error(w, "missing bearer", http.StatusUnauthorized)
+		return
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		http.Error(w, "bad token", http.StatusUnauthorized)
+		return
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if json.Unmarshal(payload, &claims) != nil || claims.Sub == "" {
+		http.Error(w, "bad token", http.StatusUnauthorized)
+		return
+	}
+	m.mu.Lock()
+	groups := m.userinfoGroups[claims.Sub]
+	m.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"sub": claims.Sub, "groups": groups}) //nolint:errcheck
 }
 
 func (m *MockIDP) handleJWKS(w http.ResponseWriter, _ *http.Request) {

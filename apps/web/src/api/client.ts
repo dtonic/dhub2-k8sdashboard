@@ -12,6 +12,19 @@ let csrfToken = "";
 export type RefreshResult = "refreshed" | "expired" | "unavailable";
 let refreshInFlight: Promise<RefreshResult> | undefined;
 
+// manager 모드(Dhub2.0 인증 위임): AuthGate가 Dhub2.0 세션에서 받아온 access token을
+// Bearer로 붙입니다. 갱신 함수도 AuthGate가 등록합니다 — 이 모듈은 보관·부착만 합니다.
+let managerToken = "";
+let managerRefresh: (() => Promise<boolean>) | undefined;
+
+export function setManagerToken(value: string) {
+	managerToken = value;
+}
+
+export function setManagerTokenRefresher(fn?: () => Promise<boolean>) {
+	managerRefresh = fn;
+}
+
 export function setSessionCSRF(value: string) {
   csrfToken = value;
 }
@@ -72,8 +85,17 @@ async function request(path: string, init: RequestInit, retry = true): Promise<R
   headers.set("accept", headers.get("accept") ?? "application/json");
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
   if (isUnsafe(method) && csrfToken) headers.set("X-CSRF-Token", csrfToken);
+  if (managerToken) headers.set("Authorization", `Bearer ${managerToken}`);
   const res = await fetch(new URL(path, window.location.origin), { ...init, headers, credentials: "same-origin" });
 	if (res.status === 401 && retry && !path.startsWith("/api/v1/auth/")) {
+		if (managerRefresh) {
+			const ok = await managerRefresh().catch(() => false);
+			if (ok) {
+				if (init.signal?.aborted) throw init.signal.reason;
+				return request(path, init, false);
+			}
+			return res;
+		}
 		const refresh = await refreshSession();
 		if (refresh === "refreshed") {
 			if (init.signal?.aborted) throw init.signal.reason;

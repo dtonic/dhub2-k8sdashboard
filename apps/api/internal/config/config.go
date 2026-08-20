@@ -119,7 +119,10 @@ type AuthConfig struct {
 	RolesClaim string
 	// RoleMap은 IdP 역할 이름 → 내부 역할 이름 변환표입니다.
 	// 예: dhub2-auth의 "dhub2-admin" 그룹을 platform.admin으로 인정합니다.
-	RoleMap        map[string]string
+	RoleMap map[string]string
+	// UserinfoRoles는 access token에 역할 클레임이 없는 provider(Dhub2.0 등)를 위해
+	// issuer userinfo에서 역할을 보충 조회하는 opt-in입니다.
+	UserinfoRoles  bool
 	Leeway         time.Duration
 	JWKSMinRefresh time.Duration
 	// MockAddr은 mock IdP의 바인드 주소입니다. loopback을 벗어나지 마세요.
@@ -245,6 +248,7 @@ func Load() Config {
 			Audience:              env("OIDC_AUDIENCE", ""),
 			RolesClaim:            env("OIDC_ROLES_CLAIM", "roles"),
 			RoleMap:               envPairs("OIDC_ROLE_MAP"),
+			UserinfoRoles:         envBool("OIDC_USERINFO_ROLES", false),
 			Leeway:                envDuration("OIDC_LEEWAY", time.Minute),
 			JWKSMinRefresh:        envDuration("OIDC_JWKS_MIN_REFRESH", 5*time.Minute),
 			MockAddr:              env("AUTH_MOCK_ADDR", "127.0.0.1:8091"),

@@ -47,6 +47,7 @@ type discoveryDoc struct {
 	JWKSURI               string `json:"jwks_uri"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
+	UserinfoEndpoint      string `json:"userinfo_endpoint"`
 }
 
 // discover는 issuer의 /.well-known/openid-configuration에서 jwks_uri를 찾습니다.

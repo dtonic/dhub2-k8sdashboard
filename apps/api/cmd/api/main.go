@@ -348,6 +348,7 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 			Audience:       cfg.Auth.Audience,
 			RolesClaim:     cfg.Auth.RolesClaim,
 			RoleMap:        cfg.Auth.RoleMap,
+			UserinfoRoles:  cfg.Auth.UserinfoRoles,
 			Leeway:         cfg.Auth.Leeway,
 			JWKSMinRefresh: cfg.Auth.JWKSMinRefresh,
 			ClusterID:      cfg.ClusterID,

@@ -50,6 +50,15 @@ api:
   # Go는 이 번들을 기본 신뢰 디렉터리(/etc/ssl/certs)에 더해 추가로 읽습니다.
   caBundle: {configMapName: "", key: ca.crt}
 
+# managerAuth: Dhub2.0(dhub2-manager) 인증 위임 모드. UI가 manager 로그인 세션에서
+# access token을 받아(Bearer) 쓰고, API가 그 토큰을 검증합니다. api.config에
+# AUTH_MODE=oidc(issuer=manager)와 OIDC_USERINFO_ROLES=true가 함께 필요하며,
+# authSession과 동시에 켤 수 없습니다. loginURL은 미로그인 시 안내할 포털 주소입니다.
+managerAuth:
+  enabled: false
+  origin: ""
+  loginURL: ""
+
 authSession:
   enabled: false
   publicOrigin: ""

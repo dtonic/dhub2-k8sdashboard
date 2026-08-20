@@ -43,11 +43,18 @@
 #   OIDC_ROLES_CLAIM   역할 클레임 이름 (기본: 서버 기본값 roles, manager 발견 시 groups)
 #   OIDC_ROLE_MAP      IdP 역할 → 내부 역할 변환표 ("a=b,c=d")
 #   OIDC_CLIENT_SECRET confidential client일 때만 지정. Secret으로만 주입됩니다.
+#   AUTH_LOGIN_URL     미로그인 사용자에게 안내할 로그인(포털) URL. Dhub2.0 위임
+#                      모드에서는 클러스터의 *portal* Route를 자동 발견합니다.
 #
-#   IdP 사전 조건(한 번만): 해당 realm에 OIDC_CLIENT_ID public client가 있어야 하고
-#   (redirect URI = https://<ROUTE_HOST>/api/v1/auth/callback, PKCE S256),
-#   flat "roles" claim 매퍼(ID/access token)와 client role(platform.admin 등)이
-#   로그인할 계정에 부여되어 있어야 합니다. 자세한 명세는 deploy/README.md 참고.
+#   Dhub2.0 위임 모드(manager Route 자동 발견 시): IdP 사전 조건이 없습니다 —
+#   client 등록·역할 매퍼 없이 manager 세션의 Bearer 토큰을 검증하고 역할은
+#   userinfo의 groups(dhub2 admin → platform.admin)로 해석합니다. 단, manager의
+#   CORS_ORIGINS에 대시보드 origin(https://<ROUTE_HOST>)이 등록되어 있어야 합니다.
+#
+#   keycloak fallback(브라우저 세션) 사전 조건: 해당 realm에 OIDC_CLIENT_ID
+#   public client(redirect URI = https://<ROUTE_HOST>/api/v1/auth/callback,
+#   PKCE S256)와 flat "roles" claim 매퍼, 계정별 role 부여가 필요합니다.
+#   자세한 명세는 deploy/README.md 참고.
 #
 # 동작 개요:
 #   chart의 NetworkPolicy는 항상 켜져 있습니다(schema 강제). 이 스크립트는
@@ -79,9 +86,12 @@ ROUTE_HOST="${ROUTE_HOST:-}"
 AUTH_MODE="${AUTH_MODE:-oidc}"
 OIDC_REALM="${OIDC_REALM:-dhub2}"
 OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-k8s-dashboard}"
-OIDC_AUDIENCE="${OIDC_AUDIENCE:-$OIDC_CLIENT_ID}"
+OIDC_AUDIENCE_RAW="${OIDC_AUDIENCE:-}"
+OIDC_AUDIENCE="${OIDC_AUDIENCE_RAW:-$OIDC_CLIENT_ID}"
 OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-}"
 OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-}"
+AUTH_LOGIN_URL="${AUTH_LOGIN_URL:-}"
+OIDC_MANAGER_MODE=0
 case "$AUTH_MODE" in
   oidc|none) ;;
   *) die "AUTH_MODE는 oidc 또는 none이어야 합니다: $AUTH_MODE" ;;
@@ -141,14 +151,22 @@ if [ "$AUTH_MODE" = "oidc" ]; then
   if [ -z "$OIDC_ISSUER_VAL" ]; then
     # ① dhub2-auth(DHubManager 내장 OIDC provider) 우선 — 플랫폼 계정·admin 판정을
     #    그대로 씁니다. type=admin 사용자는 토큰의 groups 클레임에 dhub2-admin이 실립니다.
-    MGR_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /manager/ {print $3; exit}')"
+    MGR_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'h=="" && tolower($2) ~ /manager/ {h=$3} END {print h}')"
     if [ -n "$MGR_HOST" ] && curl -skf --max-time 8 "https://$MGR_HOST/.well-known/openid-configuration" >/dev/null 2>&1; then
       OIDC_ISSUER_VAL="https://$MGR_HOST"
+      OIDC_MANAGER_MODE=1
+      # Dhub2.0 위임 모드: 자체 로그인 없이 manager 세션의 Bearer 토큰을 검증합니다.
+      # 내부 토큰의 공통 audience와 userinfo 역할 보충, dhub2 admin 매핑이 기본입니다.
+      OIDC_AUDIENCE="${OIDC_AUDIENCE_RAW:-dhub2-manager}"
       OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-groups}"
       OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-dhub2-admin=platform.admin}"
+      if [ -z "$AUTH_LOGIN_URL" ]; then
+        PORTAL_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'h=="" && tolower($2) ~ /portal/ {h=$3} END {print h}')"
+        AUTH_LOGIN_URL="https://${PORTAL_HOST:-$MGR_HOST}"
+      fi
     else
       # ② keycloak fallback
-      KC_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /keycloak/ {print $3; exit}')"
+      KC_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'h=="" && tolower($2) ~ /keycloak/ {h=$3} END {print h}')"
       [ -n "$KC_HOST" ] || die "dhub2-manager/keycloak Route를 찾지 못했습니다. OIDC_ISSUER를 직접 지정하거나 AUTH_MODE=none으로 끄세요."
       OIDC_ISSUER_VAL="https://$KC_HOST/realms/$OIDC_REALM"
     fi
@@ -280,7 +298,8 @@ fi
 
 # 브라우저 세션 키(ADR 0011) — 32-byte base64url(무패딩). 없을 때만 만들어
 # 재배포에도 기존 세션을 유지합니다. 키를 교체하면 전체 세션이 로그아웃됩니다.
-if [ "$AUTH_MODE" = "oidc" ]; then
+# Dhub2.0 위임 모드(managerAuth)는 자체 세션이 없으므로 키가 필요 없습니다.
+if [ "$AUTH_MODE" = "oidc" ] && [ "$OIDC_MANAGER_MODE" != "1" ]; then
   if [ -z "$(KC -n "$RELEASE_NAMESPACE" get secret "$API_SECRET" -o jsonpath='{.data.AUTH_SESSION_KEY}')" ]; then
     KC -n "$RELEASE_NAMESPACE" patch secret "$API_SECRET" \
       -p "{\"stringData\":{\"AUTH_SESSION_KEY\":\"$(openssl rand 32 | basenc --base64url -w0 | tr -d '=')\"}}" >/dev/null
@@ -362,6 +381,9 @@ EOF
     if [ -n "$OIDC_ROLE_MAP" ]; then
       echo "    OIDC_ROLE_MAP: \"$OIDC_ROLE_MAP\""
     fi
+    if [ "$OIDC_MANAGER_MODE" = "1" ]; then
+      echo "    OIDC_USERINFO_ROLES: \"true\""
+    fi
     if [ -n "$OIDC_CA_CONFIGMAP" ]; then
       cat <<EOF
     SSL_CERT_FILE: "/etc/dashboard-ca/ca.crt"
@@ -405,7 +427,15 @@ redis:
   # OKD cri-o는 short name을 거부하므로 fully-qualified 경로를 씁니다.
   image: {repository: docker.io/library/redis}
 EOF
-  if [ "$AUTH_MODE" = "oidc" ]; then
+  if [ "$AUTH_MODE" = "oidc" ] && [ "$OIDC_MANAGER_MODE" = "1" ]; then
+    # Dhub2.0 인증 위임 — UI가 manager 세션에서 Bearer 토큰을 받아 씁니다.
+    cat <<EOF
+managerAuth:
+  enabled: true
+  origin: "$OIDC_ISSUER_VAL"
+  loginURL: "$AUTH_LOGIN_URL"
+EOF
+  elif [ "$AUTH_MODE" = "oidc" ]; then
     # 브라우저 세션(ADR 0011). TLS 게시는 chart Ingress가 아니라 OKD Route가 맡습니다.
     cat <<EOF
 authSession:
