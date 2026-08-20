@@ -314,6 +314,15 @@ function trends(key: RangeKey): TrendPanel[] {
       ],
     },
     {
+      id: "io",
+      title: "Disk I/O",
+      stepSeconds,
+      series: [
+        { key: "read", label: "읽기", unit: "bytes_per_sec", points: series("io-read", buckets, stepSeconds, 240, 55) },
+        { key: "write", label: "쓰기", unit: "bytes_per_sec", points: series("io-write", buckets, stepSeconds, 120, 35) },
+      ],
+    },
+    {
       id: "network",
       title: "Network 처리량",
       stepSeconds,

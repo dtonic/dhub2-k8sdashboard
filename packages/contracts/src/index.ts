@@ -137,7 +137,7 @@ export interface TrendSeries {
 }
 
 export interface TrendPanel {
-  id: "cpu" | "memory" | "network" | "restarts";
+  id: "cpu" | "memory" | "network" | "io" | "restarts";
   title: string;
   stepSeconds: number;
   series: TrendSeries[];
