@@ -100,3 +100,46 @@ test.describe("Drill-down (#15)", () => {
     expect(api.matching(/\/workloads\//)).toHaveLength(1);
   });
 });
+
+/** 이슈 #2 완료 기준: 목록에서는 namespace가 아니라 이름으로 찾고 URL 상태가 새지 않습니다. */
+test.describe("Namespace 목록 URL 상태 (#2)", () => {
+  test("stale ns를 제거하고 검색을 갱신·범위 변경 뒤에도 보존한다", async ({ page }) => {
+    const api = trackApi(page);
+    await page.goto("/namespaces?ns=media&q=pay&range=1h&refresh=10000");
+    await waitForData(page);
+
+    let url = new URL(page.url());
+    expect(url.searchParams.get("ns")).toBeNull();
+    expect(url.searchParams.get("q")).toBe("pay");
+    await expect(page.getByRole("combobox", { name: "네임스페이스" })).toHaveCount(0);
+
+    const search = page.getByRole("searchbox", { name: "Namespace 이름 검색" });
+    await expect(search).toHaveValue("pay");
+    await expect(page.getByRole("link", { name: "payments", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "media", exact: true })).toHaveCount(0);
+
+    const initialRequests = api.matching(/\/namespaces\?/).length;
+    await expect
+      .poll(() => api.matching(/\/namespaces\?/).length, { timeout: 15_000 })
+      .toBeGreaterThan(initialRequests);
+    await expect(search).toHaveValue("pay");
+    expect(new URL(page.url()).searchParams.get("q")).toBe("pay");
+
+    await page.getByRole("button", { name: "7일", exact: true }).click();
+    await waitForData(page);
+    url = new URL(page.url());
+    expect(url.searchParams.get("range")).toBe("7d");
+    expect(url.searchParams.get("q")).toBe("pay");
+    await expect(search).toHaveValue("pay");
+
+    await page.getByRole("link", { name: "payments", exact: true }).click();
+    await waitForData(page);
+    url = new URL(page.url());
+    expect(url.pathname).toBe("/namespaces/payments");
+    expect(url.searchParams.get("ns")).toBeNull();
+    expect(url.searchParams.get("q")).toBeNull();
+    expect(url.searchParams.get("range")).toBe("7d");
+    await expect(page.getByRole("heading", { name: "payments", exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "네임스페이스" })).toHaveCount(0);
+  });
+});
