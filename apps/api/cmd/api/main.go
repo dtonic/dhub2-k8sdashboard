@@ -239,9 +239,9 @@ func run(logger *slog.Logger) error {
 		DashboardQueryRefs: queries.Refs(),
 		TopologyLayout:     topoLayout,
 		// 관리(ADR 0014)는 direct 모드에서만 — clientset을 직접 씁니다. central은 nil.
-		KubeClient: clients.Typed,
-		AllowedOrigin:      cfg.AllowedOrigin,
-		Version:            contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
+		KubeClient:    clients.Typed,
+		AllowedOrigin: cfg.AllowedOrigin,
+		Version:       contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
 
 	httpSrv := &http.Server{
@@ -347,6 +347,7 @@ func buildResolver(ctx context.Context, logger *slog.Logger, cfg config.Config) 
 			IssuerURL:      cfg.Auth.Issuer,
 			Audience:       cfg.Auth.Audience,
 			RolesClaim:     cfg.Auth.RolesClaim,
+			RoleMap:        cfg.Auth.RoleMap,
 			Leeway:         cfg.Auth.Leeway,
 			JWKSMinRefresh: cfg.Auth.JWKSMinRefresh,
 			ClusterID:      cfg.ClusterID,

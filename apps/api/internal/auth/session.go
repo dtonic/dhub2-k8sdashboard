@@ -382,6 +382,7 @@ func (f *sessionFlow) exchange(ctx context.Context, form url.Values, nonce strin
 	if err != nil || validateBrowserIDToken(claims, f.sc.ClientID, f.cfg.Now(), f.cfg.Leeway) != nil || (nonce != "" && !sameString(claims.Nonce, nonce)) {
 		return tokenResponse{}, Claims{}, ErrInvalidToken
 	}
+	claims.Roles = MapRoles(claims.Roles, f.cfg.RoleMap)
 	return tr, claims, nil
 }
 

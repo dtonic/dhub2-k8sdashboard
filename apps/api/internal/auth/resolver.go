@@ -22,6 +22,8 @@ type Config struct {
 	Audience string
 	// RolesClaim은 역할이 실린 클레임 이름입니다. 기본 "roles"입니다.
 	RolesClaim string
+	// RoleMap은 IdP 역할 이름 → 내부 역할 이름 변환표입니다. 비우면 변환하지 않습니다.
+	RoleMap map[string]string
 	// Leeway는 시계 오차 허용입니다. 기본 60초입니다.
 	Leeway time.Duration
 	// JWKSMinRefresh는 모르는 kid로 인한 JWKS 재조회의 하한입니다. 기본 5분입니다.
@@ -178,6 +180,7 @@ func (r *Resolver) Resolve(req *http.Request) (scope.Scope, error) {
 		r.logger.Warn("토큰 검증 실패", "reason", err.Error())
 		return scope.Scope{}, err
 	}
+	claims.Roles = MapRoles(claims.Roles, r.cfg.RoleMap)
 	return r.scopeFor(claims), nil
 }
 

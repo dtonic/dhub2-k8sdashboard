@@ -31,11 +31,17 @@
 #   AUTH_MODE          기본 oidc — Keycloak OIDC + 브라우저 세션(ADR 0011)으로
 #                      배포합니다. none이면 인증 없는 개방 배포(개발·데모 전용)이며
 #                      사내망 누구나 접근 가능합니다.
-#   OIDC_ISSUER        발급자 HTTPS URL. 비우면 클러스터의 keycloak Route를 자동
-#                      발견해 https://<host>/realms/$OIDC_REALM 을 사용합니다.
-#   OIDC_REALM         issuer 자동 발견 시 realm 이름   (기본: dhub2)
+#   OIDC_ISSUER        발급자 HTTPS URL. 비우면 자동 발견합니다:
+#                      ① dhub2-manager(dhub2-auth 내장 OIDC provider) Route —
+#                        플랫폼 계정을 그대로 쓰며, 이때 OIDC_ROLES_CLAIM=groups와
+#                        OIDC_ROLE_MAP=dhub2-admin=platform.admin 이 기본이 됩니다
+#                        (= dhub2에서 type이 admin인 계정은 대시보드 전체 접근).
+#                      ② keycloak Route → https://<host>/realms/$OIDC_REALM
+#   OIDC_REALM         keycloak fallback의 realm 이름   (기본: dhub2)
 #   OIDC_CLIENT_ID     public PKCE client id            (기본: k8s-dashboard)
 #   OIDC_AUDIENCE      API Bearer 토큰 audience         (기본: OIDC_CLIENT_ID)
+#   OIDC_ROLES_CLAIM   역할 클레임 이름 (기본: 서버 기본값 roles, manager 발견 시 groups)
+#   OIDC_ROLE_MAP      IdP 역할 → 내부 역할 변환표 ("a=b,c=d")
 #   OIDC_CLIENT_SECRET confidential client일 때만 지정. Secret으로만 주입됩니다.
 #
 #   IdP 사전 조건(한 번만): 해당 realm에 OIDC_CLIENT_ID public client가 있어야 하고
@@ -74,6 +80,8 @@ AUTH_MODE="${AUTH_MODE:-oidc}"
 OIDC_REALM="${OIDC_REALM:-dhub2}"
 OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-k8s-dashboard}"
 OIDC_AUDIENCE="${OIDC_AUDIENCE:-$OIDC_CLIENT_ID}"
+OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-}"
+OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-}"
 case "$AUTH_MODE" in
   oidc|none) ;;
   *) die "AUTH_MODE는 oidc 또는 none이어야 합니다: $AUTH_MODE" ;;
@@ -131,9 +139,19 @@ if [ "$AUTH_MODE" = "oidc" ]; then
   fi
   [ -n "$ROUTE_HOST" ] || die "AUTH_MODE=oidc에는 HTTPS 공개 origin이 필요합니다. ROUTE_HOST를 지정하거나 AUTH_MODE=none으로 명시적으로 끄세요."
   if [ -z "$OIDC_ISSUER_VAL" ]; then
-    KC_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /keycloak/ {print $3; exit}')"
-    [ -n "$KC_HOST" ] || die "keycloak Route를 찾지 못했습니다. OIDC_ISSUER를 직접 지정하거나 AUTH_MODE=none으로 끄세요."
-    OIDC_ISSUER_VAL="https://$KC_HOST/realms/$OIDC_REALM"
+    # ① dhub2-auth(DHubManager 내장 OIDC provider) 우선 — 플랫폼 계정·admin 판정을
+    #    그대로 씁니다. type=admin 사용자는 토큰의 groups 클레임에 dhub2-admin이 실립니다.
+    MGR_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /manager/ {print $3; exit}')"
+    if [ -n "$MGR_HOST" ] && curl -skf --max-time 8 "https://$MGR_HOST/.well-known/openid-configuration" >/dev/null 2>&1; then
+      OIDC_ISSUER_VAL="https://$MGR_HOST"
+      OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-groups}"
+      OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-dhub2-admin=platform.admin}"
+    else
+      # ② keycloak fallback
+      KC_HOST="$(KC get route -A --no-headers 2>/dev/null | awk 'tolower($2) ~ /keycloak/ {print $3; exit}')"
+      [ -n "$KC_HOST" ] || die "dhub2-manager/keycloak Route를 찾지 못했습니다. OIDC_ISSUER를 직접 지정하거나 AUTH_MODE=none으로 끄세요."
+      OIDC_ISSUER_VAL="https://$KC_HOST/realms/$OIDC_REALM"
+    fi
   fi
   # discovery 문서의 issuer 문자열까지 정확히 일치해야 토큰 검증이 통과합니다.
   DISCOVERED_ISSUER="$(curl -skf --max-time 10 "$OIDC_ISSUER_VAL/.well-known/openid-configuration" \
@@ -338,6 +356,12 @@ EOF
     OIDC_ISSUER: "$OIDC_ISSUER_VAL"
     OIDC_AUDIENCE: "$OIDC_AUDIENCE"
 EOF
+    if [ -n "$OIDC_ROLES_CLAIM" ]; then
+      echo "    OIDC_ROLES_CLAIM: \"$OIDC_ROLES_CLAIM\""
+    fi
+    if [ -n "$OIDC_ROLE_MAP" ]; then
+      echo "    OIDC_ROLE_MAP: \"$OIDC_ROLE_MAP\""
+    fi
     if [ -n "$OIDC_CA_CONFIGMAP" ]; then
       cat <<EOF
     SSL_CERT_FILE: "/etc/dashboard-ca/ca.crt"
@@ -485,7 +509,7 @@ else
   echo "  → http://localhost:18080"
 fi
 if [ "$AUTH_MODE" = "oidc" ]; then
-  echo "  로그인: $OIDC_ISSUER_VAL 계정 중 '$OIDC_CLIENT_ID' client role(platform.admin 등)이"
-  echo "  부여된 계정만 접근할 수 있습니다. 세션은 HTTPS origin에서만 동작하므로"
-  echo "  port-forward(http://localhost)로는 로그인할 수 없습니다."
+  echo "  로그인: $OIDC_ISSUER_VAL 계정으로 로그인합니다. 역할 클레임이 대시보드 역할로"
+  echo "  해석되는 계정만 데이터가 보입니다${OIDC_ROLE_MAP:+ (매핑: $OIDC_ROLE_MAP)}."
+  echo "  세션은 HTTPS origin에서만 동작하므로 port-forward(http://localhost)로는 로그인할 수 없습니다."
 fi

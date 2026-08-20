@@ -107,6 +107,7 @@ KUBECONFIG=~/.kube/config make dev-api
 | `OIDC_ISSUER` | (비움) | 발급자 HTTPS URL. 예: `https://login.microsoftonline.com/<tenant>/v2.0`. HTTP는 직접 실행한 loopback mock/test에서만 허용 |
 | `OIDC_AUDIENCE` | (비움) | 이 API의 client id. `AUTH_MODE=oidc`에서는 필수이며 빈 값이면 기동 실패. mock은 비우면 `k8s-dashboard-local` 사용 |
 | `OIDC_ROLES_CLAIM` | `roles` | 역할이 실린 클레임 이름 |
+| `OIDC_ROLE_MAP` | (비움) | IdP 역할 이름 → 내부 역할 변환표. `발급역할=내부역할,...` 형식. 예: dhub2-auth의 admin 그룹을 인정하는 `dhub2-admin=platform.admin`. 매핑에 없는 역할은 그대로 두고 알 수 없는 역할은 무시합니다 |
 | `OIDC_LEEWAY` | `60s` | 시계 오차 허용 |
 | `OIDC_JWKS_MIN_REFRESH` | `5m` | 모르는 kid로 인한 JWKS 재조회 하한 |
 | `AUTH_MOCK_ADDR` | `127.0.0.1:8091` | mock IdP 바인드 주소. loopback을 벗어나지 마세요 |

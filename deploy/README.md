@@ -77,8 +77,14 @@ HTTPS여야 하고 `redirectURI`는 정확히 `<publicOrigin>/api/v1/auth/callba
 - refresh 응답에 서명된 ID token 포함(Keycloak 충족 — 미지원 provider는 세션이
   fail-closed 됩니다)
 
-lnode 시험 클러스터에는 Keycloak realm `dhub2`에 client `k8s-dashboard`
-(platform.admin → 해당 realm 관리자 계정)가 2026-08-20에 등록되어 있습니다.
+deploy.sh의 issuer 자동 발견은 **dhub2-auth(DHubManager 내장 OIDC provider) Route를
+우선**하고, 없으면 keycloak Route로 fallback합니다. dhub2-auth를 쓰면 플랫폼 계정을
+그대로 사용하며, `type=admin` 사용자의 토큰 `groups` 클레임에 실리는 `dhub2-admin`이
+`OIDC_ROLE_MAP=dhub2-admin=platform.admin` 기본값으로 대시보드 전체 접근으로 해석됩니다.
+
+lnode 시험 클러스터: dhub2-manager(`manager.apps.okd.dtonic.io`)에 public PKCE client
+`k8s-dashboard`가 2026-08-20에 등록되어 있습니다(Keycloak dhub2 realm의 동명 client는
+전환기 임시 구성으로, dhub2-auth 안정화 후 제거 대상입니다).
 
 ## Dashboard Builder PostgreSQL
 

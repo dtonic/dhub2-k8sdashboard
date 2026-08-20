@@ -32,6 +32,25 @@ const (
 	RoleDashboardEditor = "dashboard.editor"
 )
 
+// MapRoles는 IdP가 발급한 역할 이름을 내부 역할 이름으로 변환합니다. (#10)
+// dhub2-auth의 "dhub2-admin"처럼 IdP 고유 그룹/역할 이름을 쓰는 provider를 코드
+// 수정 없이 붙이기 위한 설정 지점입니다(OIDC_ROLE_MAP, 예: "dhub2-admin=platform.admin").
+// 매핑에 없는 역할은 그대로 두고, 알 수 없는 역할은 이후 Scope 계산이 무시합니다.
+func MapRoles(roles []string, m map[string]string) []string {
+	if len(m) == 0 || len(roles) == 0 {
+		return roles
+	}
+	out := make([]string, len(roles))
+	for i, role := range roles {
+		if mapped, ok := m[role]; ok {
+			out[i] = mapped
+		} else {
+			out[i] = role
+		}
+	}
+	return out
+}
+
 // Principal은 인증이 끝난 사용자입니다. 감사 로그와 편집 권한 판단에 씁니다.
 type Principal struct {
 	Subject  string

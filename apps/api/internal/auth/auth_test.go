@@ -280,6 +280,42 @@ func TestRoleMapping(t *testing.T) {
 	}
 }
 
+// TestRoleMapTranslatesProviderRoles — OIDC_ROLE_MAP이 IdP 고유 역할 이름
+// (dhub2-auth의 "dhub2-admin" 등)을 내부 역할로 변환합니다. 매핑에 없는 역할은
+// 그대로 지나가며 Scope 계산이 무시하고, 빈 매핑은 아무것도 바꾸지 않습니다.
+func TestRoleMapTranslatesProviderRoles(t *testing.T) {
+	idp, err := StartMockIDP("", "k8s-dashboard", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idp.Close() })
+	r, err := NewResolver(context.Background(), Config{
+		IssuerURL:   idp.Issuer,
+		Audience:    "k8s-dashboard",
+		RoleMap:     map[string]string{"dhub2-admin": RolePlatformAdmin},
+		ClusterID:   "seoul",
+		ClusterName: "Seoul Production",
+		Now:         fixedNow,
+	}, slog.New(slog.NewTextHandler(new(strings.Builder), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := idp.Token("daesun", []string{"dhub2-admin", "grafana-editor"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := r.Resolve(request(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := sc.Cluster("seoul"); !ok || !c.All {
+		t.Fatalf("dhub2-admin이 platform.admin으로 변환되어야 합니다: %+v", sc)
+	}
+	if got := MapRoles([]string{"dhub2-admin"}, nil); !reflect.DeepEqual(got, []string{"dhub2-admin"}) {
+		t.Fatalf("빈 매핑은 역할을 바꾸면 안 됩니다: %v", got)
+	}
+}
+
 // TestNoRolesMeansEmptyButAuthenticatedScope — 역할이 없으면 빈 Scope로
 // **성공**합니다. 401(인증 실패)이 아니라 403(권한 없음)으로 가는 길입니다.
 func TestNoRolesMeansEmptyButAuthenticatedScope(t *testing.T) {
