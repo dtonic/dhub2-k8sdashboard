@@ -13,7 +13,7 @@ Grafana를 대체하는 범용 시각화 도구를 만드는 것이 **아닙니�
 특화된 UX와 통합 조회 계층을 추가하는 것이 목표입니다.
 
 현재 단계: `design-system/`, `apps/web`의 **MVP UI 화면 전체**(Cluster Overview,
-Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts)와
+Nodes, Namespace/Workload/Pod Drill-down, Logs Explorer, Pod Topology, Alerts)와
 `apps/api`의 **Go Observability API/BFF**가 구현되어 있습니다.
 GreptimeDB·Quickwit 실클라이언트는 구현되어 있습니다
 (`apps/api/internal/datasource/greptime`, `quickwit` — `GREPTIME_URL`·`QUICKWIT_URL`로 활성화).
@@ -21,10 +21,14 @@ GreptimeDB·Quickwit 실클라이언트는 구현되어 있습니다
 질의 정의를 바꿀 때는 코드가 아니라 `querycatalog/defaults/*.yaml`을 고칩니다.
 OIDC 인증·역할 기반 Scope(#10)는 `apps/api/internal/auth`로 구현되어 있습니다
 (`AUTH_MODE=none|oidc|mock` — 로컬은 mock IdP로 실제 검증 경로를 그대로 탑니다).
+배포 기본값은 OIDC이며, Dhub2.0(dhub2-manager의 dhub2-auth) 인증 위임 모드가 표준입니다 —
+UI가 manager 세션에서 Bearer 토큰을 받고, 역할은 `OIDC_USERINFO_ROLES`(userinfo `groups`)와
+`OIDC_ROLE_MAP`(`dhub2-admin=platform.admin`)으로 해석합니다. `scripts/deploy.sh`가 자동 구성합니다.
 Custom Dashboard Builder(#9/ADR 0016)는 `apps/api/internal/dashboard`로 구현되어 있습니다 —
 저장 백엔드는 선택형입니다. `DASHBOARD_DB_PATH`면 SQLite 파일(PVC, 단일 writer, 경량 기본),
 `DATABASE_URL`이면 PostgreSQL(HA)입니다. 초안 생성·수정·삭제·제출·승인·Export·Import를 지원합니다.
-남은 것은 Alertmanager 실클라이언트(#17 잔여), Redis 캐시(#11), SSE(#12)입니다.
+Alertmanager 실클라이언트(#17)·Redis 캐시(#11)·SSE(#12)도 구현되어 있습니다.
+저장소는 `github.com/dtonic/dhub2-k8sdashboard`로 이관 예정입니다.
 전체 맥락은 `README.md`, 확정된 결정은 `docs/adr/`,
 프런트엔드 규칙은 `apps/web/README.md`, 백엔드 규칙은 `apps/api/README.md`에 있습니다.
 
