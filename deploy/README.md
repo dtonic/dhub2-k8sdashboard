@@ -65,7 +65,7 @@ audience는 비밀이 아니므로 ConfigMap에 둡니다.
 HTTPS여야 하고 `redirectURI`는 정확히 `<publicOrigin>/api/v1/auth/callback`이어야
 하며, `api.existingSecret`에 32-byte base64url(무패딩) `AUTH_SESSION_KEY`가 필요합니다.
 
-루트의 `deploy.sh`는 **OIDC가 기본**입니다(`AUTH_MODE=none`으로만 옵트아웃).
+`scripts/deploy.sh`는 **OIDC가 기본**입니다(`AUTH_MODE=none`으로만 옵트아웃).
 클러스터의 keycloak Route와 기존 `<release>-ui` Route를 자동 발견해 issuer와
 공개 origin을 구성하고, `AUTH_SESSION_KEY`가 없으면 생성하며, issuer로의
 `purpose: oidc` egress를 주입합니다. IdP에는 다음이 한 번 준비되어 있어야 합니다.

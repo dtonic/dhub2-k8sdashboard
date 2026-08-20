@@ -119,9 +119,9 @@ deploy-check:       ## Helm lint/render, Kubernetes schema, repository policy
 	sh deploy/scripts/check-deploy.sh
 
 deploy-images:      ## Build release images locally without pushing
-	docker build --target build --file Dockerfile.web --tag observability-dashboard-web-builder:ci .
-	docker build --file Dockerfile.web --tag observability-dashboard-web:ci .
-	docker build --file Dockerfile.api --tag observability-dashboard-api:ci --build-arg VERSION=ci --build-arg COMMIT=$${GITHUB_SHA:-local} --build-arg BUILD_DATE=1970-01-01T00:00:00Z .
+	docker build --target build --file deploy/Dockerfile.web --tag observability-dashboard-web-builder:ci .
+	docker build --file deploy/Dockerfile.web --tag observability-dashboard-web:ci .
+	docker build --file deploy/Dockerfile.api --tag observability-dashboard-api:ci --build-arg VERSION=ci --build-arg COMMIT=$${GITHUB_SHA:-local} --build-arg BUILD_DATE=1970-01-01T00:00:00Z .
 
 quality-policy:     ## Required CI names and immutable supply-chain references
 	python3 scripts/quality/check-workflow.py

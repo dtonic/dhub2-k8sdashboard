@@ -2,16 +2,16 @@
 # deploy.sh — 단일 클러스터 시험 배포 도구 (Issue #26)
 #
 # 사용법:
-#   ./deploy.sh <cluster-context> [namespace ...]
+#   ./scripts/deploy.sh <cluster-context> [namespace ...]
 #
 #   <cluster-context>  kubeconfig 컨텍스트 이름 (예: lnode)
 #   [namespace ...]    대시보드에 노출할 namespace 목록 (0개 이상).
 #                      생략하면 전체 namespace(SCOPE_NAMESPACES="*")를 노출합니다.
 #
 # 예시:
-#   ./deploy.sh lnode dhub2          # dhub2만 노출
-#   ./deploy.sh lnode dhub2 dhub3    # 두 개 노출
-#   ./deploy.sh lnode                # 전체 노출
+#   ./scripts/deploy.sh lnode dhub2          # dhub2만 노출
+#   ./scripts/deploy.sh lnode dhub2 dhub3    # 두 개 노출
+#   ./scripts/deploy.sh lnode                # 전체 노출
 #
 # 환경변수 (선택):
 #   REGISTRY           이미지 push 대상 registry/project (기본: registry.hub.dtonic.io/lnode
@@ -69,7 +69,7 @@ set -euo pipefail
 
 die() { echo "오류: $*" >&2; exit 1; }
 
-[ $# -ge 1 ] || die "사용법: ./deploy.sh <cluster-context> [namespace ...]"
+[ $# -ge 1 ] || die "사용법: ./scripts/deploy.sh <cluster-context> [namespace ...]"
 CLUSTER="$1"; shift
 
 if [ $# -gt 0 ]; then
@@ -97,7 +97,7 @@ case "$AUTH_MODE" in
   *) die "AUTH_MODE는 oidc 또는 none이어야 합니다: $AUTH_MODE" ;;
 esac
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHART="$ROOT/deploy/helm/observability-dashboard"
 GIT_SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
 IMAGE_TAG="${IMAGE_TAG:-dev-$GIT_SHA}"
@@ -118,8 +118,8 @@ echo "== 이미지: $WEB_IMAGE:$IMAGE_TAG / $API_IMAGE:$IMAGE_TAG"
 # 1) 이미지 빌드 + push
 if [ "$SKIP_BUILD" != "1" ]; then
   echo "== [1/5] 이미지 빌드"
-  docker build -f "$ROOT/Dockerfile.web" -t "$WEB_IMAGE:$IMAGE_TAG" "$ROOT"
-  docker build -f "$ROOT/Dockerfile.api" -t "$API_IMAGE:$IMAGE_TAG" \
+  docker build -f "$ROOT/deploy/Dockerfile.web" -t "$WEB_IMAGE:$IMAGE_TAG" "$ROOT"
+  docker build -f "$ROOT/deploy/Dockerfile.api" -t "$API_IMAGE:$IMAGE_TAG" \
     --build-arg "VERSION=$IMAGE_TAG" --build-arg "COMMIT=$GIT_SHA" \
     --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ROOT"
   echo "== [2/5] 이미지 push → $REGISTRY"

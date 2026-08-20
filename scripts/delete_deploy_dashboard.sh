@@ -2,11 +2,11 @@
 # delete_deploy_dashboard.sh — deploy.sh가 설치한 대시보드 제거 (Issue #26)
 #
 # 사용법:
-#   ./delete_deploy_dashboard.sh <cluster-context>
+#   ./scripts/delete_deploy_dashboard.sh <cluster-context>
 #
 # 예시:
-#   ./delete_deploy_dashboard.sh lnode                    # release + 부속 리소스 삭제
-#   PURGE_NAMESPACE=1 ./delete_deploy_dashboard.sh lnode  # namespace까지 통째로 삭제
+#   ./scripts/delete_deploy_dashboard.sh lnode                    # release + 부속 리소스 삭제
+#   PURGE_NAMESPACE=1 ./scripts/delete_deploy_dashboard.sh lnode  # namespace까지 통째로 삭제
 #
 # 환경변수 (선택):
 #   RELEASE_NAME       helm release 이름 (기본: dashboard) — deploy.sh와 같은 값 사용

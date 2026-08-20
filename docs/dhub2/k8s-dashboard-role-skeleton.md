@@ -158,7 +158,7 @@ SCC RoleBinding이 helm보다 먼저여야 첫 Pod가 거부되지 않습니다(
 
 ## 3. templates/dashboard-values.yaml.j2
 
-chart values의 정본은 이 j2 하나입니다. deploy.sh(#30)가 런타임에 만들던 overlay를
+chart values의 정본은 이 j2 하나입니다. scripts/deploy.sh(#30)가 런타임에 만들던 overlay를
 선언으로 옮긴 것과 같습니다.
 
 <details>

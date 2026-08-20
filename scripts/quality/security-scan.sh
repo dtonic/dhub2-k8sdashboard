@@ -50,7 +50,7 @@ if [ -n "$tracked_env" ]; then
 fi
 {
   git -C "$ROOT" ls-files --cached
-  git -C "$ROOT" ls-files --others --exclude-standard -- .github apps deploy design-system docs packages quality scripts .dockerignore .gitignore Dockerfile.api Dockerfile.web Makefile README.md go.work package.json package-lock.json
+  git -C "$ROOT" ls-files --others --exclude-standard -- .github apps deploy design-system docs packages quality scripts .dockerignore .gitignore Makefile README.md go.work package.json package-lock.json
 } | sort -u | while IFS= read -r path; do
   if is_secret_env_path "$path"; then
     continue
