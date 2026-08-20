@@ -783,6 +783,9 @@ type TopologyNode struct {
 	// External은 클러스터 밖 엔티티(Ingress Gateway·External Client 등)입니다.
 	// Pod 신원이 없으므로 상세 화면으로 연결하지 않습니다. (#29)
 	External bool `json:"external,omitempty"`
+	// PodCount는 이 노드로 접힌 Pod 수입니다. 노드는 워크로드 단위이므로
+	// 화면이 "몇 개의 Pod가 접혀 있는지"를 표시할 수 있어야 합니다. (#3)
+	PodCount int `json:"podCount,omitempty"`
 }
 
 type TopologyRoute struct {

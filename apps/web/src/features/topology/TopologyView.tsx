@@ -157,7 +157,7 @@ export function TopologyView() {
         <>
           {pods && (
             <div className="grid grid--kpi">
-              <StatTile label="Pods" value={num(pods.total)} footnote="현재 그래프에 표시된 Pod" />
+              <StatTile label="Pods" value={num(pods.total)} footnote="선택한 scope의 전체 Pod · 그래프는 워크로드 단위로 접어 표시" />
               <StatTile label="정상" value={num(pods.healthy)} footnote={`전체 ${num(pods.total)}`} />
               <StatTile
                 label="비정상"
@@ -208,7 +208,10 @@ export function TopologyView() {
               emptyTitle="통신 데이터가 없습니다"
               emptyDetail="선택한 범위에 관측된 Pod 간 통신이 없습니다."
             >
-              {(g) => (
+              {(g) => {
+                const internal = g.nodes.filter((n) => !n.external);
+                const foldedPods = internal.reduce((s, n) => s + (n.podCount ?? 1), 0);
+                return (
                 <>
                   <TopologyGraph
                     nodes={g.nodes}
@@ -234,6 +237,9 @@ export function TopologyView() {
                   />
                   <ul className="ds-topology__legend" style={{ marginTop: "var(--space-4)" }}>
                     <li>
+                      워크로드 노드 {num(internal.length)}개 · Pod {num(foldedPods)}개를 접어서 표시
+                    </li>
+                    <li>
                       <i style={{ ["--_c" as string]: "var(--color-status-serious, var(--status-critical))" }} /> 선택한 경로
                     </li>
                     <li>
@@ -242,7 +248,8 @@ export function TopologyView() {
                     <li>선 두께 = 트래픽 양 · 프로토콜은 노드 카드의 In/Out 요약으로 · 방향·Route·Count 상세는 아래 표에서 · 상태는 노드 카드 테두리 색으로 표시</li>
                   </ul>
                 </>
-              )}
+                );
+              }}
             </SectionView>
           </Panel>
 

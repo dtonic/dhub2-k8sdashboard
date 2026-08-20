@@ -84,6 +84,20 @@
 
 .topo-node__ns {
   font: var(--type-meta);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 워크로드 단위 노드로 접힌 Pod 수 배지. 개수는 상태가 아니므로 중립 배지입니다. (#3) */
+.topo-node__pods {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  font: var(--type-meta);
+  white-space: nowrap;
 }
 
 /* 노드 카드 안 In/Out 프로토콜 요약 (선의 캡슐을 대체). 프로토콜은 상태색이 아니라

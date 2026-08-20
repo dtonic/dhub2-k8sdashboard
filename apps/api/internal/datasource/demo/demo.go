@@ -456,13 +456,17 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 	}
 
 	// 워크로드 단위로 접습니다. Pod를 전부 그리면 노드가 수백 개가 되어 읽을 수 없습니다.
+	// 접되 자르지는 않습니다 — scope 안 모든 워크로드가 노드로 나와야 하고,
+	// 개수 절단은 알파벳 앞쪽 namespace만 남는 편향을 만듭니다. (#3)
 	seen := map[string]datasource.CatalogPod{}
+	podCount := map[string]int{}
 	order := make([]string, 0, len(pods))
 	for _, p := range pods {
 		k := p.Namespace + "/" + p.WorkloadName
 		if p.WorkloadName == "" {
 			k = p.Namespace + "/" + p.Name
 		}
+		podCount[k]++
 		if _, ok := seen[k]; ok {
 			continue
 		}
@@ -470,14 +474,15 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 		order = append(order, k)
 	}
 	sort.Strings(order)
-	if len(order) > 20 {
-		order = order[:20]
-	}
 
 	g := contract.TopologyGraph{}
 	// 열 수를 고정하면 노드가 적을 때 한 열에 몰려 엣지가 하나도 생기지 않습니다.
 	// 이웃한 노드가 서로 다른 열에 오도록 열을 먼저 채웁니다.
-	const columns = 4
+	// 노드가 많으면 열을 √n에 비례해 늘려 한 열이 끝없이 길어지지 않게 합니다.
+	columns := 4
+	if n := len(order); n > columns*columns {
+		columns = int(math.Ceil(math.Sqrt(float64(n))))
+	}
 	for i, k := range order {
 		p := seen[k]
 		g.Nodes = append(g.Nodes, contract.TopologyNode{
@@ -488,6 +493,7 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 			Severity:  contract.SeverityHealthy,
 			Column:    1 + i%columns,
 			Row:       i / columns,
+			PodCount:  podCount[k],
 		})
 	}
 	internal := g.Nodes

@@ -49,6 +49,8 @@ type PodNodeData = {
   namespace: string;
   severity: Severity;
   external: boolean;
+  /** 이 노드로 접힌 Pod 수. 워크로드 단위 노드의 접힘 규모를 배지로 표기합니다. (#3) */
+  podCount: number;
   /** 이 노드로 들어오는(수신)·나가는(송신) 프로토콜 목록. 카드에 In/Out으로 표기합니다. (#topology) */
   inProtos: string[];
   outProtos: string[];
@@ -73,7 +75,14 @@ function PodNode({ data }: NodeProps) {
         <span className="topo-node__name ds-ident" title={d.name}>
           {d.name}
         </span>
-        <span className="topo-node__ns muted">{d.namespace}</span>
+        <span className="topo-node__ns muted">
+          {d.namespace}
+          {d.podCount > 1 && (
+            <span className="topo-node__pods" title={`이 워크로드로 접힌 Pod ${d.podCount}개`}>
+              Pod {d.podCount}
+            </span>
+          )}
+        </span>
         {(d.inProtos.length > 0 || d.outProtos.length > 0) && (
           <span className="topo-node__protos">
             {d.inProtos.length > 0 && (
@@ -145,10 +154,12 @@ const edgeTypes = { traffic: TrafficEdge };
 
 /**
  * 워크로드(Pod 명칭 그룹) 기준 열 배치를 계산합니다.
- * 같은 그룹의 Pod들은 **한 열에 연속으로** 쌓이고, 그룹이 많으면 4개 열에
- * 순환 배치해 화면이 한 줄로 길어지지 않게 합니다(서버 기본 열 수와 동일).
+ * 같은 그룹의 Pod들은 **한 열에 연속으로** 쌓이고, 그룹이 많으면 여러 열에
+ * 순환 배치해 화면이 한 줄로 길어지지 않게 합니다. 열 수는 그룹 수의 √n에
+ * 비례해 늘려(최소 4) 대형 클러스터에서 한 열이 끝없이 길어지지 않게 합니다.
+ * 입력이 같으면 배치도 같아 갱신 때 노드가 튀지 않습니다. (#3)
  */
-const MAX_COLS = 4;
+const MIN_COLS = 4;
 const GROUP_GAP = 90;
 
 function defaultPositions(nodes: TopologyNode[]): Map<string, { x: number; y: number }> {
@@ -168,12 +179,13 @@ function defaultPositions(nodes: TopologyNode[]): Map<string, { x: number; y: nu
   const externals = nodes.filter((n) => n.external);
   externals.forEach((n, row) => pos.set(n.id, { x: 0, y: row * (ROW_H + GROUP_GAP) }));
 
-  const colHeights = Array.from({ length: MAX_COLS }, () => 0);
+  const maxCols = Math.max(MIN_COLS, Math.ceil(Math.sqrt(families.length)));
+  const colHeights = Array.from({ length: maxCols }, () => 0);
   let col = 0;
   for (const family of families) {
     const members = byFamily.get(family)!.filter((n) => !n.external);
     if (members.length === 0) continue;
-    const c = col % MAX_COLS;
+    const c = col % maxCols;
     members.forEach((n, row) => {
       pos.set(n.id, { x: (1 + c) * COL_W, y: colHeights[c]! + row * ROW_H });
     });
@@ -273,6 +285,7 @@ export function TopologyGraph({
           namespace: n.namespace,
           severity: n.severity,
           external: n.external ?? false,
+          podCount: n.podCount ?? 1,
           inProtos: protoByNode.get(n.id) ? protoByNode.sorted(protoByNode.get(n.id)!.in) : [],
           outProtos: protoByNode.get(n.id) ? protoByNode.sorted(protoByNode.get(n.id)!.out) : [],
         } satisfies PodNodeData,

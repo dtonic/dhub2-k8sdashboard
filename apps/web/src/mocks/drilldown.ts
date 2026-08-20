@@ -482,5 +482,5 @@ export function primaryPod(ns: string, workloadName: string) {
   const w = workloadsOf(ns).find((x) => x.name === workloadName);
   if (!w) throw new Error(`mock: workload ${ns}/${workloadName} 없음`);
   const pods = podsOf(w).filter((p) => !p.finishedAt);
-  return { workload: w, pod: pods[0] ?? podsOf(w)[0]! };
+  return { workload: w, pod: pods[0] ?? podsOf(w)[0]!, podCount: pods.length || 1 };
 }

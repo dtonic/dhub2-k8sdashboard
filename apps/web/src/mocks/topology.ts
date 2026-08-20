@@ -48,7 +48,7 @@ let nodeCache: TopologyNode[] | null = null;
 function nodes(): TopologyNode[] {
   if (nodeCache) return nodeCache;
   nodeCache = NODE_DEF.map((d) => {
-    const { workload, pod } = primaryPod(d.ns, d.workload);
+    const { workload, pod, podCount } = primaryPod(d.ns, d.workload);
     return {
       id: d.id,
       ref: pod.ref,
@@ -57,6 +57,7 @@ function nodes(): TopologyNode[] {
       severity: workload.severity,
       column: d.column,
       row: d.row,
+      podCount,
     };
   });
   return nodeCache;

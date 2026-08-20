@@ -693,6 +693,8 @@ export interface TopologyNode {
   row: number;
   /** 클러스터 밖 엔티티(Ingress Gateway·External Client 등). Pod 상세로 연결하지 않습니다. (#29) */
   external?: boolean;
+  /** 이 노드로 접힌 Pod 수. 노드는 워크로드 단위이므로 접힘 규모를 표시합니다. (#3) */
+  podCount?: number;
 }
 
 export interface TopologyRoute {

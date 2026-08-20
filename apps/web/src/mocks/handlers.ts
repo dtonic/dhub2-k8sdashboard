@@ -503,8 +503,9 @@ export const handlers = [
       ...meta(clusterId, range),
       namespace: ns || null,
       pods: ok({
-        total: nodes.length,
-        healthy: nodes.filter((n) => n.severity === "healthy").length,
+        /* 노드는 워크로드 단위라 Pod 총계는 접힌 podCount 합입니다. (#3) */
+        total: nodes.reduce((s, n) => s + (n.podCount ?? 1), 0),
+        healthy: Math.max(0, nodes.reduce((s, n) => s + (n.podCount ?? 1), 0) - unhealthy.length),
         unhealthy: unhealthy.length,
         unhealthyList: unhealthy,
       }),
