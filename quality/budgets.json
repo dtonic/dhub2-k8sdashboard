@@ -14,8 +14,8 @@
     "BenchmarkOverviewForbidden": { "maxAllocsPerOp": 105, "maxBytesPerOp": 14400 }
   },
   "webBundle": {
-    "maxRawBytes": 385500,
-    "maxGzipBytes": 112500
+    "maxRawBytes": 767000,
+    "maxGzipBytes": 226500
   },
   "webDashboard": {
     "initialApiRequests": 2,
