@@ -1,197 +1,253 @@
 /* ==========================================================================
    K8s Dashboard — Color Tokens
    --------------------------------------------------------------------------
-   원칙
-   - 컴포넌트는 원시 hex를 직접 쓰지 않고 반드시 역할(role) 토큰을 참조합니다.
-   - Light / Dark는 자동 반전이 아니라 각 surface에 맞춰 별도로 선택된 값입니다.
-   - Series(차트 카테고리) 색상은 고정 순서로만 배정하며 순환시키지 않습니다.
-   - Status 색상은 예약어입니다. 절대 series 색상으로 재사용하지 않습니다.
-   - 차트 팔레트는 dataviz validator(CVD/대비/명도대역)를 통과한 값입니다.
-     변경 시 반드시 재검증 후 design-system/README.md의 검증 기록을 갱신하세요.
+   Portal source: design-system/portal/tokens.json (ADR 0017 / Issue #4)
+
+   - Components consume role tokens, never raw colors.
+   - Light and Dark values are selected independently.
+   - Series colors use the documented fixed order and never cycle.
+   - Status colors are reserved and never reused as series colors.
    ========================================================================== */
 
 :root {
   color-scheme: light;
 
-  /* --- Surface / Plane ---------------------------------------------------- */
-  --color-plane:              #f9f9f7; /* 앱 배경 */
-  --color-surface-1:          #fcfcfb; /* 패널 · 차트 표면 */
-  --color-surface-2:          #ffffff; /* 떠 있는 카드 · 팝오버 */
-  --color-surface-sunken:     #f2f1ee; /* 코드/로그 블록 */
-  --color-surface-hover:      rgba(11, 11, 11, 0.04);
-  --color-surface-active:     rgba(11, 11, 11, 0.08);
-  --color-surface-selected:   rgba(42, 120, 214, 0.10);
+  /* --- Brand ------------------------------------------------------------- */
+  --color-brand-primary:       #3b50ce;
+  --color-brand-primary-strong: #2837a8;
+  --color-brand-on-primary:    #ffffff;
+  --color-brand-container:     #e0e7ff;
+  --color-brand-on-container:  #1e1b4b;
 
-  /* --- Ink ---------------------------------------------------------------- */
-  --color-text-primary:       #0b0b0b;
-  --color-text-secondary:     #52514e;
-  --color-text-muted:         #6f6e69; /* 축 라벨 · 보조 메타, 최소 대비 4.85:1 */
+  /* --- Surface / Plane --------------------------------------------------- */
+  --color-plane:              #ffffff;
+  --color-surface-1:          #ffffff;
+  --color-surface-2:          #ffffff;
+  --color-surface-sunken:     #f8fafc;
+  --color-surface-hover:      #f1f5f9;
+  --color-surface-active:     #f3f4f6;
+  --color-surface-selected:   var(--color-brand-container);
+  --color-modal-overlay:      rgba(13, 17, 23, 0.60);
+
+  /* --- Ink --------------------------------------------------------------- */
+  --color-text-heading:       #1f2937;
+  --color-text-primary:       #1f2937;
+  --color-text-secondary:     #4b5563;
+  --color-text-tertiary:      #6b7280;
+  --color-text-muted:         #64748b;
   --color-text-inverse:       #ffffff;
-  --color-text-on-warning:    #0b0b0b;
-  --color-text-link:          #2468b5;
+  --color-text-on-warning:    #1f2937;
+  --color-text-link:          #3b50ce;
+  --color-text-link-hover:    #192182;
 
-  /* --- Border / Divider --------------------------------------------------- */
-  --color-border-subtle:      rgba(11, 11, 11, 0.10);
-  --color-border-default:     #e1e0d9;
-  --color-border-strong:      #c3c2b7;
-  --color-border-focus:       #2a78d6;
+  /* --- Border / Divider ------------------------------------------------- */
+  --color-border-subtle:      #e2e8f0;
+  --color-border-default:     #d4dbe7;
+  --color-border-strong:      #94a3b8;
+  --color-border-focus:       var(--color-brand-primary);
 
-  /* --- Status (예약 · 테마 불변) ------------------------------------------
-     항상 아이콘 + 텍스트 라벨과 함께 사용합니다. 색상 단독으로 의미를
-     전달하지 않습니다. */
-  --color-status-good:        #0ca30c;
-  --color-status-warning:     #fab219;
-  --color-status-serious:     #ec835a;
-  --color-status-critical:    #d03b3b;
-  --color-status-unknown:     #898781;
-  --color-status-info:        #2a78d6;
+  /* --- Status (reserved) ------------------------------------------------
+     good → Portal success, warning → warning, serious → accent orange,
+     critical → danger. Always render an icon/glyph and text label. */
+  --color-status-good:        #16a34a;
+  --color-status-good-bg:     #f0fdf4;
+  --color-status-warning:     #f59e0b;
+  --color-status-warning-bg:  #fffbeb;
+  --color-status-serious:     #f97316;
+  --color-status-serious-bg:  #fff7ed;
+  --color-status-critical:    #dc2626;
+  --color-status-critical-bg: #fef2f2;
+  --color-status-unknown:     #64748b;
+  --color-status-unknown-bg:  #f1f5f9;
+  --color-status-info:        #3b50ce;
+  --color-status-info-bg:     #f0f5ff;
 
-  /* --- Kubernetes 도메인 상태 매핑 ----------------------------------------
-     Cluster State Adapter가 정규화한 상태 → status 역할 매핑 */
-  --status-healthy:           var(--color-status-good);     /* Running / Available */
-  --status-progressing:       var(--color-status-info);     /* Rollout / Pending(정상) */
-  --status-warning:           var(--color-status-warning);  /* Replica 불일치 · Node Pressure */
-  --status-degraded:          var(--color-status-serious);  /* 일부 Pod 실패 · Rollout 지연 */
-  --status-critical:          var(--color-status-critical); /* CrashLoopBackOff · NotReady */
-  --status-unknown:           var(--color-status-unknown);  /* 데이터소스 장애 · Degraded Mode */
+  /* --- Kubernetes domain status aliases -------------------------------- */
+  --status-healthy:           var(--color-status-good);
+  --status-progressing:       var(--color-status-info);
+  --status-warning:           var(--color-status-warning);
+  --status-degraded:          var(--color-status-serious);
+  --status-critical:          var(--color-status-critical);
+  --status-unknown:           var(--color-status-unknown);
 
-  /* --- Chart: Categorical series (고정 순서, 순환 금지) --------------------
-     9번째 계열은 새 색을 생성하지 않고 "Other"로 접거나 small multiples로
-     분리합니다. 산점도/버블/코로플레스(all-pairs)는 3계열까지만 사용합니다. */
-  --series-1:  #2a78d6; /* blue    */
-  --series-2:  #eb6834; /* orange  */
-  --series-3:  #1baf7a; /* aqua    */
-  --series-4:  #eda100; /* yellow  */
-  --series-5:  #e87ba4; /* magenta */
-  --series-6:  #008300; /* green   */
-  --series-7:  #4a3aa7; /* violet  */
-  --series-8:  #e34948; /* red     */
+  /* --- Chart: Categorical series -----------------------------------------
+     Portal's ten source categories are retained, then minimally adjusted and
+     reordered so one fixed order passes the categorical validator in both
+     themes. See design-system/README.md for the source mapping and results. */
+  --series-1:  #4e77b8; /* muted blue */
+  --series-2:  #ddaa44; /* muted amber */
+  --series-3:  #1d9e8f; /* muted teal */
+  --series-4:  #7e63a5; /* muted slate → violet */
+  --series-5:  #c24848; /* muted coral */
+  --series-6:  #277fa8; /* light blue */
+  --series-7:  #d9702b; /* muted orange */
+  --series-8:  #6b4b9a; /* gray → violet tint (chroma floor) */
+  --series-9:  #2e8747; /* muted green */
+  --series-10: #cd749c; /* muted pink */
 
-  /* --- Chart: Sequential (단일 hue · 연속 크기) --------------------------- */
-  --seq-100: #cde2fb;
-  --seq-150: #b7d3f6;
-  --seq-200: #9ec5f4;
-  --seq-250: #86b6ef; /* light 모드 ordinal 램프의 최소 단계 (2.06:1) */
-  --seq-300: #6da7ec;
-  --seq-350: #5598e7;
-  --seq-400: #3987e5;
-  --seq-450: #2a78d6;
-  --seq-500: #256abf;
-  --seq-550: #1c5cab;
-  --seq-600: #184f95; /* dark 모드 ordinal 램프의 최대 단계 (2.15:1) */
-  --seq-650: #104281;
-  --seq-700: #0d366b;
+  /* --- Chart: Sequential blue ------------------------------------------- */
+  --seq-100: #b8c8dd;
+  --seq-150: #adc0d7;
+  --seq-200: #a2b8d2;
+  --seq-250: #98b1cc;
+  --seq-300: #8da9c6;
+  --seq-350: #82a1c1;
+  --seq-400: #7799bb;
+  --seq-450: #6f8eb0;
+  --seq-500: #6682a4;
+  --seq-550: #5e7799;
+  --seq-600: #556c8e;
+  --seq-650: #4d6082;
+  --seq-700: #445577;
 
-  /* --- Chart: Diverging (blue ↔ red, 중립 회색 midpoint) ------------------ */
-  --div-neg:  #2a78d6;
-  --div-mid:  #f0efec;
-  --div-pos:  #e34948;
+  /* --- Chart: Diverging teal ↔ coral ------------------------------------ */
+  --div-neg:  #55aaaa;
+  --div-mid:  #b8b8b8;
+  --div-pos:  #d97b7b;
 
-  /* --- Chart: Chrome ------------------------------------------------------ */
-  --chart-surface:   #fcfcfb;
-  --chart-grid:      #e1e0d9;
-  --chart-axis:      #c3c2b7;
-  --chart-label:     #898781;
-  --chart-delta-up:  #006300; /* 개선(good) 텍스트 */
-  --chart-delta-down:#d03b3b;
+  /* --- Chart: Chrome ----------------------------------------------------- */
+  --chart-surface:    #ffffff;
+  --chart-grid:       #e2e8f0;
+  --chart-axis:       #d4dbe7;
+  --chart-label:      #64748b;
+  --chart-delta-up:   #16a34a;
+  --chart-delta-down: #dc2626;
 }
 
 /* ==========================================================================
-   Dark — OS 설정
+   Dark — OS setting
    ========================================================================== */
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
 
-    --color-plane:            #0d0d0d;
-    --color-surface-1:        #1a1a19;
-    --color-surface-2:        #232322;
-    --color-surface-sunken:   #111110;
-    --color-surface-hover:    rgba(255, 255, 255, 0.06);
-    --color-surface-active:   rgba(255, 255, 255, 0.10);
-    --color-surface-selected: rgba(57, 135, 229, 0.18);
+    --color-brand-primary:        #3b82f6;
+    --color-brand-primary-strong: #3b50ce;
+    --color-brand-on-primary:     #0f172a;
+    --color-brand-container:      #3a44a0;
+    --color-brand-on-container:   #c7d2fe;
 
-    --color-text-primary:     #ffffff;
-    --color-text-secondary:   #c3c2b7;
-    --color-text-muted:       #898781;
-    --color-text-inverse:     #0b0b0b;
-    --color-text-on-warning:  #0b0b0b;
-    --color-text-link:        #3987e5;
+    --color-plane:            #101922;
+    --color-surface-1:        #1e293b;
+    --color-surface-2:        #1e293b;
+    --color-surface-sunken:   #020617;
+    --color-surface-hover:    #334155;
+    --color-surface-active:   #0f172a;
+    --color-surface-selected: var(--color-brand-container);
+    --color-modal-overlay:    rgba(2, 6, 23, 0.80);
 
-    --color-border-subtle:    rgba(255, 255, 255, 0.10);
-    --color-border-default:   #2c2c2a;
-    --color-border-strong:    #383835;
-    --color-border-focus:     #3987e5;
+    --color-text-heading:    #f1f5f9;
+    --color-text-primary:    #f8fafc;
+    --color-text-secondary:  #94a3b8;
+    --color-text-tertiary:   #8a96ad;
+    --color-text-muted:      #94a3b8;
+    --color-text-inverse:    #0f172a;
+    --color-text-on-warning: #0f172a;
+    --color-text-link:       #a5b4fc;
+    --color-text-link-hover: #c7d2fe;
 
-    --color-status-info:      #3987e5;
+    --color-border-subtle: #334155;
+    --color-border-default: #334155;
+    --color-border-strong: #475569;
+    --color-border-focus:  var(--color-brand-primary);
 
-    --series-1:  #3987e5;
-    --series-2:  #d95926;
-    --series-3:  #199e70;
-    --series-4:  #c98500;
-    --series-5:  #d55181;
-    --series-6:  #008300;
-    --series-7:  #9085e9;
-    --series-8:  #e66767;
+    --color-status-good:        #4ade80;
+    --color-status-good-bg:     #1a3a2e;
+    --color-status-warning:     #fbbf24;
+    --color-status-warning-bg:  #3a2e1a;
+    --color-status-serious:     #fb923c;
+    --color-status-serious-bg:  #431f0d;
+    --color-status-critical:    #f87171;
+    --color-status-critical-bg: #3a1a1a;
+    --color-status-unknown:     #94a3b8;
+    --color-status-unknown-bg:  #334155;
+    --color-status-info:        #60a5fa;
+    --color-status-info-bg:     #1e3a5f;
 
-    --div-neg:  #3987e5;
-    --div-mid:  #383835;
-    --div-pos:  #e66767;
+    --series-1:  #5b89d6;
+    --series-2:  #b98a25;
+    --series-3:  #21a18f;
+    --series-4:  #9077ce;
+    --series-5:  #d06565;
+    --series-6:  #3e93c5;
+    --series-7:  #d06f31;
+    --series-8:  #8060b6;
+    --series-9:  #379149;
+    --series-10: #c77299;
 
-    --chart-surface:    #1a1a19;
-    --chart-grid:       #2c2c2a;
-    --chart-axis:       #383835;
-    --chart-label:      #898781;
-    --chart-delta-up:   #0ca30c;
-    --chart-delta-down: #e66767;
+    --chart-surface:    #1e293b;
+    --chart-grid:       #334155;
+    --chart-axis:       #475569;
+    --chart-label:      #94a3b8;
+    --chart-delta-up:   #4ade80;
+    --chart-delta-down: #f87171;
   }
 }
 
 /* ==========================================================================
-   Dark — 사용자 테마 토글 (OS 설정보다 우선)
+   Dark — explicit user theme (wins over OS setting)
    ========================================================================== */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --color-plane:            #0d0d0d;
-  --color-surface-1:        #1a1a19;
-  --color-surface-2:        #232322;
-  --color-surface-sunken:   #111110;
-  --color-surface-hover:    rgba(255, 255, 255, 0.06);
-  --color-surface-active:   rgba(255, 255, 255, 0.10);
-  --color-surface-selected: rgba(57, 135, 229, 0.18);
+  --color-brand-primary:        #3b82f6;
+  --color-brand-primary-strong: #3b50ce;
+  --color-brand-on-primary:     #0f172a;
+  --color-brand-container:      #3a44a0;
+  --color-brand-on-container:   #c7d2fe;
 
-  --color-text-primary:     #ffffff;
-  --color-text-secondary:   #c3c2b7;
-  --color-text-muted:       #898781;
-  --color-text-inverse:     #0b0b0b;
-  --color-text-on-warning:  #0b0b0b;
-  --color-text-link:        #3987e5;
+  --color-plane:            #101922;
+  --color-surface-1:        #1e293b;
+  --color-surface-2:        #1e293b;
+  --color-surface-sunken:   #020617;
+  --color-surface-hover:    #334155;
+  --color-surface-active:   #0f172a;
+  --color-surface-selected: var(--color-brand-container);
+  --color-modal-overlay:    rgba(2, 6, 23, 0.80);
 
-  --color-border-subtle:    rgba(255, 255, 255, 0.10);
-  --color-border-default:   #2c2c2a;
-  --color-border-strong:    #383835;
-  --color-border-focus:     #3987e5;
+  --color-text-heading:    #f1f5f9;
+  --color-text-primary:    #f8fafc;
+  --color-text-secondary:  #94a3b8;
+  --color-text-tertiary:   #8a96ad;
+  --color-text-muted:      #94a3b8;
+  --color-text-inverse:    #0f172a;
+  --color-text-on-warning: #0f172a;
+  --color-text-link:       #a5b4fc;
+  --color-text-link-hover: #c7d2fe;
 
-  --color-status-info:      #3987e5;
+  --color-border-subtle: #334155;
+  --color-border-default: #334155;
+  --color-border-strong: #475569;
+  --color-border-focus:  var(--color-brand-primary);
 
-  --series-1:  #3987e5;
-  --series-2:  #d95926;
-  --series-3:  #199e70;
-  --series-4:  #c98500;
-  --series-5:  #d55181;
-  --series-6:  #008300;
-  --series-7:  #9085e9;
-  --series-8:  #e66767;
+  --color-status-good:        #4ade80;
+  --color-status-good-bg:     #1a3a2e;
+  --color-status-warning:     #fbbf24;
+  --color-status-warning-bg:  #3a2e1a;
+  --color-status-serious:     #fb923c;
+  --color-status-serious-bg:  #431f0d;
+  --color-status-critical:    #f87171;
+  --color-status-critical-bg: #3a1a1a;
+  --color-status-unknown:     #94a3b8;
+  --color-status-unknown-bg:  #334155;
+  --color-status-info:        #60a5fa;
+  --color-status-info-bg:     #1e3a5f;
 
-  --div-neg:  #3987e5;
-  --div-mid:  #383835;
-  --div-pos:  #e66767;
+  --series-1:  #5b89d6;
+  --series-2:  #b98a25;
+  --series-3:  #21a18f;
+  --series-4:  #9077ce;
+  --series-5:  #d06565;
+  --series-6:  #3e93c5;
+  --series-7:  #d06f31;
+  --series-8:  #8060b6;
+  --series-9:  #379149;
+  --series-10: #c77299;
 
-  --chart-surface:    #1a1a19;
-  --chart-grid:       #2c2c2a;
-  --chart-axis:       #383835;
-  --chart-label:      #898781;
-  --chart-delta-up:   #0ca30c;
-  --chart-delta-down: #e66767;
+  --chart-surface:    #1e293b;
+  --chart-grid:       #334155;
+  --chart-axis:       #475569;
+  --chart-label:      #94a3b8;
+  --chart-delta-up:   #4ade80;
+  --chart-delta-down: #f87171;
 }

@@ -18,7 +18,8 @@
   padding: var(--space-5) var(--space-6) var(--space-6);
   background: var(--chart-surface);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
+  box-shadow: var(--elevation-1);
 }
 
 .ds-chart-frame__header {
@@ -96,6 +97,8 @@
 .ds-series-6 { --_series: var(--series-6); }
 .ds-series-7 { --_series: var(--series-7); }
 .ds-series-8 { --_series: var(--series-8); }
+.ds-series-9 { --_series: var(--series-9); }
+.ds-series-10 { --_series: var(--series-10); }
 
 /* --- Tooltip -------------------------------------------------------------- */
 .ds-chart-tooltip {
@@ -105,7 +108,7 @@
   padding: var(--space-4);
   background: var(--color-surface-2);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   box-shadow: var(--elevation-2);
   font: var(--type-meta);
   color: var(--color-text-primary);

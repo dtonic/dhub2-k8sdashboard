@@ -41,7 +41,7 @@ body {
   padding: var(--space-4) var(--space-5);
   border-left: var(--space-1) solid var(--color-border-strong);
   background: var(--color-surface-sunken);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font: var(--type-meta);
   color: var(--color-text-secondary);
 }
@@ -54,7 +54,7 @@ body {
   padding: var(--space-3);
   background: var(--color-surface-1);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
 }
 .ds-swatch__chip {
   height: 40px;

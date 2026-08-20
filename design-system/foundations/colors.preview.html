@@ -24,14 +24,14 @@
   <section class="ds-preview__section">
     <h2 class="ds-preview__section-title">Surface &amp; Ink</h2>
     <div class="ds-preview__grid">
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-plane)"></div><span class="ds-swatch__name">plane</span><span class="ds-swatch__meta">f9f9f7 / 0d0d0d</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-1)"></div><span class="ds-swatch__name">surface-1</span><span class="ds-swatch__meta">fcfcfb / 1a1a19</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-2)"></div><span class="ds-swatch__name">surface-2</span><span class="ds-swatch__meta">ffffff / 232322</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-sunken)"></div><span class="ds-swatch__name">surface-sunken</span><span class="ds-swatch__meta">f2f1ee / 111110</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-primary)"></div><span class="ds-swatch__name">text-primary</span><span class="ds-swatch__meta">0b0b0b / ffffff</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-secondary)"></div><span class="ds-swatch__name">text-secondary</span><span class="ds-swatch__meta">52514e / c3c2b7</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-muted)"></div><span class="ds-swatch__name">text-muted</span><span class="ds-swatch__meta">898781</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-border-default)"></div><span class="ds-swatch__name">border-default</span><span class="ds-swatch__meta">e1e0d9 / 2c2c2a</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-plane)"></div><span class="ds-swatch__name">plane</span><span class="ds-swatch__meta">ffffff / 101922</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-1)"></div><span class="ds-swatch__name">surface-1</span><span class="ds-swatch__meta">ffffff / 1e293b</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-2)"></div><span class="ds-swatch__name">surface-2</span><span class="ds-swatch__meta">ffffff / 1e293b</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-surface-sunken)"></div><span class="ds-swatch__name">surface-sunken</span><span class="ds-swatch__meta">f8fafc / 020617</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-primary)"></div><span class="ds-swatch__name">text-primary</span><span class="ds-swatch__meta">1f2937 / f8fafc</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-secondary)"></div><span class="ds-swatch__name">text-secondary</span><span class="ds-swatch__meta">4b5563 / 94a3b8</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-text-tertiary)"></div><span class="ds-swatch__name">text-tertiary</span><span class="ds-swatch__meta">6b7280 / 8a96ad</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--color-border-default)"></div><span class="ds-swatch__name">border-default</span><span class="ds-swatch__meta">d4dbe7 / 334155</span></div>
     </div>
   </section>
 
@@ -42,40 +42,42 @@
         <tr><th style="width:44px"></th><th>Token</th><th>Kubernetes 상태</th><th>Hex</th></tr>
       </thead>
       <tbody>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-healthy)"></span></td><td><code>--status-healthy</code></td><td>Running / Available</td><td><code>#0ca30c</code></td></tr>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-progressing)"></span></td><td><code>--status-progressing</code></td><td>Rollout 진행 · 정상 Pending</td><td><code>#2a78d6 / #3987e5</code></td></tr>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-warning)"></span></td><td><code>--status-warning</code></td><td>Replica 불일치 · Node Pressure</td><td><code>#fab219</code></td></tr>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-degraded)"></span></td><td><code>--status-degraded</code></td><td>일부 Pod 실패 · Rollout 지연</td><td><code>#ec835a</code></td></tr>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-critical)"></span></td><td><code>--status-critical</code></td><td>CrashLoopBackOff · NotReady</td><td><code>#d03b3b</code></td></tr>
-        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-unknown)"></span></td><td><code>--status-unknown</code></td><td>데이터소스 장애 · Degraded Mode</td><td><code>#898781</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-healthy)"></span></td><td><code>--status-healthy</code></td><td>Running / Available</td><td><code>#16a34a / #4ade80</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-progressing)"></span></td><td><code>--status-progressing</code></td><td>Rollout 진행 · 정상 Pending</td><td><code>#3b50ce / #60a5fa</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-warning)"></span></td><td><code>--status-warning</code></td><td>Replica 불일치 · Node Pressure</td><td><code>#f59e0b / #fbbf24</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-degraded)"></span></td><td><code>--status-degraded</code></td><td>일부 Pod 실패 · Rollout 지연</td><td><code>#f97316 / #fb923c</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-critical)"></span></td><td><code>--status-critical</code></td><td>CrashLoopBackOff · NotReady</td><td><code>#dc2626 / #f87171</code></td></tr>
+        <tr><td><span class="ds-status-dot" style="--_status-color: var(--status-unknown)"></span></td><td><code>--status-unknown</code></td><td>데이터소스 장애 · Degraded Mode</td><td><code>#64748b / #94a3b8</code></td></tr>
       </tbody>
     </table>
     <p class="ds-preview__note">
       Status 색상은 series 색상으로 재사용하지 않습니다. 색상 단독으로 의미를 전달하지 않으며 항상 아이콘 + 텍스트 라벨과 함께 씁니다.
-      Light surface에서 warning(1.79:1)과 serious(2.57:1)는 3:1 미만이므로 이 규칙이 필수입니다.
+      Light surface에서 warning(2.15:1)과 serious(2.80:1)는 3:1 미만이므로 이 규칙이 필수입니다.
     </p>
   </section>
 
   <section class="ds-preview__section">
     <h2 class="ds-preview__section-title">Chart — Categorical series (고정 순서)</h2>
     <div class="ds-preview__grid">
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-1)"></div><span class="ds-swatch__name">series-1 blue</span><span class="ds-swatch__meta">2a78d6 / 3987e5</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-2)"></div><span class="ds-swatch__name">series-2 orange</span><span class="ds-swatch__meta">eb6834 / d95926</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-3)"></div><span class="ds-swatch__name">series-3 aqua</span><span class="ds-swatch__meta">1baf7a / 199e70</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-4)"></div><span class="ds-swatch__name">series-4 yellow</span><span class="ds-swatch__meta">eda100 / c98500</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-5)"></div><span class="ds-swatch__name">series-5 magenta</span><span class="ds-swatch__meta">e87ba4 / d55181</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-6)"></div><span class="ds-swatch__name">series-6 green</span><span class="ds-swatch__meta">008300</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-7)"></div><span class="ds-swatch__name">series-7 violet</span><span class="ds-swatch__meta">4a3aa7 / 9085e9</span></div>
-      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-8)"></div><span class="ds-swatch__name">series-8 red</span><span class="ds-swatch__meta">e34948 / e66767</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-1)"></div><span class="ds-swatch__name">series-1 blue</span><span class="ds-swatch__meta">4e77b8 / 5b89d6</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-2)"></div><span class="ds-swatch__name">series-2 amber</span><span class="ds-swatch__meta">ddaa44 / b98a25</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-3)"></div><span class="ds-swatch__name">series-3 teal</span><span class="ds-swatch__meta">1d9e8f / 21a18f</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-4)"></div><span class="ds-swatch__name">series-4 slate</span><span class="ds-swatch__meta">7e63a5 / 9077ce</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-5)"></div><span class="ds-swatch__name">series-5 coral</span><span class="ds-swatch__meta">c24848 / d06565</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-6)"></div><span class="ds-swatch__name">series-6 light blue</span><span class="ds-swatch__meta">277fa8 / 3e93c5</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-7)"></div><span class="ds-swatch__name">series-7 orange</span><span class="ds-swatch__meta">d9702b / d06f31</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-8)"></div><span class="ds-swatch__name">series-8 tinted gray</span><span class="ds-swatch__meta">6b4b9a / 8060b6</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-9)"></div><span class="ds-swatch__name">series-9 green</span><span class="ds-swatch__meta">2e8747 / 379149</span></div>
+      <div class="ds-swatch"><div class="ds-swatch__chip" style="background: var(--series-10)"></div><span class="ds-swatch__name">series-10 pink</span><span class="ds-swatch__meta">cd749c / c77299</span></div>
     </div>
     <p class="ds-preview__note">
-      슬롯 순서는 색각 이상 안전성을 위한 장치입니다. 순환 배정 금지, 9번째 계열은 "Other"로 접거나 small multiples로 분리합니다.
+      슬롯 순서는 색각 이상 안전성을 위한 장치입니다. 순환 배정 금지, 11번째 계열은 "Other"로 접거나 small multiples로 분리합니다.
       산점도 · 버블 · 코로플레스처럼 모든 계열 쌍이 동시에 보이는 형태는 3계열까지만 사용합니다.
     </p>
   </section>
 
   <section class="ds-preview__section">
-    <h2 class="ds-preview__section-title">Chart — Sequential (blue) &amp; Diverging (blue ↔ red)</h2>
+    <h2 class="ds-preview__section-title">Chart — Sequential (blue) &amp; Diverging (teal ↔ coral)</h2>
     <div class="ds-preview__row">
       <div style="display:flex; border-radius: var(--radius-sm); overflow:hidden; border:1px solid var(--color-border-subtle)">
         <div style="width:44px;height:36px;background:var(--seq-100)"></div>
@@ -94,7 +96,7 @@
     </div>
     <p class="ds-preview__note">
       Sequential은 단일 hue 명도 램프만 사용합니다(무지개 금지). Diverging은 중립 회색 midpoint를 유지합니다.
-      Ordinal(이산 순서) 램프는 light에서 <code>--seq-250</code>보다 밝게, dark에서 <code>--seq-600</code>보다 어둡게 가지 않습니다.
+      이 램프를 이산 ordinal 용도로 사용할 때는 선택한 단계만 별도로 validator에 통과시켜야 합니다.
     </p>
   </section>
 </main>

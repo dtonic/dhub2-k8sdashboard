@@ -76,7 +76,8 @@
   min-height: 0;
   background: var(--color-surface-1);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-default);
+  box-shadow: var(--elevation-1);
   overflow: hidden;
 }
 

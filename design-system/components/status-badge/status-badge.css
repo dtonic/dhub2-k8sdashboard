@@ -12,9 +12,9 @@
   gap: var(--space-3);
   height: var(--control-height-sm);
   padding: 0 var(--space-4) 0 var(--space-3);
-  border: var(--border-hairline) solid var(--color-border-subtle);
+  border: var(--border-hairline) solid var(--_status-color, var(--color-border-subtle));
   border-radius: var(--radius-full);
-  background: var(--color-surface-1);
+  background: var(--_status-background, var(--color-surface-1));
   font: var(--type-label);
   color: var(--color-text-primary);
   white-space: nowrap;
@@ -46,15 +46,16 @@
 }
 
 /* --- Variants ------------------------------------------------------------- */
-.ds-status-badge--healthy      { --_status-color: var(--status-healthy); }
-.ds-status-badge--progressing  { --_status-color: var(--status-progressing); }
-.ds-status-badge--warning      { --_status-color: var(--status-warning); }
-.ds-status-badge--degraded     { --_status-color: var(--status-degraded); }
-.ds-status-badge--critical     { --_status-color: var(--status-critical); }
-.ds-status-badge--unknown      { --_status-color: var(--status-unknown); }
+.ds-status-badge--healthy      { --_status-color: var(--status-healthy); --_status-background: var(--color-status-good-bg); }
+.ds-status-badge--progressing  { --_status-color: var(--status-progressing); --_status-background: var(--color-status-info-bg); }
+.ds-status-badge--warning      { --_status-color: var(--status-warning); --_status-background: var(--color-status-warning-bg); }
+.ds-status-badge--degraded     { --_status-color: var(--status-degraded); --_status-background: var(--color-status-serious-bg); }
+.ds-status-badge--critical     { --_status-color: var(--status-critical); --_status-background: var(--color-status-critical-bg); }
+.ds-status-badge--unknown      { --_status-color: var(--status-unknown); --_status-background: var(--color-status-unknown-bg); }
 
-/* warning은 밝은 노랑이라 흰 글리프 텍스트 대비가 부족합니다. */
-.ds-status-badge--warning .ds-status-badge__glyph { color: var(--color-text-on-warning); }
+/* warning/serious는 밝은 색이라 흰 글리프 텍스트 대비가 부족합니다. */
+.ds-status-badge--warning .ds-status-badge__glyph,
+.ds-status-badge--degraded .ds-status-badge__glyph { color: var(--color-text-on-warning); }
 
 /* --- Sizes ---------------------------------------------------------------- */
 .ds-status-badge--sm {

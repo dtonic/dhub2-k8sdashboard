@@ -3,7 +3,7 @@
 .topo-canvas {
   height: 520px;
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--color-surface-1);
   overflow: hidden;
 }
@@ -27,7 +27,7 @@
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border-default);
   border-left: 3px solid var(--status-healthy);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--color-surface-2);
   font: var(--type-body);
   color: var(--color-text-primary);
@@ -122,7 +122,7 @@
 .topo-node__proto {
   padding: 0 5px;
   border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: var(--color-surface-sunken);
   color: var(--color-text-secondary);
   font: var(--type-meta);
@@ -169,7 +169,7 @@
 
 .topo-canvas .react-flow__controls {
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   overflow: hidden;
   box-shadow: none;
 }
@@ -187,7 +187,7 @@
 .topo-canvas__minimap {
   background: var(--color-surface-1);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
 }
 
 .topo-canvas .react-flow__minimap-mask {

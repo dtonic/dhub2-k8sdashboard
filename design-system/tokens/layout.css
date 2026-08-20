@@ -1,24 +1,24 @@
 /* ==========================================================================
    K8s Dashboard — Layout / Space / Motion Tokens
    --------------------------------------------------------------------------
-   - 4px 그리드 기반입니다. 임의 픽셀값 대신 space 토큰을 사용합니다.
+   - Portal spacing scale(2/4/8/12/16/24/32/48/64/96)을 역할 토큰에 매핑합니다.
    - 대시보드는 스캔 밀도가 중요하므로 density 토큰으로 행 높이를 통일합니다.
    - 차트 마크 규격(dataviz)은 chart-* 토큰으로 고정합니다.
    ========================================================================== */
 
 :root {
-  /* --- Space (4px grid) --------------------------------------------------- */
+  /* --- Space (Portal scale; duplicate aliases preserve consumer names) --- */
   --space-0:   0;
   --space-1:   2px;
   --space-2:   4px;
-  --space-3:   6px;
+  --space-3:   8px;
   --space-4:   8px;
   --space-5:  12px;
   --space-6:  16px;
-  --space-7:  20px;
+  --space-7:  24px;
   --space-8:  24px;
   --space-9:  32px;
-  --space-10: 40px;
+  --space-10: 48px;
   --space-11: 48px;
   --space-12: 64px;
 
@@ -27,7 +27,8 @@
   --radius-sm:   4px; /* 차트 데이터 끝단 라운딩 */
   --radius-md:   6px;
   --radius-lg:   8px;
-  --radius-xl:  12px;
+  --radius-xl:  12px; /* 그래프 노드 등 명시적 강조 컨테이너 */
+  --radius-default: var(--radius-lg);
   --radius-full: 999px;
 
   /* --- Border width ------------------------------------------------------- */
@@ -38,9 +39,9 @@
 
   /* --- Elevation ---------------------------------------------------------- */
   --elevation-0: none;
-  --elevation-1: 0 1px 2px rgba(11, 11, 11, 0.06);
-  --elevation-2: 0 2px 8px rgba(11, 11, 11, 0.10);
-  --elevation-3: 0 8px 24px rgba(11, 11, 11, 0.14);
+  --elevation-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --elevation-2: 0 8px 20px rgba(15, 23, 42, 0.12);
+  --elevation-3: 0 18px 36px rgba(148, 163, 184, 0.20);
 
   /* --- Density (행 높이 · 컨트롤 높이) ------------------------------------ */
   --density-row-compact:     28px; /* 로그 라인 · 조밀 표 */
@@ -51,17 +52,17 @@
   --control-height-lg:  40px;
 
   /* --- Layout frame ------------------------------------------------------- */
-  --layout-topbar-height:    48px;
+  --layout-topbar-height:    50px;
   --layout-sidebar-width:   240px;
-  --layout-sidebar-collapsed: 56px;
-  --layout-content-max:    1600px;
+  --layout-sidebar-collapsed: 60px;
+  --layout-content-max:    1400px;
   --layout-gutter:  var(--space-6);
   --layout-grid-gap: var(--space-5);
 
   /* --- Chart marks (dataviz 규격) ----------------------------------------- */
   --chart-line-width:      2px;
   --chart-marker-size:     8px;   /* 최소 마커 크기 */
-  --chart-bar-radius:      4px;   /* 데이터 끝단만 라운딩, baseline은 각지게 */
+  --chart-bar-radius:      var(--radius-sm); /* 데이터 끝단만 라운딩 */
   --chart-mark-gap:        2px;   /* 인접 fill 사이 surface 간격 */
   --chart-grid-width:      1px;
   --chart-hit-padding:     6px;   /* 마크보다 큰 히트 영역 */
@@ -94,18 +95,4 @@
     --duration-normal:  0ms;
     --duration-slow:    0ms;
   }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.40);
-    --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.50);
-    --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.60);
-  }
-}
-
-:root[data-theme="dark"] {
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.40);
-  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.50);
-  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.60);
 }

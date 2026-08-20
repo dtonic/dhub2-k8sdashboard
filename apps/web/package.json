@@ -18,8 +18,12 @@
     "test:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@fontsource/fira-code": "5.3.0",
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/roboto": "5.3.0",
     "@k8s-dashboard/contracts": "*",
     "@k8s-dashboard/dashboard-schema": "*",
+    "@k8s-dashboard/design-system": "*",
     "@tanstack/react-query": "^5.59.0",
     "@xyflow/react": "^12.11.3",
     "js-yaml": "^5.3.0",

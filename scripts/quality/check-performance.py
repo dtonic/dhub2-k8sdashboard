@@ -31,12 +31,12 @@ def validate_benchmarks(output, budgets):
                 errors.append(f"{name} sample {index} bytes {bytes_per_op} > {limits['maxBytesPerOp']}")
     return errors
 
-def validate_bundle_sizes(raw, zipped, limits):
+def validate_bundle_sizes(raw, zipped, limits, label="web bundle"):
     errors = []
     if raw > limits["maxRawBytes"]:
-        errors.append(f"web raw bundle {raw} > {limits['maxRawBytes']}")
+        errors.append(f"{label} raw {raw} > {limits['maxRawBytes']}")
     if zipped > limits["maxGzipBytes"]:
-        errors.append(f"web gzip bundle {zipped} > {limits['maxGzipBytes']}")
+        errors.append(f"{label} gzip {zipped} > {limits['maxGzipBytes']}")
     return errors
 
 def validate_mock_absence(asset_bytes, worker_exists):
@@ -48,14 +48,32 @@ def validate_mock_absence(asset_bytes, worker_exists):
         errors.append("production assets contain MSW runtime")
     return errors
 
-def validate_bundle(root, limits):
+def asset_sizes(files):
+    raw = sum(path.stat().st_size for path in files)
+    zipped = sum(len(gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)) for path in files)
+    return raw, zipped
+
+def validate_font_assets(font_files):
+    errors = []
+    if not font_files:
+        errors.append("production font assets are missing")
+    if any(path.suffix == ".woff" for path in font_files):
+        errors.append("production bundle contains duplicate legacy WOFF font assets")
+    return errors
+
+def validate_bundle(root, limits, font_limits):
     files = [path for path in (root / "apps" / "web" / "dist" / "assets").rglob("*") if path.is_file() and not path.name.endswith(".map")]
     if not files:
         return ["production bundle assets are missing"]
-    raw = sum(path.stat().st_size for path in files)
-    zipped = sum(len(gzip.compress(path.read_bytes(), compresslevel=9, mtime=0)) for path in files)
-    print(f"web bundle: raw={raw} bytes, gzip={zipped} bytes, files={len(files)}")
-    errors = validate_bundle_sizes(raw, zipped, limits)
+    font_files = [path for path in files if path.suffix in {".woff", ".woff2"}]
+    app_files = [path for path in files if path not in font_files]
+    app_raw, app_zipped = asset_sizes(app_files)
+    font_raw, font_zipped = asset_sizes(font_files)
+    print(f"web bundle: raw={app_raw} bytes, gzip={app_zipped} bytes, files={len(app_files)}")
+    print(f"web fonts: raw={font_raw} bytes, gzip={font_zipped} bytes, files={len(font_files)}")
+    errors = validate_bundle_sizes(app_raw, app_zipped, limits)
+    errors.extend(validate_bundle_sizes(font_raw, font_zipped, font_limits, "web fonts"))
+    errors.extend(validate_font_assets(font_files))
     errors.extend(validate_mock_absence(
         [path.read_bytes() for path in files],
         (root / "apps" / "web" / "dist" / "mockServiceWorker.js").exists(),
@@ -92,12 +110,18 @@ if args.self_test:
         raise SystemExit("MSW runtime mutation was masked")
     if len(validate_mock_absence([], True)) != 1:
         raise SystemExit("MSW worker mutation was masked")
+    if len(validate_font_assets([])) != 1:
+        raise SystemExit("missing font asset mutation was masked")
+    if len(validate_font_assets([pathlib.Path("font.woff")])) != 1:
+        raise SystemExit("legacy WOFF mutation was masked")
     print("negative mutation passed: allocation overbudget was rejected")
     print("negative mutation passed: byte overbudget was rejected")
     print("negative mutation passed: raw bundle overbudget was rejected")
     print("negative mutation passed: gzip bundle overbudget was rejected")
     print("negative mutation passed: MSW runtime was rejected")
     print("negative mutation passed: MSW worker was rejected")
+    print("negative mutation passed: missing font assets were rejected")
+    print("negative mutation passed: duplicate legacy WOFF was rejected")
     raise SystemExit(0)
 
 errors = []
@@ -111,6 +135,6 @@ if not args.bundle_only:
         raise SystemExit(bench.returncode)
     errors.extend(validate_benchmarks(bench.stdout, BUDGETS["goBenchmarks"]))
 if not args.go_only:
-    errors.extend(validate_bundle(ROOT, BUDGETS["webBundle"]))
+    errors.extend(validate_bundle(ROOT, BUDGETS["webBundle"], BUDGETS["webFonts"]))
 if errors:
     raise SystemExit("\n".join(errors))

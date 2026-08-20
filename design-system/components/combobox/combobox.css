@@ -25,7 +25,7 @@
   background: var(--color-surface-1);
   color: var(--color-text-primary);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font: var(--type-label);
 }
 
@@ -62,7 +62,7 @@
   list-style: none;
   background: var(--color-surface-2);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   box-shadow: var(--elevation-2);
 }
 
@@ -72,7 +72,7 @@
   gap: var(--space-2);
   min-height: var(--density-row-compact);
   padding: 0 var(--space-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   color: var(--color-text-primary);
   font: var(--type-label);
   cursor: default;

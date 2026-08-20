@@ -16,7 +16,7 @@ design-system/
 ├── portal/                     # dhub2-portal 원천의 고정 SHA 스냅숏
 │   ├── UPSTREAM                #   repository / source / ref / commit
 │   └── MANIFEST                #   Git blob SHA별 vendored 파일 목록
-├── tokens/                     # 디자인 토큰 (원천)
+├── tokens/                     # Portal 값을 앱 역할 토큰으로 정제
 │   ├── color.css               #   surface/ink/status/series/sequential/diverging
 │   ├── typography.css          #   family/size/weight/leading + composite role
 │   ├── layout.css              #   space/radius/elevation/density/motion/chart mark
@@ -69,7 +69,7 @@ npm run check   # 파일을 쓰지 않고 검증만 (CI용)
 
 - `good / warning / serious / critical`은 **예약어**입니다. 차트 계열 색으로 절대 재사용하지 않습니다.
 - 색상 단독으로 의미를 전달하지 않습니다. 항상 **아이콘 글리프 + 텍스트 라벨**과 함께 렌더링합니다.
-  Light surface에서 warning(1.79:1)과 serious(2.57:1)는 3:1 미만이므로 이 규칙이 필수입니다.
+  Light surface에서 warning(2.15:1)과 serious(2.80:1)는 3:1 미만이므로 이 규칙이 필수입니다.
 - Kubernetes 도메인 상태는 `--status-healthy / progressing / warning / degraded / critical / unknown`
   별칭을 통해 매핑합니다. 컴포넌트는 별칭을 쓰고, 원본 `--color-status-*`는 토큰 파일 안에서만 씁니다.
 
@@ -78,7 +78,7 @@ npm run check   # 파일을 쓰지 않고 검증만 (CI용)
 `dataviz` 규칙을 따릅니다. 위반하면 리뷰에서 반려합니다.
 
 - **이중 y축 금지.** 단위가 다른 두 지표는 차트를 나누거나 공통 기준으로 지수화합니다.
-- **계열 색은 고정 순서로만 배정하고 순환시키지 않습니다.** 9번째 계열은 새 색을 만들지 않고
+- **계열 색은 고정 순서로만 배정하고 순환시키지 않습니다.** 11번째 계열은 새 색을 만들지 않고
   "Other"로 접거나 small multiples로 분리합니다.
 - **색은 엔티티에 고정합니다.** 필터로 계열 수가 줄어도 남은 계열을 재도색하지 않습니다.
 - 산점도 · 버블 · 코로플레스처럼 모든 계열 쌍이 동시에 보이는 형태는 **3계열까지만** 사용합니다.
@@ -92,8 +92,16 @@ npm run check   # 파일을 쓰지 않고 검증만 (CI용)
 | 항목 | 결과 |
 |---|---|
 | 검증 도구 | `dataviz` 스킬의 `scripts/validate_palette.js` |
-| Light (surface `#fcfcfb`) | ALL CHECKS PASS · 최악 인접 CVD ΔE 9.1 · 최악 인접 normal ΔE 19.6 · 대비 WARN 3건(aqua/yellow/magenta) → 직접 라벨 또는 표 보기 필수 |
-| Dark (surface `#1a1a19`) | ALL CHECKS PASS · 최악 인접 CVD ΔE 8.4 · 최악 인접 normal ΔE 19.3 · 전 계열 3:1 이상 |
+| Light (surface `#ffffff`) | 10 slots · ALL CHECKS PASS · 최악 인접 CVD ΔE 10.9 · 최악 인접 normal ΔE 17.6 · 대비 WARN 1건(amber `2.12:1`) |
+| Dark (surface `#1e293b`) | 10 slots · ALL CHECKS PASS · 최악 인접 CVD ΔE 10.4 · 최악 인접 normal ΔE 17.9 · 대비 WARN 1건(violet `2.97:1`) |
+
+Portal 원본 10색의 고정 순서는 validator의 인접 분리 기준을 통과하도록
+`0 → 2 → 1 → 5 → 3 → 7 → 8 → 9 → 4 → 6`으로 재배열했습니다.
+Light는 `#4E77B8,#DDAA44,#1D9E8F,#7E63A5,#C24848,#277FA8,#D9702B,#6B4B9A,#2E8747,#CD749C`,
+Dark는 `#5B89D6,#B98A25,#21A18F,#9077CE,#D06565,#3E93C5,#D06F31,#8060B6,#379149,#C77299`입니다.
+원본 muted RGBA를 그대로 쓰면 명도·채도·인접 분리 gate가 실패하므로 각 hue의 명도/채도를 조정했고,
+중립 gray 슬롯은 categorical chroma floor를 만족할 수 없어 violet tint로 조정했습니다. 두 WARN 슬롯은
+직접 라벨 또는 표 보기를 반드시 함께 제공합니다.
 
 > 계열 hex를 바꾸면 **반드시 두 모드 모두 재검증**하고 이 표를 갱신합니다. 검증 없이 색을 바꾸지 않습니다.
 
@@ -141,7 +149,7 @@ Pod 간 통신 그래프(`components/topology/`)에만 적용되는 규칙입니
 ### 4.1 흐름
 
 ```text
-tokens/ · components/ · foundations/  (원천, git)
+portal/ (고정 upstream) → tokens/ · components/ · foundations/  (소비·정제 계층)
         │  npm run build
         ▼
 design-system/dist/**/*.preview.html  (자기완결 HTML)

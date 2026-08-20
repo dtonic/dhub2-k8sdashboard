@@ -18,7 +18,7 @@ body {
 .builder-widget .panel__header { cursor: grab; user-select: none; }
 
 a { color: var(--color-text-link); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { color: var(--color-text-link-hover); text-decoration: underline; }
 
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--color-border-focus);
@@ -32,7 +32,7 @@ a:hover { text-decoration: underline; }
   z-index: var(--z-toast);
   padding: var(--space-3) var(--space-5);
   background: var(--color-surface-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   transition: top var(--duration-fast) var(--ease-standard);
 }
 .skip-link:focus { top: var(--space-4); }
@@ -59,7 +59,7 @@ a:hover { text-decoration: underline; }
 .app__brand-mark {
   width: 20px; height: 20px; flex: 0 0 auto;
   border-radius: var(--radius-xs);
-  background: var(--series-1);
+  background: var(--color-brand-primary);
   forced-color-adjust: none;
 }
 
@@ -100,7 +100,7 @@ a:hover { text-decoration: underline; }
   gap: var(--space-3);
   height: var(--density-row-default);
   padding: 0 var(--space-4);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   color: var(--color-text-secondary);
   font: var(--type-body);
 }
@@ -247,7 +247,7 @@ a:hover { text-decoration: underline; }
   display: inline-flex; align-items: center; gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   min-width: 108px;
 }
 .severity-chip__count {
@@ -272,7 +272,7 @@ a:hover { text-decoration: underline; }
   background: var(--color-surface-1);
   color: var(--color-text-primary);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font: var(--type-label);
 }
 
@@ -343,7 +343,7 @@ a:hover { text-decoration: underline; }
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   font: var(--type-table-cell);
 }
 .owner-chain__item--current { border-color: var(--color-border-focus); }
@@ -393,7 +393,7 @@ a:hover { text-decoration: underline; }
   background: var(--color-surface-1);
   color: var(--color-text-primary);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   font: var(--type-body);
   max-width: 320px;
 }
@@ -405,7 +405,7 @@ a:hover { text-decoration: underline; }
   padding: var(--space-4) var(--space-5);
   border: var(--border-hairline) solid var(--color-border-subtle);
   border-left-width: var(--space-2);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   background: var(--color-surface-1);
   font: var(--type-body);
 }
@@ -489,7 +489,7 @@ a:hover { text-decoration: underline; }
 .btn {
   font: var(--type-body-strong);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   border: 1px solid var(--color-border-default);
   background: var(--color-surface-2);
   color: var(--color-text-primary);
@@ -498,7 +498,7 @@ a:hover { text-decoration: underline; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn--warning { border-color: var(--status-warning); color: var(--status-warning); }
 .btn--critical { border-color: var(--status-critical); color: var(--color-text-inverse); background: var(--status-critical); }
-.btn--primary { border-color: var(--color-text-link); background: var(--color-text-link); color: var(--color-text-inverse); }
+.btn--primary { border-color: var(--color-brand-primary); background: linear-gradient(180deg, var(--color-brand-primary), var(--color-brand-primary-strong)); color: var(--color-brand-on-primary); }
 .btn--sm { font: var(--type-meta); padding: var(--space-1) var(--space-3); }
 .btn--icon { font: var(--type-meta); padding: var(--space-1) var(--space-2); min-width: 2.2em; text-align: center; }
 
@@ -511,7 +511,7 @@ a:hover { text-decoration: underline; }
 .builder-list__title:hover { text-decoration: underline; }
 .builder-list__meta { font: var(--type-meta); color: var(--color-text-muted); display: flex; align-items: center; gap: var(--space-2); }
 
-.builder-badge { font: var(--type-meta); padding: 0 var(--space-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border-default); }
+.builder-badge { font: var(--type-meta); padding: 0 var(--space-2); border-radius: var(--radius-full); border: 1px solid var(--color-border-default); }
 .builder-badge--draft { color: var(--color-text-muted); }
 .builder-badge--submitted { color: var(--color-status-info); border-color: var(--color-status-info); }
 .builder-badge--approved { color: var(--color-status-good); border-color: var(--color-status-good); }
@@ -520,7 +520,7 @@ a:hover { text-decoration: underline; }
 
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 50;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--color-modal-overlay);
   display: flex; align-items: center; justify-content: center;
   padding: var(--space-4);
 }
@@ -528,9 +528,9 @@ a:hover { text-decoration: underline; }
   width: min(480px, 100%);
   background: var(--color-surface-1);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-default);
   padding: var(--space-6);
-  box-shadow: var(--shadow-lg, 0 10px 40px rgba(0, 0, 0, 0.3));
+  box-shadow: var(--elevation-3);
 }
 .confirm-dialog__title { font: var(--type-section-title); margin: 0 0 var(--space-3); }
 .confirm-dialog__message { font: var(--type-body); color: var(--color-text-secondary); margin: 0 0 var(--space-6); }
@@ -543,7 +543,7 @@ a:hover { text-decoration: underline; }
   font: var(--type-code);
   padding: var(--space-3);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: var(--color-surface-sunken);
   color: var(--color-text-primary);
   white-space: pre; overflow-wrap: normal; overflow-x: auto;
@@ -559,7 +559,7 @@ a:hover { text-decoration: underline; }
   font: var(--type-code);
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-default);
   background: var(--color-surface-2);
   color: var(--color-text-primary);
 }

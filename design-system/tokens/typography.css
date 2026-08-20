@@ -1,30 +1,33 @@
 /* ==========================================================================
    K8s Dashboard — Typography Tokens
    --------------------------------------------------------------------------
-   - UI 전반은 시스템 sans 하나만 사용합니다. display/serif 폰트는 쓰지 않습니다.
+   - Portal과 동일하게 UI는 Inter 400–600, 페이지/섹션 제목은 Roboto 700을 사용합니다.
+   - 폰트 파일은 apps/web의 @fontsource 의존성으로 자체 번들합니다.
    - Pod 이름, Container ID, 로그 본문 등 식별자/원문은 mono를 사용합니다.
    - 세로 정렬이 필요한 표·축 눈금에만 tabular-nums를 적용합니다.
      (Stat tile의 대형 수치는 기본 비례 숫자를 사용)
-   - 대시보드는 정보 밀도가 높으므로 기본 본문은 13px입니다.
+   - Fira Code는 Pod 이름, Container ID, 로그 본문 등 식별자/원문에만 사용합니다.
    ========================================================================== */
 
 :root {
   /* --- Family ------------------------------------------------------------- */
-  --font-sans: "Pretendard Variable", Pretendard, system-ui, -apple-system,
-               "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "D2Coding",
-               Consolas, "Liberation Mono", monospace;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo",
+               "Noto Sans KR", sans-serif;
+  --font-heading: "Roboto", "Inter", system-ui, -apple-system, "Segoe UI",
+                  "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, "D2Coding", Consolas,
+               "Liberation Mono", monospace;
 
   /* --- Size (dense dashboard scale) --------------------------------------- */
-  --text-2xs: 11px; /* 축 눈금 · 배지 · 조밀한 메타 */
-  --text-xs:  12px; /* 표 셀 · 보조 라벨 */
-  --text-sm:  13px; /* 본문 기본 */
-  --text-md:  14px; /* 폼 컨트롤 · 강조 본문 */
-  --text-lg:  16px; /* 패널 제목 */
-  --text-xl:  20px; /* 섹션 제목 */
-  --text-2xl: 24px; /* 페이지 제목 */
-  --text-3xl: 32px; /* Stat tile 수치 */
-  --text-4xl: 40px; /* Hero 수치 */
+  --text-2xs: 11px;
+  --text-xs:  12px;
+  --text-sm:  13px;
+  --text-md:  14px;
+  --text-lg:  16px;
+  --text-xl:  18px;
+  --text-2xl: 20px;
+  --text-3xl: 24px;
+  --text-4xl: 30px;
 
   /* --- Weight ------------------------------------------------------------- */
   --weight-regular:  400;
@@ -34,24 +37,26 @@
 
   /* --- Line height -------------------------------------------------------- */
   --leading-tight:   1.2;  /* 수치 · 제목 */
-  --leading-snug:    1.4;  /* 표 · 조밀한 UI */
-  --leading-normal:  1.55; /* 본문 */
+  --leading-snug:    1.35; /* 표 · 조밀한 UI */
+  --leading-normal:  1.5;  /* 본문 */
   --leading-loose:   1.7;  /* 문서형 텍스트 */
 
   /* --- Letter spacing ----------------------------------------------------- */
-  --tracking-tight:  -0.01em; /* 대형 수치 */
+  --tracking-tight:  -0.02em; /* 제목 · 대형 수치 */
+  --tracking-snug:   -0.01em;
   --tracking-normal: 0;
-  --tracking-wide:   0.04em;  /* 전체 대문자 라벨 */
+  --tracking-wide:   0.05em;  /* 전체 대문자 라벨 */
 
   /* --- Composite roles ---------------------------------------------------- */
-  --type-page-title:   var(--weight-semibold) var(--text-2xl) / var(--leading-tight) var(--font-sans);
-  --type-section-title:var(--weight-semibold) var(--text-xl)  / var(--leading-tight) var(--font-sans);
-  --type-panel-title:  var(--weight-semibold) var(--text-lg)  / var(--leading-snug)  var(--font-sans);
-  --type-body:         var(--weight-regular)  var(--text-sm)  / var(--leading-normal)var(--font-sans);
-  --type-body-strong:  var(--weight-medium)   var(--text-sm)  / var(--leading-normal)var(--font-sans);
+  --type-page-title:   var(--weight-bold)     var(--text-4xl) / var(--leading-tight) var(--font-heading);
+  --type-section-title:var(--weight-bold)     var(--text-3xl) / var(--leading-tight) var(--font-heading);
+  --type-panel-title:  var(--weight-semibold) var(--text-xl)  / var(--leading-snug)  var(--font-sans);
+  --type-body:         var(--weight-regular)  var(--text-md)  / var(--leading-normal)var(--font-sans);
+  --type-body-strong:  var(--weight-medium)   var(--text-md)  / var(--leading-normal)var(--font-sans);
   --type-table-cell:   var(--weight-regular)  var(--text-xs)  / var(--leading-snug)  var(--font-sans);
-  --type-label:        var(--weight-medium)   var(--text-xs)  / var(--leading-snug)  var(--font-sans);
+  --type-label:        var(--weight-medium)   var(--text-sm)  / var(--leading-snug)  var(--font-sans);
   --type-meta:         var(--weight-regular)  var(--text-2xs) / var(--leading-snug)  var(--font-sans);
-  --type-metric:       var(--weight-semibold) var(--text-3xl) / var(--leading-tight) var(--font-sans);
-  --type-code:         var(--weight-regular)  var(--text-xs)  / var(--leading-normal)var(--font-mono);
+  --type-metric:       var(--weight-semibold) var(--text-4xl) / var(--leading-tight) var(--font-sans);
+  --type-display:      var(--type-metric);
+  --type-code:         var(--weight-regular)  var(--text-md)  / var(--leading-normal)var(--font-mono);
 }

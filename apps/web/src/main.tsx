@@ -15,6 +15,7 @@ import { ManageView } from "@/features/manage/ManageView";
 import { AlertsView } from "@/features/alerts/AlertsView";
 import { DashboardView } from "@/features/dashboards/DashboardView";
 import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
+import "./styles/fonts.css";
 import "./styles/index.css";
 import { AuthGate } from "@/app/AuthGate";
 import { usingMockApi } from "@/lib/env";

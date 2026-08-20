@@ -190,7 +190,7 @@ Kubernetes API를 매 요청마다 직접 조회하지 않고 Shared Informer Ca
 - **상태 색은 예약어입니다.** `good / warning / serious / critical`을 차트 계열 색으로
   재사용하지 않고, 항상 아이콘 + 텍스트 라벨과 함께 렌더링합니다.
 - **차트 팔레트는 검증된 값만 씁니다.** 명도 대역 · 채도 하한 · 인접 쌍 색각 이상 분리 ·
-  정상 시야 하한 · 표면 대비를 Light/Dark 두 모드에서 통과한 8슬롯 고정 순서 팔레트를 사용하며,
+  정상 시야 하한 · 표면 대비를 Light/Dark 두 모드에서 통과한 10슬롯 고정 순서 팔레트를 사용하며,
   계열 색을 바꿀 때는 검증을 재실행하고 결과를 기록합니다.
 - **Light/Dark는 자동 반전이 아닙니다.** 각 표면에 맞춰 별도로 고른 값을 선언하며,
   사용자 테마 토글이 OS 설정보다 우선합니다.
@@ -315,7 +315,7 @@ k8s-dashboard/
 │   └── web/                    # React/TypeScript UI
 ├── design-system/              # 디자인 토큰 · 컴포넌트 스타일 · Claude Design preview
 │   ├── portal/                 #   dhub2-portal 디자인 원천의 고정 SHA 스냅숏
-│   ├── tokens/                 #   color / typography / layout (단일 원천)
+│   ├── tokens/                 #   Portal 값을 앱 역할 토큰으로 정제
 │   ├── components/             #   컴포넌트 CSS + *.preview.html
 │   ├── foundations/            #   토큰 자체를 보여주는 preview
 │   ├── previews/               #   preview 전용 레이아웃

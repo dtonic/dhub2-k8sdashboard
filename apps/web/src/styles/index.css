@@ -2,7 +2,7 @@
    앱 스타일 진입점
    --------------------------------------------------------------------------
    디자인 시스템은 복사하지 않고 그대로 참조합니다. 토큰과 컴포넌트 CSS의
-   단일 원천은 design-system/ 입니다. (ADR 0001)
+   소비·정제 계층은 design-system/ 입니다. (ADR 0017)
    ========================================================================== */
 @import "@k8s-dashboard/design-system/tokens/index.css";
 @import "@k8s-dashboard/design-system/components/status-badge/status-badge.css";
@@ -28,16 +28,16 @@
   text-align: center;
   background: var(--color-surface-2);
   border: var(--border-hairline) solid var(--color-border-subtle);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-default);
   box-shadow: var(--elevation-2);
 }
 .auth-login__eyebrow { display: block; color: var(--color-text-muted); font: var(--type-label); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
-.auth-login__mark { display: grid; place-items: center; width: var(--space-11); height: var(--space-11); margin: var(--space-8) auto var(--space-6); border-radius: var(--radius-xl); color: var(--color-text-inverse); background: var(--color-text-link); font: var(--weight-bold) var(--text-xl) / 1 var(--font-sans); }
+.auth-login__mark { display: grid; place-items: center; width: var(--space-11); height: var(--space-11); margin: var(--space-8) auto var(--space-6); border-radius: var(--radius-default); color: var(--color-brand-on-primary); background: var(--color-brand-primary); font: var(--weight-bold) var(--text-xl) / 1 var(--font-sans); }
 .auth-login__card h1 { margin: 0; font: var(--type-page-title); }
 .auth-login__card p { margin: var(--space-5) auto 0; max-width: calc(var(--space-12) * 5); color: var(--color-text-secondary); }
 .auth-login__actions { display: grid; gap: var(--space-5); margin-top: var(--space-8); }
-.auth-login__primary, .auth-login__secondary { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height-lg); padding: 0 var(--space-6); border-radius: var(--radius-md); font: var(--type-body-strong); cursor: pointer; }
-.auth-login__primary { color: var(--color-text-inverse); background: var(--color-text-link); }
+.auth-login__primary, .auth-login__secondary { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height-lg); padding: 0 var(--space-6); border-radius: var(--radius-default); font: var(--type-body-strong); cursor: pointer; }
+.auth-login__primary { color: var(--color-brand-on-primary); background: linear-gradient(180deg, var(--color-brand-primary), var(--color-brand-primary-strong)); }
 .auth-login__primary:hover { text-decoration: none; }
 .auth-login__secondary { color: var(--color-text-secondary); background: var(--color-surface-1); border: var(--border-hairline) solid var(--color-border-default); }
 .auth-login__secondary:hover { background: var(--color-surface-hover); }
