@@ -34,11 +34,11 @@ kind: ClusterRole
 metadata:
   name: k8s-dashboard-api-read
 rules:
-  # Pod · Node · Event — Cluster Overview와 Drill-down의 기본 사실입니다.
+  # Pod · Namespace · Node · Event — Cluster Overview와 Drill-down의 기본 사실입니다.
   # Event는 코드에서 field selector(type=Warning)로 좁히지만, RBAC은 리소스 단위라
   # 여기서 더 줄일 수는 없습니다. 실제 전송량은 selector가 결정합니다.
   - apiGroups: [""]
-    resources: ["pods", "nodes", "events"]
+    resources: ["pods", "namespaces", "nodes", "events"]
     verbs: ["get", "list", "watch"]
 
   # Workload. replicasets는 **metadata-only informer**로 받지만

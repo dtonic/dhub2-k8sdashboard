@@ -3,8 +3,8 @@
 # 유지 규칙:
 #   - 라우터(apps/api/internal/httpapi/server.go)와 이 문서의 메서드·경로가 어긋나면
 #     apps/api의 TestOpenAPIMatchesRouter가 실패합니다. 라우트를 바꾸면 여기도 고칩니다.
-#   - 화면 응답 DTO의 원본은 packages/contracts/src/index.ts입니다. 여기서는 전체 모델을
-#     복제하지 않고 이름만 참조합니다 — 두 곳에서 필드를 관리하지 않기 위해서입니다.
+#   - 화면 응답 DTO의 원본은 packages/contracts/src/index.ts입니다. 일반 화면 모델은 이름만
+#     참조하고, 인증·Scope처럼 경계 검증이 필요한 모델만 구체 스키마를 유지합니다.
 #   - 모든 응답은 X-Request-ID 헤더를 달고, 에러 본문 requestId와 같은 값입니다.
 openapi: 3.1.0
 info:
@@ -1319,10 +1319,34 @@ components:
         buildDate:
           type: string
     # 화면 응답 DTO — 필드 정의의 원본은 packages/contracts/src/index.ts입니다.
-    # 여기서 전체 모델을 복제하면 두 곳을 관리하게 되므로 이름만 고정합니다.
+    ScopeCluster:
+      type: object
+      additionalProperties: false
+      required: [id, name, namespaces, accessible]
+      properties:
+        id: {type: string, minLength: 1}
+        name: {type: string, minLength: 1}
+        namespaces:
+          oneOf:
+            - {type: string, const: all}
+            - type: array
+              uniqueItems: true
+              items: {type: string, minLength: 1}
+        accessible: {type: boolean}
+        availableNamespaces:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1}
     ScopeResponse:
       type: object
-      description: "원본: src/index.ts의 ScopeResponse"
+      additionalProperties: false
+      required: [clusters]
+      properties:
+        clusters:
+          type: array
+          items: {$ref: "#/components/schemas/ScopeCluster"}
+        canManageWorkloads: {type: boolean}
+      description: "원본: src/index.ts의 ScopeResponse. availableNamespaces는 캐시 기반 표시 힌트"
     AuthSessionResponse:
       oneOf:
         - type: object

@@ -234,6 +234,35 @@ func TestOpenAPIBrowserSessionMutationBoundary(t *testing.T) {
 	}
 }
 
+func TestOpenAPIScopeNamespaceCatalogContract(t *testing.T) {
+	schemas := asMap(asMap(loadSpec(t)["components"])["schemas"])
+	scopeResponse := asMap(schemas["ScopeResponse"])
+	responseProperties := asMap(scopeResponse["properties"])
+	clusters := asMap(responseProperties["clusters"])
+	if clusters["type"] != "array" || asMap(clusters["items"])["$ref"] != "#/components/schemas/ScopeCluster" {
+		t.Fatalf("ScopeResponse.clusters drifted: %v", clusters)
+	}
+
+	scopeCluster := asMap(schemas["ScopeCluster"])
+	properties := asMap(scopeCluster["properties"])
+	available := asMap(properties["availableNamespaces"])
+	if available["type"] != "array" || available["uniqueItems"] != true || asMap(available["items"])["minLength"] != 1 {
+		t.Fatalf("ScopeCluster.availableNamespaces drifted: %v", available)
+	}
+	variants := asSlice(asMap(properties["namespaces"])["oneOf"])
+	if len(variants) != 2 || asMap(variants[0])["const"] != "all" || asMap(variants[1])["type"] != "array" {
+		t.Fatalf("ScopeCluster.namespaces drifted: %v", variants)
+	}
+
+	ts, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "contracts", "src", "index.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ts), "availableNamespaces?: string[];") {
+		t.Fatal("TypeScript ScopeCluster.availableNamespaces drifted")
+	}
+}
+
 func TestOpenAPITimeParametersMatchParser(t *testing.T) {
 	params := asMap(asMap(loadSpec(t)["components"])["parameters"])
 	for _, name := range []string{"From", "To"} {

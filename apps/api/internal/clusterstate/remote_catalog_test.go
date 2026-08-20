@@ -58,7 +58,17 @@ func TestRemoteCatalog100kApplyAndQueryBudgets(t *testing.T) {
 		if len(pods) != 100_000 || (!raceEnabled && queryLatency > time.Second) || queryAlloc > 64<<20 {
 			t.Fatalf("sample=%d pods=%d query=%v alloc=%d", sample, len(pods), queryLatency, queryAlloc)
 		}
-		t.Logf("sample=%d apply=%v/%dB catalogQuery=%v/%dB", sample, applyLatency, applyAlloc, queryLatency, queryAlloc)
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		started = time.Now()
+		namespaces := catalog.NamespaceNames("a")
+		namespaceLatency := time.Since(started)
+		runtime.ReadMemStats(&after)
+		namespaceAlloc := after.TotalAlloc - before.TotalAlloc
+		if strings.Join(namespaces, ",") != "ns" || (!raceEnabled && namespaceLatency > 100*time.Millisecond) || namespaceAlloc > 8<<20 {
+			t.Fatalf("sample=%d namespaces=%v query=%v alloc=%d", sample, namespaces, namespaceLatency, namespaceAlloc)
+		}
+		t.Logf("sample=%d apply=%v/%dB catalogQuery=%v/%dB namespaceQuery=%v/%dB", sample, applyLatency, applyAlloc, queryLatency, queryAlloc, namespaceLatency, namespaceAlloc)
 	}
 }
 
@@ -74,6 +84,32 @@ func applyCatalogSnapshot(t *testing.T, catalog *RemoteCatalog, id string, epoch
 	}
 	if err := catalog.Apply(&v1.WatchFrame{ClusterId: id, Epoch: epoch, Seq: seq, Type: v1.WatchFrameType_WATCH_SNAPSHOT_COMMIT, ObservedUnixMs: 1000}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemoteCatalogNamespaceNamesAreSortedDedupedAndIsolated(t *testing.T) {
+	catalog, err := NewRemoteCatalog([]string{"a", "b"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyCatalogSnapshot(t, catalog, "a", 1, 0,
+		&v1.CatalogResource{Kind: v1.KindNamespace, Uid: "empty", Name: "empty"},
+		&v1.CatalogResource{Kind: v1.KindPod, Uid: "z-1", Namespace: "z", Name: "z-1"},
+		&v1.CatalogResource{Kind: v1.KindDeployment, Uid: "a-1", Namespace: "a", Name: "a-1"},
+		&v1.CatalogResource{Kind: v1.KindPod, Uid: "z-2", Namespace: "z", Name: "z-2"},
+	)
+	applyCatalogSnapshot(t, catalog, "b", 1, 0,
+		&v1.CatalogResource{Kind: v1.KindPod, Uid: "b-1", Namespace: "b", Name: "b-1"},
+	)
+
+	if got := strings.Join(catalog.NamespaceNames("a"), ","); got != "a,empty,z" {
+		t.Fatalf("cluster a namespaces=%q, want a,empty,z", got)
+	}
+	if got := strings.Join(catalog.NamespaceNames("b"), ","); got != "b" {
+		t.Fatalf("cluster b namespaces=%q, want b", got)
+	}
+	if got := catalog.NamespaceNames("unknown"); got != nil {
+		t.Fatalf("unknown cluster leaked namespaces: %v", got)
 	}
 }
 

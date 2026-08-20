@@ -28,7 +28,7 @@ message SnapshotChunk { repeated Resource resources = 1; }
 message CommitSnapshot { uint64 epoch = 1; }
 message Delta { uint64 epoch = 1; uint64 seq = 2; Resource resource = 3; bool deleted = 4; }
 message Heartbeat { uint64 epoch = 1; uint64 seq = 2; }
-message Ack { uint64 epoch = 1; uint64 applied_seq = 2; bool duplicate = 3; }
+message Ack { uint64 epoch = 1; uint64 applied_seq = 2; bool duplicate = 3; bool namespace_resources = 4; }
 message Nack { string code = 1; bool full_resync = 2; }
 
 message Resource {

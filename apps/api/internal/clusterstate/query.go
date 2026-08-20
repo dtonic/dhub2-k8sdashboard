@@ -469,6 +469,10 @@ func eventTime(e *corev1.Event) time.Time {
 
 // NamespaceSummaries는 Scope 안의 namespace 요약입니다.
 func (s *Store) NamespaceSummaries(f NamespaceFilter) ([]contract.NamespaceSummary, error) {
+	namespaces, err := s.namespaces.List(labelsEverything)
+	if err != nil {
+		return nil, err
+	}
 	pods, err := s.scopedPods(f)
 	if err != nil {
 		return nil, err
@@ -487,6 +491,11 @@ func (s *Store) NamespaceSummaries(f NamespaceFilter) ([]contract.NamespaceSumma
 		v := &contract.NamespaceSummary{Name: ns, Severity: contract.SeverityHealthy}
 		byNS[ns] = v
 		return v
+	}
+	for _, namespace := range namespaces {
+		if f.Allows(namespace.Name) {
+			get(namespace.Name)
+		}
 	}
 
 	for _, p := range pods {

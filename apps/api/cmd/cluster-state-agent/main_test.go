@@ -182,8 +182,9 @@ func TestSyncOncePrivateCASnapshotAndCancellation(t *testing.T) {
 	// The committed and updated snapshot remains queryable whether the server has already
 	// observed the client-side close (stale) or is still processing it (fresh).
 	pod := snapshot.Resources[v1.KindPod+"\x00"+testcluster.UIDPodHealthy]
-	if err != nil || len(snapshot.Resources) == 0 || snapshot.Epoch == 0 || snapshot.Seq != 1 || pod == nil || pod.Pod.NodeName != "node-2" {
-		t.Fatalf("registry resources=%d epoch=%d seq=%d stale=%v pod=%v err=%v", len(snapshot.Resources), snapshot.Epoch, snapshot.Seq, stale, pod, err)
+	namespace := snapshot.Resources[v1.KindNamespace+"\x00namespace-media"]
+	if err != nil || len(snapshot.Resources) == 0 || snapshot.Epoch == 0 || snapshot.Seq != 1 || pod == nil || pod.Pod.NodeName != "node-2" || namespace == nil || namespace.Name != "media" {
+		t.Fatalf("registry resources=%d epoch=%d seq=%d stale=%v pod=%v namespace=%v err=%v", len(snapshot.Resources), snapshot.Epoch, snapshot.Seq, stale, pod, namespace, err)
 	}
 }
 

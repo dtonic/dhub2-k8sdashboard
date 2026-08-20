@@ -86,6 +86,7 @@ func (s *Service) Sync(stream v1.ClusterState_SyncServer) error {
 				return status.Error(codes.InvalidArgument, "duplicate hello")
 			}
 			ack.Epoch = generation
+			ack.NamespaceResources = true
 		case f.GetBeginSnapshot() != nil:
 			err = s.Registry.BeginSession(id, generation, f.GetBeginSnapshot())
 		case f.GetSnapshotChunk() != nil:

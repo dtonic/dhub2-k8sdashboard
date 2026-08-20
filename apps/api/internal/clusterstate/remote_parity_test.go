@@ -24,7 +24,7 @@ func TestDirectAndRemoteProviderParity(t *testing.T) {
 		value, ok := usageValues[uid]
 		return value, ok
 	})
-	resources, err := direct.SafeProjection(100_000)
+	resources, err := direct.SafeProjection(100_000, true)
 	if err != nil {
 		t.Fatal(err)
 	}

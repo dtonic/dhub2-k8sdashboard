@@ -166,10 +166,11 @@ func syncOnce(ctx context.Context, store *clusterstate.Store, changes <-chan str
 	if epoch == 0 {
 		return fmt.Errorf("registry returned invalid session epoch")
 	}
+	namespaceResources := hello.GetAck().GetNamespaceResources()
 	seq := uint64(0)
 	current := map[string]*v1.Resource{}
 	snapshot := func() error {
-		resources, e := store.SafeProjection(maxResources)
+		resources, e := store.SafeProjection(maxResources, namespaceResources)
 		if e != nil {
 			return e
 		}
@@ -212,7 +213,7 @@ func syncOnce(ctx context.Context, store *clusterstate.Store, changes <-chan str
 				return e
 			}
 		case <-changes:
-			resources, e := store.SafeProjection(maxResources)
+			resources, e := store.SafeProjection(maxResources, namespaceResources)
 			if e != nil {
 				return e
 			}

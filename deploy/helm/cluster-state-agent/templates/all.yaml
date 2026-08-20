@@ -25,7 +25,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata: {name: {{ .Release.Name }}-cluster-state-agent-read}
 rules:
-  - {apiGroups: [""], resources: [pods, nodes, events], verbs: [get, list, watch]}
+  - {apiGroups: [""], resources: [pods, namespaces, nodes, events], verbs: [get, list, watch]}
   - {apiGroups: [apps], resources: [deployments, statefulsets, daemonsets, replicasets], verbs: [get, list, watch]}
   - {apiGroups: [batch], resources: [cronjobs], verbs: [get, list, watch]}
 ---

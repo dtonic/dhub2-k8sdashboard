@@ -133,6 +133,34 @@ func TestCatalogSnapshot100kBudgetsAndConcurrentReplicas(t *testing.T) {
 	t.Logf("twoReplicas alloc=%d deltaLockWait=%v", after.TotalAlloc-before.TotalAlloc, deltaWait)
 }
 
+func TestCatalogSnapshotPreservesEmptyNamespaces(t *testing.T) {
+	r := newRegistry(t)
+	if err := r.Connect(&v1.Hello{ClusterId: "a", ProtocolVersion: v1.Version}, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Begin("a", &v1.BeginSnapshot{Epoch: 1}); err != nil {
+		t.Fatal(err)
+	}
+	resources := []*v1.Resource{
+		{Kind: v1.KindNamespace, Uid: "empty-uid", Name: "empty"},
+		{Kind: v1.KindPod, Uid: "pod-uid", Namespace: "active", Name: "pod", Pod: &v1.PodProjection{}},
+	}
+	if err := r.Chunk("a", &v1.SnapshotChunk{Resources: resources}); err != nil {
+		t.Fatal(err)
+	}
+	if _, nack := r.Commit("a", &v1.CommitSnapshot{Epoch: 1}); nack != nil {
+		t.Fatal(nack)
+	}
+
+	snapshot, err := r.CatalogSnapshot("a", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Resources) != 2 || snapshot.Resources[0].Kind != v1.KindNamespace || snapshot.Resources[0].Name != "empty" {
+		t.Fatalf("catalog snapshot lost empty namespace: %+v", snapshot.Resources)
+	}
+}
+
 func TestSessionIngressHeartbeatAndDisconnectAreGenerationBound(t *testing.T) {
 	l := DefaultLimits()
 	l.AllowedClusters = []string{"a"}

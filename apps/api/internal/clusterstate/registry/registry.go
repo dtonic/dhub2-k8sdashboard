@@ -144,7 +144,7 @@ func (r *Registry) CatalogSnapshot(id string, maxBytes int) (*WatchSnapshot, err
 }
 
 func persistentCatalogKind(kind string) bool {
-	return kind == v1.KindPod || kind == v1.KindReplicaSet || kind == v1.KindDeployment || kind == v1.KindStatefulSet || kind == v1.KindDaemonSet || kind == v1.KindCronJob
+	return kind == v1.KindNamespace || kind == v1.KindPod || kind == v1.KindReplicaSet || kind == v1.KindDeployment || kind == v1.KindStatefulSet || kind == v1.KindDaemonSet || kind == v1.KindCronJob
 }
 
 func catalogResource(resource *v1.Resource) *v1.CatalogResource {
@@ -831,6 +831,9 @@ func (r *Registry) validate(x *v1.Resource) error {
 			return fmt.Errorf("owner_limit")
 		}
 	}
+	if x.Kind == v1.KindNamespace && (x.Namespace != "" || len(x.Owners) != 0) {
+		return fmt.Errorf("namespace_identity")
+	}
 	projections := 0
 	if x.Pod != nil {
 		projections++
@@ -872,12 +875,22 @@ func (r *Registry) validate(x *v1.Resource) error {
 			return fmt.Errorf("event_limit")
 		}
 	}
-	want := map[string]int{v1.KindPod: 1, v1.KindNode: 1, v1.KindDeployment: 1, v1.KindStatefulSet: 1, v1.KindDaemonSet: 1, v1.KindCronJob: 1, v1.KindEvent: 1, v1.KindReplicaSet: 0}
-	p, ok := want[x.Kind]
+	p, ok := expectedProjectionCount(x.Kind)
 	if !ok || projections != p {
 		return fmt.Errorf("kind_projection_mismatch")
 	}
 	return nil
+}
+
+func expectedProjectionCount(kind string) (int, bool) {
+	switch kind {
+	case v1.KindNamespace, v1.KindReplicaSet:
+		return 0, true
+	case v1.KindPod, v1.KindNode, v1.KindDeployment, v1.KindStatefulSet, v1.KindDaemonSet, v1.KindCronJob, v1.KindEvent:
+		return 1, true
+	default:
+		return 0, false
+	}
 }
 
 func containsSensitive(s string) bool {

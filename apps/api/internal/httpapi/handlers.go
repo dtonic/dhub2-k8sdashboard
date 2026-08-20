@@ -50,28 +50,19 @@ func (s *Server) handleScope(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// availableNamespaces는 셀렉터 옵션용 namespace 이름을 로컬 informer 캐시에서
-// 열거합니다. 요청 경로의 API 서버 호출은 없습니다(ADR 0004). 중앙(멀티클러스터)
-// 모드의 원격 클러스터는 화면별 projection만 오가므로 열거를 생략합니다 —
-// 이 필드는 표시 힌트라 없어도 화면은 동작합니다. (#1)
+// availableNamespaces enumerates selector options from the configured local
+// informer/watch catalog. Direct mode falls back to Store for compatibility;
+// central mode injects its bounded RemoteCatalog. Neither path calls Kubernetes
+// or the cluster-state registry while handling this request. (#1)
 func (s *Server) availableNamespaces(clusterID string) []string {
-	st := s.deps.Store
-	if st == nil || !st.HasSynced() {
+	catalog := s.deps.ScopeNamespaces
+	if catalog == nil {
+		catalog, _ = s.deps.Store.(clusterstate.NamespaceCatalog)
+	}
+	if catalog == nil {
 		return nil
 	}
-	if ider, ok := st.(interface{ ClusterID() string }); !ok || ider.ClusterID() != clusterID {
-		return nil
-	}
-	sums, err := st.NamespaceSummaries(clusterstate.NamespaceFilter{All: true})
-	if err != nil || len(sums) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(sums))
-	for _, n := range sums {
-		names = append(names, n.Name)
-	}
-	sort.Strings(names)
-	return names
+	return catalog.NamespaceNames(clusterID)
 }
 
 /* ── Cluster Overview ───────────────────────────────────────────────────── */

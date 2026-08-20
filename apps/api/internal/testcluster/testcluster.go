@@ -113,6 +113,8 @@ func ScenarioObjects() []runtime.Object {
 
 func typedObjects() []runtime.Object {
 	return []runtime.Object{
+		namespace("media"),
+		namespace("payments"),
 		node("node-1", true, false, false),
 		node("node-2", false, true, false),
 
@@ -129,6 +131,10 @@ func typedObjects() []runtime.Object {
 		warningEvent("payments", "payments-api-7f-bbb", UIDPodCrashLoop, "BackOff", "Back-off restarting failed container"),
 		warningEvent("media", "media-api-zzz", UIDPodMedia, "Unhealthy", "Readiness probe failed"),
 	}
+}
+
+func namespace(name string) *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID("namespace-" + name)}}
 }
 
 // metadataObjects는 metadata-only informer가 받는 것과 같은 모양입니다.

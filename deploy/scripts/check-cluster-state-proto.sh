@@ -2,8 +2,8 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 DIR="$ROOT/apps/api/internal/clusterstate/protocol/v1"
-EXPECTED='65e1b0e8837d325f5cd0b964baa730ddbca6e8dd5f58e3730904f17aae3f214f  cluster_state.proto
-99372cfac4efeae0bab644e06257a15df02d7974a018fa83a6b48600a1c1e8c2  cluster_state.pb.go
+EXPECTED='94c38d25701f4a8b3eb28d9e862f6b5e421b2c73318c9fa8c166d50c4f187742  cluster_state.proto
+22672b41effe4cd4a2cb163021cd81c844a856d3fd237233c4e4f73bbdce0165  cluster_state.pb.go
 d22496dcff37c7525ab532e2789d077b8d64eab4337df151cc2c3642475cc287  cluster_state_grpc.pb.go'
 check() { printf '%s\n' "$EXPECTED" | (cd "$1" && sha256sum -c - >/dev/null); }
 check "$DIR"

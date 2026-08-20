@@ -264,7 +264,7 @@ func (r *RemoteCatalog) Retained() (resources, bytes int) {
 }
 
 func persistentCatalogResourceKind(kind string) bool {
-	return kind == v1.KindPod || kind == v1.KindReplicaSet || kind == v1.KindDeployment || kind == v1.KindStatefulSet || kind == v1.KindDaemonSet || kind == v1.KindCronJob
+	return kind == v1.KindNamespace || kind == v1.KindPod || kind == v1.KindReplicaSet || kind == v1.KindDeployment || kind == v1.KindStatefulSet || kind == v1.KindDaemonSet || kind == v1.KindCronJob
 }
 
 func (r *RemoteCatalog) releaseStageLocked(c *remoteCatalogCluster) {
@@ -296,11 +296,14 @@ func validateCatalogResource(resource *v1.CatalogResource, snapshot bool) error 
 	if resource == nil || resource.Uid == "" || len(resource.Uid) > 253 || resource.Name == "" || len(resource.Name) > 253 || len(resource.Namespace) > 253 || len(resource.NodeName) > 253 || len(resource.Owners) > 4 {
 		return fmt.Errorf("invalid identity")
 	}
-	allowed := map[string]bool{v1.KindPod: true, v1.KindReplicaSet: true, v1.KindDeployment: true, v1.KindStatefulSet: true, v1.KindDaemonSet: true, v1.KindCronJob: true, v1.KindNode: true, v1.KindEvent: true}
-	if !allowed[resource.Kind] || snapshot && !persistentCatalogResourceKind(resource.Kind) || resource.Kind != v1.KindPod && resource.NodeName != "" {
+	if !catalogResourceKind(resource.Kind) || snapshot && !persistentCatalogResourceKind(resource.Kind) || resource.Kind != v1.KindPod && resource.NodeName != "" {
 		return fmt.Errorf("invalid kind")
 	}
 	switch resource.Kind {
+	case v1.KindNamespace:
+		if resource.Namespace != "" || len(resource.Owners) != 0 {
+			return fmt.Errorf("invalid namespace identity")
+		}
 	case v1.KindNode:
 		if resource.Namespace != "" || len(resource.Owners) != 0 {
 			return fmt.Errorf("invalid node identity")
@@ -321,6 +324,15 @@ func validateCatalogResource(resource *v1.CatalogResource, snapshot bool) error 
 		}
 	}
 	return nil
+}
+
+func catalogResourceKind(kind string) bool {
+	switch kind {
+	case v1.KindNamespace, v1.KindPod, v1.KindReplicaSet, v1.KindDeployment, v1.KindStatefulSet, v1.KindDaemonSet, v1.KindCronJob, v1.KindNode, v1.KindEvent:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *RemoteCatalog) CatalogPods(clusterID, namespace string, limit int) []datasource.CatalogPod {
@@ -356,6 +368,37 @@ func (r *RemoteCatalog) CatalogPods(clusterID, namespace string, limit int) []da
 		out = out[:limit]
 	}
 	return out
+}
+
+// NamespaceNames returns the namespace names already present in the bounded
+// central watch catalog. It is a local cache read; no registry or Kubernetes
+// request is issued from the HTTP request path.
+func (r *RemoteCatalog) NamespaceNames(clusterID string) []string {
+	r.mu.RLock()
+	c := r.clusters[clusterID]
+	r.mu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.available {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, resource := range c.resources {
+		if resource != nil && resource.Kind == v1.KindNamespace {
+			seen[resource.Name] = struct{}{}
+		} else if resource != nil && resource.Namespace != "" {
+			seen[resource.Namespace] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for namespace := range seen {
+		names = append(names, namespace)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *RemoteCatalog) visitPods(clusterID, namespace string, visit func(datasource.CatalogPod)) {
@@ -427,3 +470,4 @@ func (r *RemoteCatalog) StreamEntityNamespaces(clusterID string) map[string]stri
 }
 
 var _ datasource.PodCatalog = (*RemoteCatalog)(nil)
+var _ NamespaceCatalog = (*RemoteCatalog)(nil)

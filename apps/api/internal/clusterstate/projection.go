@@ -11,7 +11,9 @@ import (
 )
 
 // SafeProjection returns only fields representable by the closed v1 schema.
-func (s *Store) SafeProjection(max int) ([]*v1.Resource, error) {
+// Namespace resources are additive and emitted only after registry capability
+// negotiation so rolling upgrades remain compatible with older registries.
+func (s *Store) SafeProjection(max int, includeNamespaces bool) ([]*v1.Resource, error) {
 	out := make([]*v1.Resource, 0, 1024)
 	add := func(x *v1.Resource) error {
 		if max > 0 && len(out) >= max {
@@ -19,6 +21,17 @@ func (s *Store) SafeProjection(max int) ([]*v1.Resource, error) {
 		}
 		out = append(out, x)
 		return nil
+	}
+	if includeNamespaces {
+		namespaces, e := s.namespaces.List(labelsEverything)
+		if e != nil {
+			return nil, e
+		}
+		for _, namespace := range namespaces {
+			if e := add(&v1.Resource{Kind: v1.KindNamespace, Uid: string(namespace.UID), Name: namespace.Name}); e != nil {
+				return nil, e
+			}
+		}
 	}
 	pods, e := s.listPods("")
 	if e != nil {

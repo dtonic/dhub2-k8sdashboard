@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/transport"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/config"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/httpapi"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -137,11 +139,28 @@ func TestCentralRuntimePrivateCAGRPCQueryWatchSSEIsolationAndShutdown(t *testing
 
 	api := httptest.NewServer(httpapi.NewServer(httpapi.Deps{
 		ProviderRegistry: runtime.registry,
+		ScopeNamespaces:  runtime.catalog,
 		Metrics:          datasource.Unavailable{}, Logs: datasource.Unavailable{}, Alerts: datasource.Unavailable{}, Topology: datasource.Unavailable{},
 		Resolver: scope.Static{S: scope.Scope{Clusters: []scope.Cluster{{ID: "a", Name: "a", All: true}, {ID: "b", Name: "b", All: true}}}},
 		Stream:   hub,
 	}))
 	t.Cleanup(api.Close)
+	scopeResponse, err := http.Get(api.URL + "/api/v1/scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scopeBody contract.ScopeResponse
+	if err = json.NewDecoder(scopeResponse.Body).Decode(&scopeBody); err != nil {
+		_ = scopeResponse.Body.Close()
+		t.Fatal(err)
+	}
+	_ = scopeResponse.Body.Close()
+	if scopeResponse.StatusCode != http.StatusOK || len(scopeBody.Clusters) != 2 || fmt.Sprint(scopeBody.Clusters[0].AvailableNamespaces) != "[empty-a ns]" || fmt.Sprint(scopeBody.Clusters[1].AvailableNamespaces) != "[empty-b ns]" {
+		t.Fatalf("central scope status=%d body=%+v", scopeResponse.StatusCode, scopeBody)
+	}
+	if service.queries.Load() != 0 {
+		t.Fatalf("scope request called registry query path %d times", service.queries.Load())
+	}
 	getStatus := func(cluster string) int {
 		response, err := http.Get(api.URL + "/api/v1/clusters/" + cluster + "/overview?range=1h")
 		if err != nil {
@@ -475,7 +494,8 @@ func seedRegistryCluster(t *testing.T, reg *registry.Registry, id string) {
 	if err := reg.Begin(id, &v1.BeginSnapshot{Epoch: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.Chunk(id, &v1.SnapshotChunk{Resources: []*v1.Resource{testPod(id + "-1")}}); err != nil {
+	resources := []*v1.Resource{{Kind: v1.KindNamespace, Uid: id + "-empty", Name: "empty-" + id}, testPod(id + "-1")}
+	if err := reg.Chunk(id, &v1.SnapshotChunk{Resources: resources}); err != nil {
 		t.Fatal(err)
 	}
 	if _, nack := reg.Commit(id, &v1.CommitSnapshot{Epoch: 1}); nack != nil {

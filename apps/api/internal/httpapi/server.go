@@ -38,6 +38,7 @@ import (
 type Deps struct {
 	Store             clusterstate.Provider
 	ProviderRegistry  clusterstate.ProviderRegistry
+	ScopeNamespaces   clusterstate.NamespaceCatalog
 	Metrics           datasource.Metrics
 	Logs              datasource.Logs
 	Alerts            datasource.Alerts

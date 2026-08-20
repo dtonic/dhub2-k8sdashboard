@@ -141,8 +141,8 @@ func runCentral(ctx context.Context, logger *slog.Logger, cfg config.Config, con
 	guardCfg.UserConcurrent, guardCfg.DashboardConcurrent = cfg.QueryUserConcurrent, cfg.QueryDashboardConcurrent
 	guardCfg.QueryTimeout, guardCfg.SlowThreshold = cfg.QueryTimeout, cfg.QuerySlowThreshold
 	srv := httpapi.NewServer(httpapi.Deps{
-		ProviderRegistry: runtime.registry,
-		Metrics:          metrics, Logs: logs, Alerts: alerts, Topology: topo,
+		ProviderRegistry: runtime.registry, ScopeNamespaces: runtime.catalog,
+		Metrics: metrics, Logs: logs, Alerts: alerts, Topology: topo,
 		Resolver: resolver, Cache: responseCache, Guard: queryprotect.New(guardCfg, protectionMetrics),
 		ProtectionMetrics: protectionMetrics, Observability: platformMetrics,
 		PlannedQueryRefs: panelQueryRefs(queries),

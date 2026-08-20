@@ -36,6 +36,15 @@ type Provider interface {
 
 var _ Provider = (*Store)(nil)
 
+// NamespaceCatalog is the request-free namespace name projection used by the
+// scope selector. Implementations must return a sorted, de-duplicated snapshot
+// from an informer/watch cache and must never call Kubernetes on the request path.
+type NamespaceCatalog interface {
+	NamespaceNames(clusterID string) []string
+}
+
+var _ NamespaceCatalog = (*Store)(nil)
+
 // ProviderRegistry resolves exactly one projection after HTTP authorization.
 type ProviderRegistry interface {
 	ForScreen(context.Context, ScreenRequest) (Provider, error)

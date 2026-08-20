@@ -11,6 +11,7 @@ package clusterstate
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -74,6 +75,7 @@ type Store struct {
 	metaFactory  metadatainformer.SharedInformerFactory
 
 	pods         corelisters.PodLister
+	namespaces   corelisters.NamespaceLister
 	nodes        corelisters.NodeLister
 	events       corelisters.EventLister
 	deployments  appslisters.DeploymentLister
@@ -115,6 +117,7 @@ func New(c Clients, opts Options) (*Store, error) {
 	s.metaFactory = metadatainformer.NewSharedInformerFactory(c.Metadata, opts.Resync)
 
 	podInformer := s.factory.Core().V1().Pods()
+	namespaceInformer := s.factory.Core().V1().Namespaces()
 	nodeInformer := s.factory.Core().V1().Nodes()
 	depInformer := s.factory.Apps().V1().Deployments()
 	stsInformer := s.factory.Apps().V1().StatefulSets()
@@ -124,6 +127,7 @@ func New(c Clients, opts Options) (*Store, error) {
 	rsInformer := s.metaFactory.ForResource(replicaSetGVR)
 
 	s.pods = podInformer.Lister()
+	s.namespaces = namespaceInformer.Lister()
 	s.nodes = nodeInformer.Lister()
 	s.events = evInformer.Lister()
 	s.deployments = depInformer.Lister()
@@ -159,6 +163,7 @@ func New(c Clients, opts Options) (*Store, error) {
 
 	s.synced = []cache.InformerSynced{
 		podInformer.Informer().HasSynced,
+		namespaceInformer.Informer().HasSynced,
 		nodeInformer.Informer().HasSynced,
 		depInformer.Informer().HasSynced,
 		stsInformer.Informer().HasSynced,
@@ -204,6 +209,25 @@ func (s *Store) HasSynced() bool {
 // ClusterID/ClusterName은 응답에 실을 클러스터 식별자입니다.
 func (s *Store) ClusterID() string   { return s.opts.ClusterID }
 func (s *Store) ClusterName() string { return s.opts.ClusterName }
+
+// NamespaceNames returns the complete namespace name set from the local
+// informer cache. The lister is cluster-scoped, so the explicit cluster check
+// prevents a Store from answering for another configured cluster.
+func (s *Store) NamespaceNames(clusterID string) []string {
+	if clusterID != s.opts.ClusterID || !s.HasSynced() {
+		return nil
+	}
+	items, err := s.namespaces.List(labelsEverything)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 // SetClock은 테스트에서 시간을 고정합니다.
 func (s *Store) SetClock(f func() time.Time) { s.now = f }

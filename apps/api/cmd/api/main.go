@@ -220,6 +220,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = topoLayout.Close() }()
 	srv := httpapi.NewServer(httpapi.Deps{
 		Store:              store,
+		ScopeNamespaces:    store,
 		Metrics:            metrics,
 		Logs:               logs,
 		Alerts:             alerts,

@@ -149,6 +149,25 @@ func TestScopedListsExcludeOtherNamespaces(t *testing.T) {
 	}
 }
 
+func TestScopeListsCachedNamespacesOnlyForClusterWideAccess(t *testing.T) {
+	wide := newFixture(t, withClusterWideScope)
+	var wideResponse contract.ScopeResponse
+	rec := wide.get(t, "/api/v1/scope", &wideResponse)
+	if rec.Code != http.StatusOK || len(wideResponse.Clusters) != 1 {
+		t.Fatalf("wide scope response=%d %+v", rec.Code, wideResponse)
+	}
+	if got := strings.Join(wideResponse.Clusters[0].AvailableNamespaces, ","); got != "media,payments" {
+		t.Fatalf("availableNamespaces=%q, want media,payments", got)
+	}
+
+	limited := newFixture(t)
+	var limitedResponse contract.ScopeResponse
+	limited.get(t, "/api/v1/scope", &limitedResponse)
+	if len(limitedResponse.Clusters) != 1 || limitedResponse.Clusters[0].AvailableNamespaces != nil {
+		t.Fatalf("limited scope exposed namespace catalog: %+v", limitedResponse.Clusters)
+	}
+}
+
 type currentOnlyAlerts struct{}
 
 func (currentOnlyAlerts) List(context.Context, datasource.AlertQuery) (datasource.AlertResult, error) {

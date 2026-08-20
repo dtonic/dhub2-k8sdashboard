@@ -2,12 +2,17 @@ package clusterstate_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate"
+	v1 "github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/protocol/v1"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/testcluster"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestQueriesNeverCallTheAPIServer(t *testing.T) {
@@ -48,6 +53,7 @@ func TestQueriesNeverCallTheAPIServer(t *testing.T) {
 	}
 	store.WorkloadOwnerChain("payments", "Deployment", "payments-api", wl.Ref.WorkloadUID)
 	store.CatalogPods(testcluster.ClusterID, "", 0)
+	store.NamespaceNames(testcluster.ClusterID)
 
 	if got := len(fakes.Typed.Actions()) - before; got != 0 {
 		t.Errorf("조회 중 API 서버 호출 %d회 발생 (want 0): %v", got, fakes.Typed.Actions()[before:])
@@ -55,6 +61,57 @@ func TestQueriesNeverCallTheAPIServer(t *testing.T) {
 	if got := len(fakes.Metadata.Actions()) - beforeMeta; got != 0 {
 		t.Errorf("조회 중 metadata API 호출 %d회 발생 (want 0)", got)
 	}
+}
+
+func TestNamespaceCatalogIncludesEmptyNamespaceAndIsSorted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store, _, err := testcluster.Build(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "empty", UID: types.UID("namespace-empty")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := store.NamespaceNames(testcluster.ClusterID)
+	if got, want := strings.Join(names, ","), "empty,media,payments"; got != want {
+		t.Fatalf("namespace catalog=%q, want %q", got, want)
+	}
+	if got := store.NamespaceNames("another-cluster"); got != nil {
+		t.Fatalf("another cluster leaked namespaces: %v", got)
+	}
+	projection, err := store.SafeProjection(100_000, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundProjectedEmpty := false
+	for _, resource := range projection {
+		foundProjectedEmpty = foundProjectedEmpty || resource.Kind == v1.KindNamespace && resource.Name == "empty"
+	}
+	if !foundProjectedEmpty {
+		t.Fatal("empty namespace missing from central projection")
+	}
+	legacyProjection, err := store.SafeProjection(100_000, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range legacyProjection {
+		if resource.Kind == v1.KindNamespace {
+			t.Fatal("namespace resource emitted without negotiated capability")
+		}
+	}
+
+	summaries, err := store.NamespaceSummaries(clusterstate.NamespaceFilter{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range summaries {
+		if summary.Name == "empty" {
+			if summary.Pods.Total != 0 || summary.Workloads.Total != 0 || summary.Issues == nil {
+				t.Fatalf("empty namespace summary=%+v", summary)
+			}
+			return
+		}
+	}
+	t.Fatal("empty namespace missing from summaries")
 }
 
 func TestInitialSyncUsesWatchNotPolling(t *testing.T) {

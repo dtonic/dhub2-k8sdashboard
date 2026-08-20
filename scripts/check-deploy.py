@@ -25,7 +25,7 @@ def check(text: str, environment: str) -> list[str]:
     require(expected_containers >= 2, "rendered workload containers missing", errors)
     require(text.count('drop: ["ALL"]') >= expected_containers, "all containers must drop capabilities", errors)
     require("runAsNonRoot: true" in text and "readOnlyRootFilesystem: true" in text, "nonroot/read-only workload contexts required", errors)
-    require('resources: ["pods", "nodes", "events"]' in text, "RBAC core allowlist drift", errors)
+    require('resources: ["pods", "namespaces", "nodes", "events"]' in text, "RBAC core allowlist drift", errors)
     require('resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]' in text, "RBAC apps allowlist drift", errors)
     require('resources: ["cronjobs"]' in text and 'verbs: ["get", "list", "watch"]' in text, "RBAC verbs drift", errors)
     require(not re.search(r'resources:\s*\[[^\]]*"\*"|verbs:\s*\[[^\]]*"\*"|resources:\s*\[[^\]]*"secrets"', text), "wildcard/secret RBAC forbidden", errors)
@@ -66,7 +66,7 @@ def main() -> int:
         mutations = {
             "privilege escalation": text.replace("allowPrivilegeEscalation: false", "allowPrivilegeEscalation: true", 1),
             "Secret creation": "apiVersion: v1\nkind: Secret\nmetadata: {name: forbidden}\n---\n" + text,
-            "RBAC wildcard": text.replace('resources: ["pods", "nodes", "events"]', 'resources: ["*"]', 1),
+            "RBAC wildcard": text.replace('resources: ["pods", "namespaces", "nodes", "events"]', 'resources: ["*"]', 1),
             "invalid CIDR": re.sub(r"\bcidr:\s*\"?[^\"}\s]+", 'cidr: "999.999.1.1/33"', text, count=1),
             "broad CIDR": re.sub(r"\bcidr:\s*\"?[^\"}\s]+", 'cidr: "0.0.0.0/0"', text, count=1),
         }

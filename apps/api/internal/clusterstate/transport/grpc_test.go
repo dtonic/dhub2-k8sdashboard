@@ -134,7 +134,7 @@ func TestSyncAndQueryMapBoundaryFailuresWithoutPanics(t *testing.T) {
 		t.Fatalf("pre-hello empty status=%v err=%v", status.Code(err), err)
 	}
 	stream := &scriptedSyncStream{ctx: agentCtx, recv: []*v1.AgentFrame{hello, {}}}
-	if err := svc.Sync(stream); status.Code(err) != codes.InvalidArgument || len(stream.sent) != 1 || stream.sent[0].GetAck() == nil {
+	if err := svc.Sync(stream); status.Code(err) != codes.InvalidArgument || len(stream.sent) != 1 || stream.sent[0].GetAck() == nil || !stream.sent[0].GetAck().GetNamespaceResources() {
 		t.Fatalf("post-hello empty status=%v sent=%+v err=%v", status.Code(err), stream.sent, err)
 	}
 	sendErr := errors.New("send failed")
