@@ -42,6 +42,10 @@ data:
       listen 8080;
       server_name _;
       root /usr/share/nginx/html;
+      {{- /* SPA 셸이 배포를 넘어 브라우저 캐시로 살아남지 않도록 매 요청 재검증을
+           강제합니다. 해시된 정적 자산은 검증자 기반 304로 재사용되므로 비용이 작고,
+           auth 모드 전환 직후 사용자가 이전 셸을 계속 실행하는 문제를 막습니다. */}}
+      add_header Cache-Control "no-cache" always;
       {{- if .Values.authSession.enabled }}
       add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
       add_header X-Content-Type-Options "nosniff" always;
