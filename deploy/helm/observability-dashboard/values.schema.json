@@ -17,7 +17,7 @@
         }}
       ]
     },
-    "managerAuth": {"type":"object","required":["enabled","origin","loginURL"],"properties":{"enabled":{"type":"boolean"},"origin":{"type":"string"},"loginURL":{"type":"string"}}},
+    "managerAuth": {"type":"object","required":["enabled","origin","loginURL","clientID"],"properties":{"enabled":{"type":"boolean"},"origin":{"type":"string"},"loginURL":{"type":"string"},"clientID":{"type":"string","pattern":"^[A-Za-z0-9._~-]+$"}}},
     "authSession": {"type":"object","required":["enabled","publicOrigin","redirectURI","clientID","externalIngress","idleTTL","absoluteTTL","loginTTL","refreshSkew","maxSessions"],"properties":{"enabled":{"type":"boolean"},"publicOrigin":{"type":"string"},"redirectURI":{"type":"string"},"clientID":{"type":"string"},"externalIngress":{"type":"boolean"},"idleTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"absoluteTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"loginTTL":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"refreshSkew":{"type":"string","pattern":"^[1-9][0-9]*(s|m|h)$"},"maxSessions":{"type":"integer","minimum":1,"maximum":100000}}},
     "alerts": {
       "type": "object", "additionalProperties": false,

@@ -79,8 +79,9 @@ issuer egress를 보완 NetworkPolicy(cluster-compat)로 주입합니다. IdP에
 
 deploy.sh의 issuer 자동 발견은 **dhub2-auth(DHubManager 내장 OIDC provider) Route를
 우선**하고, 없으면 keycloak Route로 fallback합니다. dhub2-auth 발견 시에는 자체
-로그인(authSession) 대신 **managerAuth 위임 모드**로 배포됩니다: UI가 manager 로그인
-세션(refresh_token 쿠키)에서 access token을 조용히 받아 Bearer로 쓰고, API는 그 토큰을
+로그인(authSession) 대신 **managerAuth 위임 모드**로 배포됩니다: UI가 Portal과 같은
+OIDC cookie refresh(`/token`, 기본 client `dhub2-portal`)를 사용하고 로컬 로그인의 legacy
+JWT cookie refresh를 fallback으로 지원해 access token을 받아 Bearer로 씁니다. API는 그 토큰을
 검증한 뒤 역할 클레임이 비어 있으면 issuer `/userinfo`의 `groups`(dhub2의
 `type=admin` → `dhub2-admin`)를 `OIDC_ROLE_MAP`으로 해석합니다. IdP에 client 등록은
 필요 없고, **manager의 `CORS_ORIGINS`에 대시보드 origin 등록** 1건만 선행 조건입니다.

@@ -60,6 +60,7 @@ data:
       add_header Referrer-Policy "no-referrer" always;
       sub_filter '<meta name="k8s-auth-manager-origin" content="" />' '<meta name="k8s-auth-manager-origin" content="{{ .Values.managerAuth.origin }}" />';
       sub_filter '<meta name="k8s-auth-manager-login" content="" />' '<meta name="k8s-auth-manager-login" content="{{ .Values.managerAuth.loginURL }}" />';
+      sub_filter '<meta name="k8s-auth-manager-client-id" content="" />' '<meta name="k8s-auth-manager-client-id" content="{{ .Values.managerAuth.clientID }}" />';
       sub_filter_once on;
       {{- end }}
 

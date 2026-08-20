@@ -3,8 +3,8 @@
 인증 UI는 같은 immutable image를 사용하며, 활성 모드는 nginx가 최초 HTML에 삽입하는
 비밀이 아닌 meta로 결정됩니다. Helm `authSession.enabled`이면 `k8s-auth-session` meta
 (BFF 세션 로그인, ADR 0011), `managerAuth.enabled`이면 `k8s-auth-manager-origin`/`-login`
-meta(Dhub2.0 인증 위임 — UI가 dhub2-manager 로그인 세션에서 access token을 조용히 받아
-Bearer로 사용, 자체 로그인 화면 없음)가 삽입됩니다. 기본/direct 렌더에는 meta와 인증
+meta(Dhub2.0 인증 위임 — UI가 Portal과 같은 OIDC cookie refresh를 사용하고 로컬 로그인
+JWT cookie를 fallback으로 지원해 access token을 받아 Bearer로 사용)가 삽입됩니다. 기본/direct 렌더에는 meta와 인증
 bootstrap 요청이 없고 rollback 시 nginx 설정과 함께 즉시 제거됩니다. 두 모드는 상호
 배타이며 SSE(`sse.ts`)도 같은 토큰/세션 갱신 경로(`refreshAuth`)를 공유합니다.
 

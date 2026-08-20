@@ -83,7 +83,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.managerAuth.enabled -}}
 {{- /* Dhub2.0 인증 위임(managerAuth): Bearer 검증은 AUTH_MODE=oidc가, 역할 보충은 OIDC_USERINFO_ROLES가 맡습니다. 자체 로그인(authSession)과는 상호 배타입니다. */}}
 {{- if .Values.authSession.enabled }}{{ fail "managerAuth and authSession are mutually exclusive" }}{{ end -}}
-{{- if or (ne .Values.api.config.AUTH_MODE "oidc") (ne (toString (get .Values.api.config "OIDC_USERINFO_ROLES")) "true") (not (regexMatch "^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" .Values.managerAuth.origin)) (not (hasPrefix "https://" .Values.managerAuth.loginURL)) }}{{ fail "managerAuth requires AUTH_MODE=oidc, api.config.OIDC_USERINFO_ROLES=true, an https origin, and an https loginURL" }}{{ end -}}
+{{- if or (ne .Values.api.config.AUTH_MODE "oidc") (ne (toString (get .Values.api.config "OIDC_USERINFO_ROLES")) "true") (not (regexMatch "^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" .Values.managerAuth.origin)) (not (hasPrefix "https://" .Values.managerAuth.loginURL)) (not (regexMatch "^[A-Za-z0-9._~-]+$" .Values.managerAuth.clientID)) }}{{ fail "managerAuth requires AUTH_MODE=oidc, api.config.OIDC_USERINFO_ROLES=true, an https origin/loginURL, and a safe OIDC client ID" }}{{ end -}}
 {{- end -}}
 {{- if .Values.authSession.enabled -}}
 {{- if .Values.authSession.externalIngress -}}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { AuthGate, useAuth } from "./AuthGate";
 
 function AuthProbe() {
@@ -7,8 +8,22 @@ function AuthProbe() {
 	return <><span>{session?.authenticated ? `${session.principal.displayName}:${session.capabilities.canEditDashboard}` : "signed-out"}</span><button onClick={()=>void auth.logout()}>probe logout</button></>;
 }
 
+function enableManagerAuth() {
+	for (const [name, content] of [
+		["k8s-auth-manager-origin", "https://manager.example.test"],
+		["k8s-auth-manager-login", "https://portal.example.test/login"],
+		["k8s-auth-manager-client-id", "dhub2-portal"],
+	]) {
+		const meta=document.createElement("meta"); meta.name=name; meta.content=content; document.head.append(meta);
+	}
+}
+
+function managerAccessToken() {
+	return `header.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 900 })).replace(/=/g, "")}.signature`;
+}
+
 describe("AuthGate runtime signal", () => {
-  afterEach(() => { cleanup(); document.querySelector('meta[name="k8s-auth-session"]')?.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
+  afterEach(() => { cleanup(); document.querySelectorAll('meta[name^="k8s-auth-"]').forEach((meta) => meta.remove()); vi.restoreAllMocks(); vi.useRealTimers(); });
   it("adds no bootstrap request when immutable image has no runtime meta", () => {
     const fetchMock=vi.spyOn(globalThis,"fetch"); render(<AuthGate><div>application</div></AuthGate>); expect(screen.getByText("application")).toBeInTheDocument(); expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -20,6 +35,57 @@ describe("AuthGate runtime signal", () => {
   });
 	it("fails closed for a malformed runtime meta", () => {
 	  const meta=document.createElement("meta");meta.name="k8s-auth-session";meta.content="true";document.head.append(meta);const fetchMock=vi.spyOn(globalThis,"fetch");render(<AuthGate><div>application</div></AuthGate>);expect(screen.getByText("application")).toBeInTheDocument();expect(fetchMock).not.toHaveBeenCalled();
+	});
+	it("reuses the Portal OIDC refresh cookie before rendering the application", async () => {
+		enableManagerAuth(); const token=managerAccessToken();
+		const fetchMock=vi.spyOn(globalThis,"fetch")
+			.mockResolvedValueOnce(new Response(JSON.stringify({access_token:token}),{status:200,headers:{"content-type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({name:"Portal Admin"}),{status:200,headers:{"content-type":"application/json"}}));
+		render(<AuthGate><AuthProbe/></AuthGate>);
+		await waitFor(()=>expect(screen.getByText("Portal Admin:false")).toBeInTheDocument());
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls[0]?.[0]).toBe("https://manager.example.test/token");
+		const init=fetchMock.mock.calls[0]?.[1];
+		expect(init?.credentials).toBe("include");
+		expect(new Headers(init?.headers).get("content-type")).toBe("application/x-www-form-urlencoded");
+		expect(init?.body?.toString()).toBe("grant_type=refresh_token&client_id=dhub2-portal");
+	});
+	it("converges manager bootstrap after the StrictMode effect cleanup", async () => {
+		enableManagerAuth(); const token=managerAccessToken();
+		vi.spyOn(globalThis,"fetch").mockImplementation(async (input) => {
+			const url=String(input);
+			if (url.endsWith("/token")) return new Response(JSON.stringify({access_token:token}),{status:200,headers:{"content-type":"application/json"}});
+			if (url.endsWith("/userinfo")) return new Response(JSON.stringify({name:"Strict Admin"}),{status:200,headers:{"content-type":"application/json"}});
+			throw new Error(`unexpected request: ${url}`);
+		});
+		render(<StrictMode><AuthGate><AuthProbe/></AuthGate></StrictMode>);
+		await waitFor(()=>expect(screen.getByText("Strict Admin:false")).toBeInTheDocument());
+	});
+	it("falls back to the legacy refresh endpoint for a Portal local-login cookie", async () => {
+		enableManagerAuth(); const token=managerAccessToken();
+		const fetchMock=vi.spyOn(globalThis,"fetch")
+			.mockResolvedValueOnce(new Response(JSON.stringify({detail:"Invalid refresh token"}),{status:400,headers:{"content-type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({access_token:token}),{status:200,headers:{"content-type":"application/json"}}))
+			.mockResolvedValueOnce(new Response(JSON.stringify({email:"operator@example.test"}),{status:200,headers:{"content-type":"application/json"}}));
+		render(<AuthGate><AuthProbe/></AuthGate>);
+		await waitFor(()=>expect(screen.getByText("operator@example.test:false")).toBeInTheDocument());
+		expect(fetchMock.mock.calls.map(([url])=>url)).toEqual([
+			"https://manager.example.test/token",
+			"https://manager.example.test/api/v1/auth/refresh",
+			"https://manager.example.test/userinfo",
+		]);
+	});
+	it("shows the Portal login page after both refresh contracts reject the cookie", async () => {
+		enableManagerAuth();
+		const fetchMock=vi.spyOn(globalThis,"fetch")
+			.mockResolvedValueOnce(new Response("{}",{status:400}))
+			.mockResolvedValueOnce(new Response("{}",{status:401}))
+			.mockResolvedValueOnce(new Response("{}",{status:400}));
+		render(<AuthGate><div>application</div></AuthGate>);
+		await waitFor(()=>expect(screen.getByRole("heading",{name:"D.Hub 계정으로 로그인"})).toBeInTheDocument());
+		expect(screen.getByRole("link",{name:"D.Hub 로그인 열기"})).toHaveAttribute("href","https://portal.example.test/login");
+		expect(screen.queryByText("application")).not.toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 	it.each([
 		["404", new Response("not found", { status: 404 })],

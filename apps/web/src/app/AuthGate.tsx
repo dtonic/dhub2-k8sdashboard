@@ -36,9 +36,11 @@ export function AuthGate({ children }: PropsWithChildren) {
 	// token을 조용히 받아 Bearer로 씁니다. 대시보드는 자체 로그인 화면을 갖지 않습니다.
 	const managerOrigin = document.querySelector('meta[name="k8s-auth-manager-origin"]')?.getAttribute("content") ?? "";
 	const managerLogin = document.querySelector('meta[name="k8s-auth-manager-login"]')?.getAttribute("content") || managerOrigin;
-  const [state, setState] = useState<"loading" | "disabled" | "ready" | "error">(enabled || managerOrigin ? "loading" : "disabled");
+	const managerClientID = document.querySelector('meta[name="k8s-auth-manager-client-id"]')?.getAttribute("content") ?? "";
+	const [state, setState] = useState<"loading" | "disabled" | "ready" | "error">(enabled || managerOrigin ? "loading" : "disabled");
   const [session, setSession] = useState<Session>();
 	const managerTimer = useRef<number>();
+	const managerSignedOut = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -93,37 +95,73 @@ export function AuthGate({ children }: PropsWithChildren) {
 	// 창 포커스 시 재시도(포털에서 로그인하고 돌아온 경우). 세션 모드와 상호 배타입니다.
 	useEffect(() => {
 		if (!managerOrigin) return;
+		if (!managerClientID) { setState("error"); return; }
 		let mounted = true;
-		let signedOut = false;
+		let refreshInFlight: Promise<boolean> | undefined;
+		const controller = new AbortController();
 		const schedule = (token: string) => {
 			if (managerTimer.current !== undefined) window.clearTimeout(managerTimer.current);
 			const exp = jwtExpMs(token);
 			const delay = exp === undefined ? 5 * 60_000 : Math.max(10_000, exp - Date.now() - 60_000);
 			managerTimer.current = window.setTimeout(() => { void acquire(false); }, Math.min(delay, 2_147_483_647));
 		};
-		const acquire = async (initial: boolean): Promise<boolean> => {
+		type TokenResult = { kind: "token"; token: string } | { kind: "rejected"; status: number } | { kind: "invalid" };
+		const requestToken = (url: string, init: RequestInit): Promise<TokenResult> => bounded(controller.signal, async (signal) => {
+			const res = await fetch(url, { ...init, signal });
+			if (!res.ok) { const status = res.status; await res.body?.cancel(); return { kind: "rejected", status }; }
+			const body = (await res.json()) as { access_token?: string };
+			if (typeof body.access_token !== "string" || !body.access_token) return { kind: "invalid" };
+			return { kind: "token", token: body.access_token };
+		});
+		const requestOIDCToken = () => requestToken(`${managerOrigin}/token`, {
+			method: "POST",
+			credentials: "include",
+			headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ grant_type: "refresh_token", client_id: managerClientID }),
+		});
+		const requestLegacyToken = () => requestToken(`${managerOrigin}/api/v1/auth/refresh`, {
+			method: "POST", credentials: "include", headers: { accept: "application/json" },
+		});
+		const acquireOnce = async (initial: boolean): Promise<boolean> => {
 			try {
-				const res = await bounded(undefined, (signal) =>
-					fetch(`${managerOrigin}/api/v1/auth/refresh`, { method: "POST", credentials: "include", headers: { accept: "application/json" }, signal }));
-				if (res.status === 401) {
-					await res.body?.cancel();
-					signedOut = true;
+				// Portal SSO uses an opaque, rotating OIDC refresh cookie. Local login
+				// uses the legacy JWT refresh cookie with the same name. Try both
+				// contracts without exposing either cookie to JavaScript.
+				const oidc = await requestOIDCToken();
+				let token = oidc.kind === "token" ? oidc.token : undefined;
+				const legacy = token ? undefined : await requestLegacyToken();
+				if (!token && legacy?.kind === "token") token = legacy.token;
+				if (!token && oidc.kind === "rejected" && legacy?.kind === "rejected" &&
+					(oidc.status === 400 || oidc.status === 401) && legacy.status === 401) {
+					// Another Portal/dashboard tab may have rotated the cookie between
+					// requests. Retry once with the browser's now-current cookie.
+					const retry = await requestOIDCToken();
+					if (retry.kind === "token") token = retry.token;
+					else if (retry.kind !== "rejected" || (retry.status !== 400 && retry.status !== 401)) throw new Error("manager OIDC refresh failed");
+				}
+				if (!token) {
+					if (oidc.kind === "invalid" || legacy?.kind === "invalid" ||
+						oidc.kind !== "rejected" || (oidc.status !== 400 && oidc.status !== 401) ||
+						legacy?.kind !== "rejected" || legacy.status !== 401) throw new Error("manager refresh failed");
+					managerSignedOut.current = true;
 					if (mounted) { setManagerToken(""); setSession({ authenticated: false }); setState("ready"); }
 					return false;
 				}
-				if (!res.ok) { await res.body?.cancel(); if (mounted && initial) setState("error"); return false; }
-				const body = (await res.json()) as { access_token?: string };
-				if (typeof body.access_token !== "string" || !body.access_token) { if (mounted && initial) setState("error"); return false; }
-				signedOut = false;
-				setManagerToken(body.access_token);
-				schedule(body.access_token);
+				if (!mounted) return false;
+				managerSignedOut.current = false;
+				setManagerToken(token);
+				schedule(token);
 				let displayName = "Dhub2 계정";
 				try {
-					const ui = await fetch(`${managerOrigin}/userinfo`, { headers: { Authorization: `Bearer ${body.access_token}`, accept: "application/json" } });
-					if (ui.ok) { const v = (await ui.json()) as { name?: string; email?: string }; displayName = v.name || v.email || displayName; } else { await ui.body?.cancel(); }
+					const identity = await bounded(controller.signal, async (signal) => {
+						const ui = await fetch(`${managerOrigin}/userinfo`, { headers: { Authorization: `Bearer ${token}`, accept: "application/json" }, signal });
+						if (!ui.ok) { await ui.body?.cancel(); return undefined; }
+						return (await ui.json()) as { name?: string; email?: string };
+					});
+					displayName = identity?.name || identity?.email || displayName;
 				} catch { /* 표시 이름은 보조 정보 — 실패해도 진행합니다 */ }
 				if (mounted) {
-					const exp = jwtExpMs(body.access_token) ?? Date.now() + 15 * 60_000;
+					const exp = jwtExpMs(token) ?? Date.now() + 15 * 60_000;
 					setSession({ authenticated: true, principal: { displayName }, capabilities: { canEditDashboard: false, canPublishDashboard: false }, expiresAt: new Date(exp).toISOString(), refreshAt: new Date(Math.max(Date.now() + 1_000, exp - 60_000)).toISOString(), csrfToken: "" } as Session);
 					setState("ready");
 				}
@@ -133,24 +171,32 @@ export function AuthGate({ children }: PropsWithChildren) {
 				return false;
 			}
 		};
+		const acquire = (initial: boolean): Promise<boolean> => {
+			if (refreshInFlight) return refreshInFlight;
+			const pending = acquireOnce(initial).finally(() => { if (refreshInFlight === pending) refreshInFlight = undefined; });
+			refreshInFlight = pending;
+			return pending;
+		};
 		setManagerTokenRefresher(() => acquire(false));
 		void acquire(true);
-		const focus = () => { if (signedOut) void acquire(false); };
+		const focus = () => { if (managerSignedOut.current) void acquire(false); };
 		window.addEventListener("focus", focus);
 		return () => {
 			mounted = false;
+			controller.abort();
 			window.removeEventListener("focus", focus);
 			setManagerTokenRefresher(undefined);
 			if (managerTimer.current !== undefined) window.clearTimeout(managerTimer.current);
 		};
-		// managerOrigin은 문서 메타에서 오는 상수입니다.
+		// manager 설정은 nginx가 같은 immutable HTML에 주입하는 상수입니다.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [managerOrigin]);
+	}, [managerOrigin, managerClientID]);
 
   const logout = async () => {
 	if (managerOrigin) {
 		// Dhub2.0 세션 자체는 포털이 관리합니다 — 여기서는 이 앱의 토큰만 버립니다.
 		if (managerTimer.current !== undefined) window.clearTimeout(managerTimer.current);
+		managerSignedOut.current = true;
 		setManagerToken("");
 		setSession({ authenticated: false });
 		return;
@@ -169,14 +215,21 @@ export function AuthGate({ children }: PropsWithChildren) {
   if (state === "loading") return <main className="auth-state" aria-busy="true">Checking session…</main>;
   if (state === "error") return <main className="auth-state"><h1>Authentication unavailable</h1><button onClick={() => window.location.reload()}>Retry</button></main>;
   if (state === "ready" && !session?.authenticated) {
-	if (managerOrigin) {
-		return (
-			<main className="auth-state">
-				<h1>Sign in required</h1>
-				<p>Dhub2 포털에 로그인하면 이 대시보드가 자동으로 연결됩니다. 로그인 후 이 탭으로 돌아오세요.</p>
-				<a href={managerLogin} target="_blank" rel="noreferrer">Dhub2 로그인</a>
-			</main>
-		);
+		if (managerOrigin) {
+			return (
+				<main className="auth-state auth-login">
+					<section className="auth-login__card" aria-labelledby="auth-login-title">
+						<span className="auth-login__eyebrow">Kubernetes Observability</span>
+						<div className="auth-login__mark" aria-hidden="true">D</div>
+						<h1 id="auth-login-title">D.Hub 계정으로 로그인</h1>
+						<p>Portal의 로그인 세션을 안전하게 연결합니다. 로그인 창을 연 뒤 이 탭으로 돌아오면 자동으로 다시 확인합니다.</p>
+						<div className="auth-login__actions">
+							<a className="auth-login__primary" href={managerLogin} target="_blank" rel="noreferrer">D.Hub 로그인 열기</a>
+							<button className="auth-login__secondary" type="button" onClick={() => window.location.reload()}>로그인 상태 다시 확인</button>
+						</div>
+					</section>
+				</main>
+			);
 	}
     const returnTo = window.location.pathname + window.location.search;
     return <main className="auth-state"><h1>Sign in required</h1><a href={`/api/v1/auth/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in</a></main>;

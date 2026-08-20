@@ -45,6 +45,7 @@
 #   OIDC_CLIENT_SECRET confidential client일 때만 지정. Secret으로만 주입됩니다.
 #   AUTH_LOGIN_URL     미로그인 사용자에게 안내할 로그인(포털) URL. Dhub2.0 위임
 #                      모드에서는 클러스터의 *portal* Route를 자동 발견합니다.
+#   MANAGER_AUTH_CLIENT_ID  위임 모드의 Portal OIDC client id(기본: dhub2-portal).
 #   OIDC_MANAGER       1이면 Dhub2.0 위임 모드를 명시적으로 켭니다 — Route 자동
 #                      발견이 없는 클러스터(EKS 등)용. OIDC_ISSUER 지정이 필수이며
 #                      UI 공개는 ROUTE_HOST(host명)와 별도 ingress(HTTPRoute 등)로
@@ -99,6 +100,7 @@ OIDC_AUDIENCE="${OIDC_AUDIENCE_RAW:-$OIDC_CLIENT_ID}"
 OIDC_ROLES_CLAIM="${OIDC_ROLES_CLAIM:-}"
 OIDC_ROLE_MAP="${OIDC_ROLE_MAP:-}"
 AUTH_LOGIN_URL="${AUTH_LOGIN_URL:-}"
+MANAGER_AUTH_CLIENT_ID="${MANAGER_AUTH_CLIENT_ID:-dhub2-portal}"
 OIDC_MANAGER="${OIDC_MANAGER:-0}"
 OIDC_EGRESS_CIDR="${OIDC_EGRESS_CIDR:-}"
 OIDC_MANAGER_MODE=0
@@ -472,6 +474,7 @@ managerAuth:
   enabled: true
   origin: "$OIDC_ISSUER_VAL"
   loginURL: "$AUTH_LOGIN_URL"
+  clientID: "$MANAGER_AUTH_CLIENT_ID"
 EOF
   elif [ "$AUTH_MODE" = "oidc" ]; then
     # 브라우저 세션(ADR 0011). TLS 게시는 chart Ingress가 아니라 OKD Route가 맡습니다.

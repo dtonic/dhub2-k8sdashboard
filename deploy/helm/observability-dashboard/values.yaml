@@ -58,6 +58,7 @@ managerAuth:
   enabled: false
   origin: ""
   loginURL: ""
+  clientID: dhub2-portal
 
 authSession:
   enabled: false
