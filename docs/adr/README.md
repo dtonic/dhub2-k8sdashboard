@@ -35,7 +35,7 @@
 | 0014 | 관리자 전용 Deployment/Secret 관리(쓰기·Secret 노출)를 조회 경로와 격리해 추가한다 | Proposed | [#34](https://github.com/xenx96/k8s-dashboard/issues/34) |
 | 0015 | Dashboard Builder 위젯 확장·예시 대시보드 갱신·편집 UX 개선 | Accepted | [#35](https://github.com/xenx96/k8s-dashboard/issues/35) |
 | 0016 | Dashboard draft 저장소를 SQLite 파일(PVC)로 선택 지원하고 Import를 추가한다 (0009 확장) | Proposed | [#37](https://github.com/xenx96/k8s-dashboard/issues/37) |
-| 0017 | 디자인 시스템 원천을 dhub2-portal design-system으로 전환한다 | Accepted | [#4](https://github.com/xenx96/k8s-dashboard/issues/4) |
+| 0017 | 디자인 시스템 원천을 dhub2-portal design-system으로 전환한다 | Accepted | [#4](https://github.com/dtonic/dhub2-k8sdashboard/issues/4) |
 
 ## 상태 값
 
