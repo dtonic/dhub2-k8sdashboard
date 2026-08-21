@@ -1,0 +1,95 @@
+/* ==========================================================================
+   Component — Button
+   --------------------------------------------------------------------------
+   Portal(D.Hub2) 버튼 규격입니다. (ADR 0017, #4 후속)
+
+   정책
+   - Primary는 브랜드 그라디언트 + glow입니다. 화면당 하나의 주 행동에만 씁니다.
+   - Secondary/Ghost/Outline은 중립 표면 계열입니다. 상태 색을 입지 않습니다.
+   - Destructive는 status-critical을 쓰며, 확인 절차(ConfirmDialog)와 함께 씁니다.
+   - radius는 8px(--radius-default) — 포털 컨테이너 공통 규격입니다.
+   - 아이콘 단독 버튼은 ds-icon-button(앱 셸)을, 링크형 행동은 linkish를 유지합니다.
+   ========================================================================== */
+
+.ds-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-6);
+  border: var(--border-hairline) solid transparent;
+  border-radius: var(--radius-default);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  font: var(--type-body-strong);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.ds-button:hover:not(:disabled) {
+  background: var(--color-surface-active);
+}
+
+.ds-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-border-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.ds-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Primary — 브랜드 그라디언트 + glow ---------------------------------- */
+.ds-button--primary {
+  background: linear-gradient(180deg, var(--color-brand-primary), var(--color-brand-primary-strong));
+  color: var(--color-brand-on-primary);
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.ds-button--primary:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-brand-primary) 85%, black),
+    color-mix(in srgb, var(--color-brand-primary-strong) 85%, black)
+  );
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
+}
+
+/* --- Ghost — 투명 배경, hover에서만 표면 --------------------------------- */
+.ds-button--ghost {
+  background: transparent;
+}
+
+.ds-button--ghost:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+/* --- Outline — 중립 테두리 ------------------------------------------------ */
+.ds-button--outline {
+  background: var(--color-surface-1);
+  border-color: var(--color-border-default);
+}
+
+.ds-button--outline:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+/* --- Destructive — 파괴적 행동 전용 -------------------------------------- */
+.ds-button--destructive {
+  background: var(--color-status-critical);
+  color: var(--color-text-inverse);
+}
+
+.ds-button--destructive:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-status-critical) 85%, black);
+}
+
+/* --- Size ----------------------------------------------------------------- */
+.ds-button--sm {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  font: var(--type-label);
+}

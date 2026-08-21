@@ -1,0 +1,47 @@
+<!-- @dsCard group="Components" name="Button" viewport="960x520" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8s Dashboard — Button</title>
+<style>
+/* @inline: tokens/index.css */
+/* @inline: previews/preview-shell.css */
+/* @inline: components/button/button.css */
+</style>
+</head>
+<body>
+<main class="ds-preview">
+  <header class="ds-preview__header">
+    <h1 class="ds-preview__title">Button</h1>
+    <p class="ds-preview__desc">
+      Portal(D.Hub2) 버튼 규격입니다. Primary는 브랜드 그라디언트 + glow이며 화면당 주 행동
+      하나에만 씁니다. Destructive는 항상 확인 절차와 함께 씁니다.
+    </p>
+  </header>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Variants</h2>
+    <div class="ds-preview__row">
+      <button type="button" class="ds-button ds-button--primary">배치 저장</button>
+      <button type="button" class="ds-button">닫기</button>
+      <button type="button" class="ds-button ds-button--outline">배치 편집</button>
+      <button type="button" class="ds-button ds-button--ghost">Pod 목록 펼치기</button>
+      <button type="button" class="ds-button ds-button--destructive">재배포</button>
+    </div>
+  </section>
+
+  <section class="ds-preview__section">
+    <h2 class="ds-preview__section-title">Disabled · Small</h2>
+    <div class="ds-preview__row">
+      <button type="button" class="ds-button ds-button--primary" disabled>저장 중…</button>
+      <button type="button" class="ds-button ds-button--outline" disabled>배치 편집</button>
+      <button type="button" class="ds-button ds-button--primary ds-button--sm">필터 적용</button>
+      <button type="button" class="ds-button ds-button--outline ds-button--sm">전체 해제</button>
+      <button type="button" class="ds-button ds-button--ghost ds-button--sm">이벤트 더 보기</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>

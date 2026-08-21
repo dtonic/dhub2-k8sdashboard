@@ -85,7 +85,7 @@ export function AppShell() {
             Mock API · 실데이터 아님
           </span>
         )}
-		{auth.enabled && auth.session?.authenticated && <span className="auth-user">{auth.session.principal.displayName}<button type="button" onClick={() => void auth.logout()}>Sign out</button></span>}
+		{auth.enabled && auth.session?.authenticated && <span className="auth-user">{auth.session.principal.displayName}<button type="button" className="ds-button ds-button--ghost ds-button--sm" onClick={() => void auth.logout()}>Sign out</button></span>}
       </header>
 
       <nav className="app__nav" aria-label="주요 화면">

@@ -189,12 +189,12 @@ export function TopologyView() {
                       <button type="button" className="linkish" onClick={exitEdit} disabled={saveLayout.isPending}>
                         취소
                       </button>
-                      <button type="button" onClick={save} disabled={saveLayout.isPending}>
+                      <button type="button" className="ds-button ds-button--primary ds-button--sm" onClick={save} disabled={saveLayout.isPending}>
                         {saveLayout.isPending ? "저장 중…" : "배치 저장"}
                       </button>
                     </>
                   ) : (
-                    <button type="button" onClick={() => setEditMode(true)}>
+                    <button type="button" className="ds-button ds-button--outline ds-button--sm" onClick={() => setEditMode(true)}>
                       배치 편집
                     </button>
                   )}

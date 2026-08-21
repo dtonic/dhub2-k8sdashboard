@@ -484,6 +484,25 @@ a:hover { color: var(--color-text-link-hover); text-decoration: underline; }
 .logline__fields dt { font: var(--type-label); color: var(--color-text-muted); }
 .logline__fields dd { margin: 0; font: var(--type-code); overflow-wrap: anywhere; }
 
+/* 클래스 없는 <button>이 브라우저 기본(무디자인)으로 렌더되지 않게 포털 outline
+   규격을 기본 적용합니다. 명시적 변형이 필요하면 design-system의 ds-button을
+   씁니다. (ADR 0017, #4 후속) */
+button:not([class]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  font: var(--type-label);
+  cursor: pointer;
+}
+button:not([class]):hover:not(:disabled) { background: var(--color-surface-hover); }
+button:not([class]):disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── 관리(Deployment/Secret) UI — ADR 0014, #33 ───────────────────────── */
 
 .btn {
