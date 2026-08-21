@@ -16,6 +16,7 @@ import {
   type EdgeProps,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./topology.css";
@@ -229,6 +230,24 @@ export function TopologyGraph({
 
   const savedKey = useMemo(() => JSON.stringify(savedPositions ?? []), [savedPositions]);
 
+  /* fitView는 React Flow가 최초 마운트에만 적용합니다. namespace 전환처럼 노드
+     **구성**(id 집합)이 바뀌면 이전 뷰포트(전체 뷰에 맞춘 축소/이동 상태)가 남아
+     부분집합이 화면 밖에 놓입니다 — 구성이 바뀔 때만 다시 fit합니다. 같은 구성의
+     자동 갱신은 사용자의 팬/줌을 유지하고, 편집 모드 중에는 건드리지 않습니다. (#16) */
+  const flowRef = useRef<ReactFlowInstance | null>(null);
+  const nodeSetKey = useMemo(() => graphNodes.map((n) => n.id).sort().join("|"), [graphNodes]);
+  const fittedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!flowRef.current || editRef.current) return;
+    if (fittedKeyRef.current === null || fittedKeyRef.current === nodeSetKey) return;
+    fittedKeyRef.current = nodeSetKey;
+    /* setNodes 반영 이후에 fit해야 새 노드 좌표 기준으로 잡힙니다. */
+    const t = window.setTimeout(() => {
+      void flowRef.current?.fitView({ padding: 0.15, maxZoom: 1 });
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [nodeSetKey]);
+
   /* 노드별 In/Out 프로토콜 집계. from 엣지 = 송신(Out), to 엣지 = 수신(In).
      프로토콜은 고정 순서(TCP·UDP·HTTP·gRPC)로 정렬해 카드마다 일관되게 보입니다. */
   const protoByNode = useMemo(() => {
@@ -335,6 +354,11 @@ export function TopologyGraph({
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        onInit={(instance) => {
+          flowRef.current = instance;
+          /* 최초 마운트는 fitView prop이 처리합니다 — 여기서는 기준 구성만 기록합니다. */
+          fittedKeyRef.current = nodeSetKey;
+        }}
         onNodesChange={onNodesChange}
         onNodeDragStop={(_, __, dragged) => {
           for (const n of dragged) posRef.current.set(n.id, n.position);

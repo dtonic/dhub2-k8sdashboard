@@ -52,7 +52,8 @@
   position: absolute;
   top: calc(100% + var(--space-1));
   left: 0;
-  z-index: 40;
+  /* 드롭다운은 데이터 테이블 sticky 헤더(--z-sticky)보다 위에 떠야 합니다. (#15) */
+  z-index: var(--z-dropdown);
   min-width: 100%;
   max-width: 340px;
   max-height: 280px;

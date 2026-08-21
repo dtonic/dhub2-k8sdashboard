@@ -99,13 +99,14 @@ function NodeTable({ items, search }: { items: NodeSummary[]; search: string }) 
                   {num(n.podsTotal)}/{num(n.allocatable.pods)}
                 </td>
                 <td>
-                  <UsageBar ratio={cpuRatio} label="Request" />
+                  {/* 노드 request/allocatable은 1을 넘지 않으므로 풀스케일로 그립니다. (#14) */}
+                  <UsageBar ratio={cpuRatio} label="Request" max={1} />
                   <div className="muted" style={{ fontSize: 12 }}>
                     {num(n.requested.cpuMilli)}m / {num(n.allocatable.cpuMilli)}m
                   </div>
                 </td>
                 <td>
-                  <UsageBar ratio={memRatio} label="Request" />
+                  <UsageBar ratio={memRatio} label="Request" max={1} />
                   <div className="muted" style={{ fontSize: 12 }}>
                     {num(n.requested.memoryMib)} Mi / {num(n.allocatable.memoryMib)} Mi
                   </div>

@@ -104,7 +104,20 @@ export function IssueFilter({
  * Request/Limit 대비 비율. 100%를 기준선으로 두고 넘으면 상태 색으로 칠합니다.
  * 색만으로 판단하지 않도록 수치를 항상 함께 씁니다.
  */
-export function UsageBar({ ratio, label }: { ratio: number | null; label: string }) {
+export function UsageBar({
+  ratio,
+  label,
+  max = 2,
+}: {
+  ratio: number | null;
+  label: string;
+  /**
+   * 막대가 표현하는 최대 비율. 초과 할당이 가능한 화면(사용량 vs request)은 2가
+   * 기본이며 중앙 눈금이 100%입니다. 노드 request/allocatable처럼 1을 넘을 수
+   * 없는 비율은 1을 지정해 0–100% 풀스케일로 그립니다. (#14)
+   */
+  max?: 1 | 2;
+}) {
   if (ratio === null) {
     return (
       <span className="usage">
@@ -112,13 +125,13 @@ export function UsageBar({ ratio, label }: { ratio: number | null; label: string
       </span>
     );
   }
-  const pct = Math.min(ratio, 2) * 50; // 100% == 막대 절반
+  const pct = (Math.min(ratio, max) / max) * 100;
   const tone = ratio >= 1 ? "critical" : ratio >= 0.85 ? "warning" : "healthy";
   return (
     <span className="usage" title={`${label} 대비 ${(ratio * 100).toFixed(0)}%`}>
       <span className={`usage__track usage__track--${tone}`}>
         <span className="usage__fill" style={{ width: `${pct}%` }} />
-        <span className="usage__mark" />
+        {max > 1 && <span className="usage__mark" />}
       </span>
       <span className="usage__text num">{(ratio * 100).toFixed(0)}%</span>
     </span>
