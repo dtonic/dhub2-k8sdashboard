@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -22,8 +23,10 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type Config struct {
@@ -91,6 +94,10 @@ type Config struct {
 	// 지정하면 그 디렉터리의 *.yaml이 기본 카탈로그를 **대체**합니다. (#9)
 	QueryCatalogDir  string
 	DashboardBuilder DashboardBuilderConfig
+
+	// ResourceExplorer는 API discovery 기반 Resource Explorer(ADR 0018) 설정입니다.
+	// 기본은 비활성이며, 켜지 않으면 관련 엔드포인트는 503으로 남습니다.
+	ResourceExplorer ResourceExplorerConfig
 
 	// Greptime은 메트릭 데이터소스(GreptimeDB) 설정입니다. URL이 비어 있으면 미사용입니다.
 	Greptime GreptimeConfig
@@ -161,6 +168,28 @@ type DashboardBuilderConfig struct {
 	RequireTLS     bool
 }
 
+// ResourceExplorerConfig는 Resource Explorer(ADR 0018)가 클러스터에 주는 부하의 상한입니다.
+//
+// 잘못 설정하면 기동을 막습니다 — allowlist 오타 하나가 조용히 "리소스 없음"으로
+// 보이는 것보다 낫습니다. CRD는 언제나 명시적 opt-in입니다.
+type ResourceExplorerConfig struct {
+	Enabled bool
+	// EnabledInvalid는 RESOURCE_EXPLORER_ENABLED가 boolean이 아닐 때입니다.
+	EnabledInvalid bool
+	// Resources는 "group/version/resource" 목록입니다. 비우면 보수적 기본 목록입니다.
+	Resources []string
+	AllowCRDs bool
+	// Refresh는 discovery snapshot 갱신 주기입니다(1m..24h).
+	Refresh time.Duration
+	// DetailRate/DetailBurst/DetailConcurrent는 상세 live GET 전용 상한입니다.
+	DetailRate       float64
+	DetailBurst      int
+	DetailConcurrent int
+	DetailTimeout    time.Duration
+	// MaxObjectBytes는 상세 응답 본문 상한입니다.
+	MaxObjectBytes int
+}
+
 // UsesSQLite는 SQLite 파일 백엔드(ADR 0016)를 쓰는지 알려줍니다.
 // DBPath가 있으면 SQLite, 없고 DatabaseURL이 있으면 PostgreSQL(ADR 0009)입니다.
 func (c DashboardBuilderConfig) UsesSQLite() bool { return c.DBPath != "" }
@@ -193,6 +222,7 @@ func Load() Config {
 	nsList, all := scope.ParseNamespaces(env("SCOPE_NAMESPACES", "*"))
 	sessionEnabled, sessionEnabledInvalid := strictEnvBool("AUTH_SESSION_ENABLED", false)
 	alertmanagerEnabled, alertmanagerEnabledInvalid := strictEnvBool("ALERTMANAGER_ENABLED", false)
+	resourcesEnabled, resourcesEnabledInvalid := strictEnvBool("RESOURCE_EXPLORER_ENABLED", false)
 	return Config{
 		Addr:                     env("ADDR", ":8080"),
 		Kubeconfig:               env("KUBECONFIG", ""),
@@ -241,6 +271,17 @@ func Load() Config {
 			CursorKey: env("DASHBOARD_CURSOR_KEY", ""), MaxConns: envInt("DASHBOARD_DB_MAX_CONNS", 8),
 			ConnectTimeout: envDuration("DASHBOARD_DB_CONNECT_TIMEOUT", 5*time.Second),
 			RequireTLS:     envBool("DASHBOARD_DB_REQUIRE_TLS", false),
+		},
+		ResourceExplorer: ResourceExplorerConfig{
+			Enabled: resourcesEnabled, EnabledInvalid: resourcesEnabledInvalid,
+			Resources:        splitCSV(env("RESOURCE_EXPLORER_RESOURCES", "")),
+			AllowCRDs:        envBool("RESOURCE_EXPLORER_ALLOW_CRDS", false),
+			Refresh:          strictEnvDuration("RESOURCE_EXPLORER_REFRESH", 10*time.Minute),
+			DetailRate:       envFloat("RESOURCE_EXPLORER_DETAIL_RATE", 2),
+			DetailBurst:      strictEnvInt("RESOURCE_EXPLORER_DETAIL_BURST", 5),
+			DetailConcurrent: strictEnvInt("RESOURCE_EXPLORER_DETAIL_CONCURRENT", 2),
+			DetailTimeout:    strictEnvDuration("RESOURCE_EXPLORER_DETAIL_TIMEOUT", 5*time.Second),
+			MaxObjectBytes:   strictEnvInt("RESOURCE_EXPLORER_MAX_OBJECT_BYTES", 1<<20),
 		},
 		Auth: AuthConfig{
 			Mode:                  env("AUTH_MODE", "none"),
@@ -375,6 +416,12 @@ func (c Config) Validate() error {
 		if c.DashboardBuilder.ConnectTimeout <= 0 || c.DashboardBuilder.ConnectTimeout > 30*time.Second {
 			errs = append(errs, errors.New("DASHBOARD_DB_CONNECT_TIMEOUT must be between 0 and 30s"))
 		}
+	}
+	if c.ResourceExplorer.EnabledInvalid {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_ENABLED must be a boolean"))
+	}
+	if c.ResourceExplorer.Enabled {
+		errs = append(errs, c.validateResourceExplorer()...)
 	}
 	if err := validateListenAddr(c.Addr); err != nil {
 		errs = append(errs, fmt.Errorf("ADDR가 유효한 listen 주소가 아닙니다: %q: %w", c.Addr, err))
@@ -514,6 +561,64 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
+// ResourceAllowlist는 Resource Explorer가 informer를 붙일 GVR 목록입니다. (ADR 0018)
+//
+// 비우면 보수적 기본 목록을 씁니다. CRD group은 RESOURCE_EXPLORER_ALLOW_CRDS 없이는
+// 통과하지 못합니다 — 오타 하나가 조용히 "리소스 없음"이 되는 편보다 기동 실패가 낫습니다.
+func (c Config) ResourceAllowlist() ([]schema.GroupVersionResource, error) {
+	raw := c.ResourceExplorer.Resources
+	if len(raw) == 0 {
+		return resourcecatalog.NormalizeAllowlist(resourcecatalog.DefaultAllowlist(), c.ResourceExplorer.AllowCRDs)
+	}
+	out := make([]schema.GroupVersionResource, 0, len(raw))
+	for _, entry := range raw {
+		gvr, err := resourcecatalog.ParseGVR(entry)
+		if err != nil {
+			return nil, fmt.Errorf("RESOURCE_EXPLORER_RESOURCES: %w", err)
+		}
+		out = append(out, gvr)
+	}
+	list, err := resourcecatalog.NormalizeAllowlist(out, c.ResourceExplorer.AllowCRDs)
+	if err != nil {
+		return nil, fmt.Errorf("RESOURCE_EXPLORER_RESOURCES: %w", err)
+	}
+	return list, nil
+}
+
+// validateResourceExplorer는 활성화된 Resource Explorer 설정의 상한을 검사합니다.
+func (c Config) validateResourceExplorer() []error {
+	var errs []error
+	if _, err := c.ResourceAllowlist(); err != nil {
+		errs = append(errs, err)
+	}
+	if c.ResourceExplorer.Refresh < resourcecatalog.MinRefreshInterval || c.ResourceExplorer.Refresh > resourcecatalog.MaxRefreshInterval {
+		errs = append(errs, fmt.Errorf("RESOURCE_EXPLORER_REFRESH must be between %v and %v", resourcecatalog.MinRefreshInterval, resourcecatalog.MaxRefreshInterval))
+	}
+	// NaN은 <=0 과 >100 비교를 **둘 다** 통과합니다. 그대로 두면 token bucket의
+	// tokens가 NaN이 되어 `tokens < 1` 검사가 영원히 false — 상세 조회 rate limit이
+	// fail-open 됩니다. 그래서 명시적으로 거절합니다.
+	if math.IsNaN(c.ResourceExplorer.DetailRate) || c.ResourceExplorer.DetailRate <= 0 || c.ResourceExplorer.DetailRate > 100 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_RATE must be a finite value between 0 and 100"))
+	}
+	if c.ResourceExplorer.DetailBurst < 1 || c.ResourceExplorer.DetailBurst > 100 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_BURST must be between 1 and 100"))
+	}
+	if c.ResourceExplorer.DetailConcurrent < 1 || c.ResourceExplorer.DetailConcurrent > 16 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_CONCURRENT must be between 1 and 16"))
+	}
+	if c.ResourceExplorer.DetailTimeout <= 0 || c.ResourceExplorer.DetailTimeout > 30*time.Second {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_TIMEOUT must be between 0 and 30s"))
+	}
+	if c.ResourceExplorer.MaxObjectBytes < 4096 || c.ResourceExplorer.MaxObjectBytes > 16<<20 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_MAX_OBJECT_BYTES must be between 4096 and 16777216"))
+	}
+	// central 모드는 로컬 informer도 kubeconfig도 없습니다. 켜졌다면 설정 오류입니다.
+	if c.ClusterState.Mode != "direct" {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_ENABLED requires CLUSTER_STATE_MODE=direct"))
+	}
+	return errs
+}
+
 func validOIDCIssuer(u *url.URL) bool {
 	if u == nil || !u.IsAbs() || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
 		return false
@@ -542,12 +647,14 @@ func (c Config) Scope() scope.Scope {
 	if name == "" {
 		name = c.ClusterID
 	}
-	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 편집·워크로드 관리·대시보드 편집/발행을
-	// 모두 허용합니다. (#28, #32, ADR 0016) draft 소유·감사에는 Subject가 필요하므로 고정값을 둡니다.
+	// AUTH_MODE=none은 개발·데모 전용이므로 토폴로지 편집·워크로드 관리·대시보드 편집/발행과
+	// Resource Explorer를 모두 허용합니다. (#28, #32, ADR 0016, ADR 0018)
+	// draft 소유·감사에는 Subject가 필요하므로 고정값을 둡니다.
 	return scope.Scope{
 		Subject:             "local",
 		CanEditTopology:     true,
 		CanManageWorkloads:  true,
+		CanExploreResources: true,
 		CanEditDashboard:    true,
 		CanPublishDashboard: true,
 		Clusters: []scope.Cluster{{

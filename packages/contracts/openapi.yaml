@@ -870,6 +870,135 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
+  # Resource Explorer (ADR 0018) — 조회 전용. 카탈로그·목록은 서버 로컬 snapshot에서만
+  # 나오고, 상세 하나만 사용자가 항목을 연 순간의 격리된 live GET입니다.
+  /api/v1/clusters/{clusterId}/resources:
+    get:
+      operationId: getResourceCatalog
+      summary: "탐색 가능한 리소스 카탈로그 (platform.admin 전용, ADR 0018)"
+      description: >-
+        시작 시점과 주기적 discovery로 만든 불변 snapshot입니다. 요청 처리 중에는
+        discovery도 Kubernetes LIST도 호출하지 않습니다. 각 항목의 state가
+        ready·syncing·unsupported·forbidden·missing을 구분합니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+      responses:
+        "200":
+          description: ResourceCatalogResponse
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceCatalogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
+  /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}:
+    get:
+      operationId: listClusterResources
+      summary: "allowlist 리소스 목록 (metadata 인덱스, keyset 페이지)"
+      description: >-
+        로컬 metadata informer 인덱스에서만 읽습니다. 정렬 키는 (namespace, name)
+        하나이며 cursor는 opaque keyset입니다. offset 페이징은 없습니다 (ADR 0003).
+        namespace 범위는 서버가 Scope와 교차시켜 강제 삽입합니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/ResourceGroup"
+        - $ref: "#/components/parameters/ResourceVersion"
+        - $ref: "#/components/parameters/ResourcePlural"
+        - $ref: "#/components/parameters/Ns"
+        - $ref: "#/components/parameters/ResourceNamePrefix"
+        - $ref: "#/components/parameters/ResourceLabelSelector"
+        - $ref: "#/components/parameters/ResourceLimit"
+        - $ref: "#/components/parameters/ResourceCursor"
+        - $ref: "#/components/parameters/ResourceSort"
+        - $ref: "#/components/parameters/ResourceOrder"
+      responses:
+        "200":
+          description: ResourceListResponse
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/ResourceUpstream"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
+  /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object:
+    get:
+      operationId: getClusterResourceObject
+      summary: "선택한 항목의 정제된 읽기 전용 YAML (격리된 live GET)"
+      description: >-
+        사용자가 항목을 연 순간에만 나가는 단일 live GET입니다. ADR 0004의 명시적
+        예외이며 조회 경로와 client·rate limit·timeout·본문 상한을 공유하지 않습니다.
+        요청한 uid와 실제 객체 uid가 다르면 409입니다. Secret의 data/stringData와
+        managedFields·민감 annotation은 서버에서 제거되어 나갑니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/ResourceGroup"
+        - $ref: "#/components/parameters/ResourceVersion"
+        - $ref: "#/components/parameters/ResourcePlural"
+        - $ref: "#/components/parameters/ResourceObjectNamespace"
+        - $ref: "#/components/parameters/ResourceObjectName"
+        - $ref: "#/components/parameters/ResourceObjectUID"
+      responses:
+        "200":
+          description: ResourceDetailResponse
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/ResourceConflict"
+        "429":
+          $ref: "#/components/responses/ResourceRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/ResourceUpstream"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
+        "504":
+          $ref: "#/components/responses/ResourceTimeout"
   /api/v1/clusters/{clusterId}/events/stream:
     get:
       operationId: streamClusterEvents
@@ -1009,6 +1138,91 @@ components:
             format: date-time
           - type: string
             pattern: "^-?[0-9]+$"
+    # Resource Explorer (ADR 0018). 경로 세그먼트는 discovery allowlist 대조 전에
+    # 형식부터 막습니다 — 임의 문자열이 informer/discovery 키가 되지 않게 합니다.
+    ResourceGroup:
+      name: group
+      in: path
+      required: true
+      description: API group. core group은 "core"로 표기합니다.
+      schema:
+        type: string
+        maxLength: 253
+        pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+    ResourceVersion:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 32
+        pattern: "^v[0-9]+((alpha|beta)[0-9]+)?$"
+    ResourcePlural:
+      name: resource
+      in: path
+      required: true
+      description: 복수형 리소스 이름. subresource는 대상이 아닙니다.
+      schema:
+        type: string
+        maxLength: 63
+        pattern: "^[a-z][a-z0-9]*$"
+    ResourceNamePrefix:
+      name: name
+      in: query
+      required: false
+      description: 이름 prefix 필터.
+      schema:
+        type: string
+        maxLength: 253
+    ResourceLabelSelector:
+      name: labelSelector
+      in: query
+      required: false
+      description: Kubernetes label selector. 표현식은 최대 8개입니다.
+      schema:
+        type: string
+        maxLength: 512
+    ResourceLimit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    ResourceCursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        opaque keyset cursor. 필터·정렬·Scope가 바뀐 cursor는 400입니다 —
+        이어붙이면 중복이나 누락이 조용히 생기기 때문입니다.
+      schema: {type: string, maxLength: 512, pattern: "^[A-Za-z0-9_-]+$"}
+    ResourceSort:
+      name: sort
+      in: query
+      required: false
+      description: 정렬 키. 인덱스가 있는 (namespace, name) 하나뿐입니다.
+      schema: {type: string, enum: [name], default: name}
+    ResourceOrder:
+      name: order
+      in: query
+      required: false
+      schema: {type: string, enum: [asc, desc], default: asc}
+    ResourceObjectNamespace:
+      name: namespace
+      in: query
+      required: false
+      description: namespaced 리소스에서만 필수입니다. Scope 밖이면 403입니다.
+      schema: {type: string, maxLength: 63}
+    ResourceObjectName:
+      name: name
+      in: query
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 253}
+    ResourceObjectUID:
+      name: uid
+      in: query
+      required: true
+      description: 목록에서 본 객체의 UID. 다르면 409입니다.
+      schema: {type: string, minLength: 1, maxLength: 64}
     LastEventID:
       name: Last-Event-ID
       in: header
@@ -1142,6 +1356,64 @@ components:
             $ref: "#/components/schemas/APIError"
     ServiceUnavailable:
       description: 스트림 런타임이 준비되지 않았습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceUnavailable:
+      description: >-
+        이 배포에는 Resource Explorer가 없거나(central·비활성) 캐시가 아직 동기화
+        중입니다. 권한 판정 뒤에 나오는 상태이며, 코드가 resources_unavailable인지
+        resource_syncing인지로 구분합니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+        Retry-After:
+          description: 재시도까지 대기할 초(resource_syncing일 때).
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceUpstream:
+      description: >-
+        클러스터가 이 리소스를 metadata 전용으로 제공하지 않거나(406) 서버 권한이
+        없거나 객체가 응답 한도를 넘었습니다. 내부 주소·질의는 담기지 않습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceConflict:
+      description: 같은 이름의 다른 객체로 교체되었습니다(uid 불일치).
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceRateLimited:
+      description: 상세 live GET 전용 rate·동시성 상한 초과입니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+        Retry-After:
+          description: 재시도까지 대기할 초
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceTimeout:
+      description: 클러스터 응답이 상세 조회 timeout을 넘었습니다.
       headers:
         X-Request-ID:
           $ref: "#/components/headers/XRequestID"
@@ -1284,6 +1556,20 @@ components:
             - refresh_conflict
             - auth_rate_limited
             - session_unavailable
+            - cluster_access_denied
+            - namespace_access_denied
+            - cluster_scope_required
+            - resources_unavailable
+            - resource_not_allowlisted
+            - resource_not_served
+            - resource_unsupported
+            - resource_forbidden
+            - resource_syncing
+            - invalid_filter
+            - detail_rate_limited
+            - uid_mismatch
+            - object_too_large
+            - upstream_timeout
         message:
           type: string
         requestId:
@@ -1346,7 +1632,113 @@ components:
           type: array
           items: {$ref: "#/components/schemas/ScopeCluster"}
         canManageWorkloads: {type: boolean}
+        canExploreResources: {type: boolean}
       description: "원본: src/index.ts의 ScopeResponse. availableNamespaces는 캐시 기반 표시 힌트"
+    # Resource Explorer (ADR 0018) — 조회 전용 계약입니다.
+    ResourceState:
+      type: string
+      description: allowlist 한 항목의 상태. "0건"과 "권한 없음"과 "미지원"을 구분합니다.
+      enum: [ready, syncing, unsupported, forbidden, missing]
+    ResourceDescriptor:
+      type: object
+      additionalProperties: false
+      required: [group, version, resource, kind, namespaced, verbs, state, count]
+      properties:
+        group: {type: string, minLength: 1, description: 'core group은 "core"로 표기합니다.'}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        kind: {type: string}
+        namespaced: {type: boolean}
+        verbs:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+        preferredVersion: {type: string}
+        state: {$ref: "#/components/schemas/ResourceState"}
+        reason: {type: string}
+        count: {type: integer, minimum: 0}
+    ResourceCatalogResponse:
+      type: object
+      additionalProperties: false
+      required: [clusterId, generatedAt, degraded, items]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        generatedAt: {type: string, format: date-time}
+        refreshedAt: {type: string, format: date-time}
+        degraded: {type: boolean}
+        reason: {type: string}
+        items:
+          type: array
+          maxItems: 64
+          items: {$ref: "#/components/schemas/ResourceDescriptor"}
+    ResourceListItem:
+      type: object
+      additionalProperties: false
+      required: [name, uid]
+      properties:
+        namespace: {type: string}
+        name: {type: string, minLength: 1}
+        uid: {type: string, minLength: 1}
+        createdAt: {type: string, format: date-time}
+    ResourceListResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        유계 keyset 페이지입니다. 응답 본문은 1MiB, 행은 200개를 넘지 않습니다.
+      x-max-response-bytes: 1048576
+      required: [clusterId, group, version, resource, kind, namespaced, generatedAt, appliedScope, items, truncated, total]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        group: {type: string, minLength: 1}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        kind: {type: string}
+        namespaced: {type: boolean}
+        generatedAt: {type: string, format: date-time}
+        observedAt: {type: string, format: date-time}
+        appliedScope:
+          type: object
+          additionalProperties: false
+          required: [clusterId, namespaces]
+          properties:
+            clusterId: {type: string, minLength: 1}
+            namespaces:
+              oneOf:
+                - {type: string, const: all}
+                - type: array
+                  uniqueItems: true
+                  items: {type: string, minLength: 1}
+        items:
+          type: array
+          maxItems: 200
+          items: {$ref: "#/components/schemas/ResourceListItem"}
+        nextCursor: {type: string, maxLength: 512, pattern: "^[A-Za-z0-9_-]+$"}
+        truncated: {type: boolean}
+        total: {type: integer, minimum: 0}
+    ResourceDetailResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        서버가 정제한 읽기 전용 매니페스트입니다. Secret의 data/stringData는 절대
+        포함되지 않으며 managedFields와 민감 annotation도 제거됩니다.
+      required: [clusterId, group, version, resource, apiVersion, kind, name, uid, resourceVersion, generatedAt, yaml]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        group: {type: string, minLength: 1}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        apiVersion: {type: string, minLength: 1}
+        kind: {type: string, minLength: 1}
+        namespace: {type: string}
+        name: {type: string, minLength: 1}
+        uid: {type: string, minLength: 1}
+        resourceVersion: {type: string}
+        generatedAt: {type: string, format: date-time}
+        yaml: {type: string}
+        redacted:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1}
     AuthSessionResponse:
       oneOf:
         - type: object

@@ -43,6 +43,9 @@ export function AppShell() {
   const navSearch = useMemo(() => sharedSearch(search), [search]);
   const scope = useScope();
   const canManage = scope.data?.canManageWorkloads ?? false;
+  /* Resources 진입점은 서버가 준 capability로만 노출합니다 — 관리 그룹 조건과 별개입니다.
+     서버는 platform.admin(또는 AUTH_MODE=none)이고 direct 모드 서비스가 있을 때만 true를 줍니다. (ADR 0018) */
+  const canExplore = scope.data?.canExploreResources ?? false;
   const { clusterId } = useDashboardParams();
   const cluster = scope.data?.clusters.find((c) => c.id === clusterId);
   const auth = useAuth();
@@ -98,6 +101,12 @@ export function AppShell() {
             </NavLink>
           ))}
         </div>
+        {canExplore && (
+          <div className="app__nav-group">
+            <div className="app__nav-title">리소스</div>
+            <NavLink to={{ pathname: "/resources", search: navSearch }} className="app__nav-link">Resources</NavLink>
+          </div>
+        )}
         {canManage && (
           <div className="app__nav-group">
             <div className="app__nav-title">관리</div>

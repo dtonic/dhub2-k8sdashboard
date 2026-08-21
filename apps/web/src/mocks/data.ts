@@ -432,4 +432,6 @@ export const SCOPE = {
     { id: "prod-frankfurt", name: "prod-frankfurt", namespaces: [], accessible: false },
   ],
   canManageWorkloads: true,
+  /* Resource Explorer 진입점 노출(ADR 0018). 서버는 platform.admin + direct 모드일 때만 true입니다. */
+  canExploreResources: true,
 };

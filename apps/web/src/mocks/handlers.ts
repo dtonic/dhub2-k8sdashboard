@@ -41,6 +41,7 @@ import {
   workloadsOf,
 } from "./drilldown";
 import { dashboardBuilderHandlers } from "./dashboard-builder";
+import { resourceHandlers } from "./resources";
 
 const scenarioOf = (req: Request): Scenario => {
   const s = new URL(req.url).searchParams.get("scenario");
@@ -93,6 +94,8 @@ function persistLayouts() {
 
 export const handlers = [
   ...dashboardBuilderHandlers,
+  /* Resource Explorer (ADR 0018) — 조회 전용 catalog/list/detail */
+  ...resourceHandlers,
   http.get("/api/v1/scope", async () => {
     await delay(80);
     return HttpResponse.json(SCOPE);

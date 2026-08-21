@@ -26,6 +26,10 @@ type Scope struct {
 	// CanManageWorkloads는 Deployment/Secret 조회·수정·재배포 권한입니다.
 	// platform.admin에서만 파생하고 AUTH_MODE=none은 허용합니다. (ADR 0014, #32)
 	CanManageWorkloads bool
+	// CanExploreResources는 Resource Explorer(조회 전용) 권한입니다.
+	// CanManageWorkloads와 같은 근거(정확히 platform.admin, AUTH_MODE=none)에서
+	// 파생하지만 별개 값입니다 — 관리 권한을 넓히지 않고 탐색만 여는 배포를 위해서입니다. (ADR 0018)
+	CanExploreResources bool
 	// Clusters는 접근 가능한 클러스터입니다.
 	Clusters []Cluster
 }

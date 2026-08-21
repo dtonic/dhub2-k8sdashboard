@@ -87,6 +87,32 @@ src/
 | `/topology?edge=` | Pod Topology (방향별 선 · 엣지 상세 · 시계열) | #16 |
 | `/alerts?tab=&alert=` | Alerts (Active/Resolved · 상세 · deep link) | #17 |
 | `/dashboards/:id` | `packages/dashboard-schema/dashboards/*.json` 자동 발견 Dashboard | #18 |
+| `/resources?res=&q=&labels=&order=&item=` | Resources 진입 화면 — Explorer / Deployments / Secrets 탭 | ADR 0018 |
+| `/deployments`, `/secrets` | Deployment · Secret 관리 (기존 화면 그대로. Resources 탭에서도 진입) | ADR 0014 |
+
+### Resources (ADR 0018)
+
+`/resources`는 리소스 작업의 진입점이고 탭이 세 개입니다. **Explorer**는 이 화면 안에서
+렌더링하는 조회 전용 탐색기이고, **Deployments·Secrets** 탭은 기존 `/deployments`·`/secrets`
+화면으로 이동합니다. 기존 라우트·화면·좌측 nav 항목은 그대로 두고 진입점만 추가한 것이라
+기존 링크와 북마크는 계속 같은 화면을 엽니다. 탭은 WAI-ARIA tabs 패턴(좌우 화살표·Home/End,
+`aria-selected`, `aria-controls`)을 따르고 선택 상태를 색 단독으로 전달하지 않습니다.
+
+- 좌측 nav의 **Resources 항목과 `/resources` 화면은 서버가 준 `canExploreResources`로만**
+  열립니다. 기존 관리 그룹의 `canManageWorkloads` 조건은 그대로입니다.
+- Explorer는 BFF의 **catalog / list / detail 세 경로만** 부릅니다. Kubernetes를 직접
+  호출하지 않고, `queryRef`처럼 서버에 등록된 대상만 조회합니다.
+- **폴링하지 않습니다.** 자동 갱신 주기를 걸지 않고 "다시 조회"·"더 보기"처럼 사용자가
+  일으킨 조작에서만 요청이 나갑니다. 필터도 타이핑마다가 아니라 "조회"에서 반영됩니다.
+- **cursor 페이징입니다.** 서버가 준 불투명 cursor로만 이어보고 offset을 만들지 않습니다.
+  cursor가 없으면 "마지막 페이지"라고 명시합니다.
+- **일곱 상태를 구분합니다** — `ready`(목록) · `empty`(0건) · `syncing` · `unsupported`(406) ·
+  `forbidden`(서버 RBAC) · `missing`(미제공) · `unavailable`(central·비활성). 같은 빈 화면으로
+  접지 않습니다. 400·409·429처럼 상태가 아닌 오류는 상태로 위장하지 않고 이유를 그대로 알립니다.
+- 상세는 **읽기 전용 YAML 모달**입니다. 편집·저장·복사 경로가 없고, Secret의
+  `data`/`stringData`는 애초에 응답에 없습니다. 무엇이 제거됐는지는 감추지 않고
+  redaction 안내에 함께 적습니다. Escape·닫기 버튼으로 닫히고 포커스는 모달 안에 갇힙니다.
+- 생성·수정·삭제 컨트롤이 없습니다. 화면 전체가 조회 전용입니다.
 
 ## 설계 규칙
 

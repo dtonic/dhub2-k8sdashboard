@@ -159,6 +159,44 @@ dashboardBuilder:
 manageWorkloads:
   enabled: false
 
+# Resource Explorer (ADR 0018) — API discovery 기반 **조회 전용** 리소스 탐색기.
+# 명시적 opt-in이며 direct 모드에서만 켤 수 있습니다(central은 로컬 informer가 없어
+# 렌더 단계에서 실패합니다). 끄면(기본) 엔드포인트는 권한 판정 뒤 503이고
+# UI의 Resources 진입점도 나타나지 않습니다 — 이것이 롤백 스위치입니다.
+#
+# 켜면 아래 resources 목록이 두 곳에 그대로 쓰입니다.
+#   1) API의 allowlist(RESOURCE_EXPLORER_RESOURCES) — 여기 없는 GVR은 목록도 상세도 없습니다.
+#   2) 대시보드 ServiceAccount의 ClusterRole — **get/list/watch만** 붙고 write verb는 없습니다.
+# 목록에서 항목을 빼면 두 곳이 함께 줄어듭니다. 필요한 것만 남기세요.
+#
+# core/v1/secrets는 기본 목록에 **없습니다**. 추가하면 Explorer가 Secret "메타데이터"를
+# 보여주지만(값은 서버가 제거) SA에는 secrets list/watch 권한이 붙습니다 — 그 영향을
+# 감수할 때만 추가하세요. Secret 값 조회는 여전히 manageWorkloads 경로 하나뿐입니다.
+resourceExplorer:
+  enabled: false
+  refresh: 10m
+  allowCRDs: false
+  resources:
+    - core/v1/services
+    - core/v1/configmaps
+    - core/v1/serviceaccounts
+    - core/v1/persistentvolumeclaims
+    - core/v1/persistentvolumes
+    - discovery.k8s.io/v1/endpointslices
+    - batch/v1/jobs
+    - networking.k8s.io/v1/ingresses
+    - networking.k8s.io/v1/networkpolicies
+    - autoscaling/v2/horizontalpodautoscalers
+    - policy/v1/poddisruptionbudgets
+    - storage.k8s.io/v1/storageclasses
+  # 상세(선택한 항목 하나)만 실시간 GET입니다. 조회 경로와 예산을 공유하지 않습니다.
+  detail:
+    rate: 2
+    burst: 5
+    concurrent: 2
+    timeout: 5s
+    maxObjectBytes: 1048576
+
 redis:
   enabled: true
   image: {repository: redis, tag: 8.2.6-alpine, digest: ""}

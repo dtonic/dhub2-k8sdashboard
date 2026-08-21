@@ -587,3 +587,83 @@ button:not([class]):disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 tr.is-selected td { background: var(--color-surface-selected); }
+
+/* --- Resource Explorer (ADR 0018) ---------------------------------------- */
+/* 탭 링크는 chip 모양을 재사용합니다. 선택 상태는 색이 아니라 aria-selected +
+   텍스트로 전달되며, 아래 규칙은 이미 aria-pressed로 표현되던 것과 같은 표시입니다. */
+.chip[aria-selected="true"] {
+  background: var(--color-surface-selected);
+  border-color: var(--color-border-focus);
+  color: var(--color-text-primary);
+}
+.resource-tabs { margin-bottom: var(--space-4); }
+.resource-tabs a.chip { text-decoration: none; }
+
+.resource-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.resource-filters__error { font: var(--type-meta); color: var(--status-critical); margin: var(--space-3) 0 0; }
+
+.resource-list__footer {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-hairline) solid var(--color-border-subtle);
+  font: var(--type-meta);
+}
+
+.resource-drawer__overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: var(--color-modal-overlay);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-4);
+}
+.resource-drawer {
+  display: flex; flex-direction: column;
+  width: min(880px, 100%);
+  max-height: min(88vh, 900px);
+  padding: var(--space-6);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  box-shadow: var(--elevation-3);
+  overflow: auto;
+}
+.resource-drawer__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.resource-drawer__title { font: var(--type-section-title); margin: 0; }
+.resource-drawer__meta { font: var(--type-meta); margin: var(--space-2) 0 0; }
+.resource-drawer__facts { display: flex; flex-wrap: wrap; gap: var(--space-6); margin: var(--space-5) 0 0; }
+.resource-drawer__facts dt { font: var(--type-label); color: var(--color-text-muted); }
+.resource-drawer__facts dd { font: var(--type-code); margin: var(--space-1) 0 0; color: var(--color-text-primary); }
+.resource-drawer__redaction {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+  margin: var(--space-5) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-hairline) solid var(--status-warning);
+  border-radius: var(--radius-default);
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}
+.resource-drawer__redaction-mark {
+  display: grid; place-items: center;
+  width: 18px; height: 18px;
+  border-radius: var(--radius-full);
+  background: var(--status-warning);
+  color: var(--color-text-on-warning);
+  font: var(--weight-bold) var(--text-xs) / 1 var(--font-sans);
+  forced-color-adjust: none;
+}
+.resource-drawer__yaml {
+  flex: 1; min-height: 200px;
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  font: var(--type-code);
+  white-space: pre; overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .resource-filters { flex-direction: column; align-items: stretch; }
+  .resource-drawer { max-height: 94vh; padding: var(--space-4); }
+}

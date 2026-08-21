@@ -292,6 +292,92 @@ export interface ScopeResponse {
   }>;
   /** Deployment/Secret 관리 탭·버튼 노출 여부(platform.admin + 관리 기능 활성). (ADR 0014) */
   canManageWorkloads?: boolean;
+  /**
+   * Resource Explorer 진입점 노출 여부. platform.admin에서 파생한 capability이면서
+   * 이 배포에 direct 모드 resource 서비스가 있을 때만 true입니다. (ADR 0018)
+   */
+  canExploreResources?: boolean;
+}
+
+/* ── Resource Explorer (ADR 0018) ───────────────────────────────────────────
+   조회 전용입니다. 목록은 서버의 metadata informer 인덱스에서만 나오고,
+   상세만 사용자가 항목을 연 순간의 격리된 live GET입니다. */
+
+/** allowlist 한 항목의 상태. "0건"과 "권한 없음"과 "미지원"을 구분합니다. */
+export type ResourceState = "ready" | "syncing" | "unsupported" | "forbidden" | "missing";
+
+export interface ResourceDescriptor {
+  /** core group은 "core"로 표기합니다. 경로 세그먼트가 비어 있을 수 없기 때문입니다. */
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  verbs: string[];
+  /** 서버가 선호하는 group 버전(진단용). */
+  preferredVersion?: string;
+  state: ResourceState;
+  /** ready가 아닐 때의 짧은 사유. 내부 주소·질의는 담기지 않습니다. */
+  reason?: string;
+  /** 로컬 인덱스에 담긴 객체 수(필터 전). */
+  count: number;
+}
+
+export interface ResourceCatalogResponse {
+  clusterId: string;
+  generatedAt: string;
+  /** discovery snapshot을 마지막으로 만든 시각. */
+  refreshedAt?: string;
+  /** discovery 자체가 부분/전체 실패했는지. */
+  degraded: boolean;
+  reason?: string;
+  items: ResourceDescriptor[];
+}
+
+/** 목록 한 줄. 신원은 이름이 아니라 UID입니다. */
+export interface ResourceListItem {
+  namespace?: string;
+  name: string;
+  uid: string;
+  createdAt?: string;
+}
+
+export interface ResourceListResponse {
+  clusterId: string;
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  generatedAt: string;
+  /** 인덱스를 마지막으로 만든 시각. */
+  observedAt?: string;
+  appliedScope: { clusterId: string; namespaces: string[] | "all" };
+  items: ResourceListItem[];
+  /** opaque keyset cursor. offset 페이징은 어떤 요청에도 없습니다. (ADR 0003) */
+  nextCursor?: string;
+  /** 페이지·byte·scan 예산으로 조기 종료했는지. */
+  truncated: boolean;
+  /** 인덱스 전체 객체 수(필터 전). */
+  total: number;
+}
+
+export interface ResourceDetailResponse {
+  clusterId: string;
+  group: string;
+  version: string;
+  resource: string;
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+  uid: string;
+  resourceVersion: string;
+  generatedAt: string;
+  /** 서버가 정제한 읽기 전용 YAML. Secret의 data/stringData는 들어 있지 않습니다. */
+  yaml: string;
+  /** 제거한 필드 경로. 가려졌다는 사실은 보이게 합니다. */
+  redacted?: string[];
 }
 
 export type AuthSessionResponse =
@@ -338,6 +424,20 @@ export interface ApiError {
 	| "refresh_conflict"
 	| "auth_rate_limited"
 	| "session_unavailable"
+	| "cluster_access_denied"
+	| "namespace_access_denied"
+	| "cluster_scope_required"
+	| "resources_unavailable"
+	| "resource_not_allowlisted"
+	| "resource_not_served"
+	| "resource_unsupported"
+	| "resource_forbidden"
+	| "resource_syncing"
+	| "invalid_filter"
+	| "detail_rate_limited"
+	| "uid_mismatch"
+	| "object_too_large"
+	| "upstream_timeout"
     | "internal";
   message: string;
   /** 응답 헤더 X-Request-ID와 항상 같은 값. 문의·로그 대조는 이 값 하나로 합니다. */

@@ -27,6 +27,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/timerange"
@@ -65,6 +66,9 @@ type Deps struct {
 	// KubeClient는 관리(Deployment/Secret write) 전용 clientset입니다. direct 모드에서만
 	// 설정되며 nil이면 관리 엔드포인트가 503입니다. 조회 경로는 쓰지 않습니다. (ADR 0014, #32)
 	KubeClient kubernetes.Interface
+	// Resources는 direct 모드의 Resource Explorer 서비스입니다. central 모드는 nil이며
+	// 관련 엔드포인트가 권한 판정 뒤 안정적으로 503을 돌려줍니다. (ADR 0018)
+	Resources *resourcecatalog.Service
 	// AllowedOrigin이 있으면 CORS 헤더를 붙입니다. 개발 중 Vite 오리진용입니다.
 	AllowedOrigin string
 	// Now는 테스트에서 시간을 고정합니다.
@@ -190,6 +194,11 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/v1/clusters/{clusterId}/secrets/{namespace}/{name}", s.handleSecretUpdate)
 	m.HandleFunc("POST /api/v1/clusters/{clusterId}/secrets/{namespace}/{name}/restart", s.handleSecretRestart)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/alerts", s.handleAlerts)
+	// Resource Explorer(ADR 0018) — 조회 전용. 카탈로그·목록은 로컬 snapshot,
+	// 상세 하나만 격리된 live GET입니다.
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources", s.handleResourceCatalog)
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}", s.handleResourceList)
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object", s.handleResourceDetail)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
 }
 
@@ -473,6 +482,12 @@ func routeName(mux *http.ServeMux, r *http.Request) string {
 		return "secret_restart"
 	case "GET /api/v1/clusters/{clusterId}/alerts":
 		return "alerts"
+	case "GET /api/v1/clusters/{clusterId}/resources":
+		return "resource_catalog"
+	case "GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}":
+		return "resource_list"
+	case "GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object":
+		return "resource_detail"
 	case streamRoute:
 		return "stream"
 	default:

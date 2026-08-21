@@ -232,6 +232,53 @@ if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work
   echo "stage dashboard builder without verified TLS unexpectedly rendered" >&2; exit 1
 fi
 
+# Resource Explorer (ADR 0018) — 기본 opt-out이 정확한 무차이여야 하고, 켜면
+# 조회 전용 RBAC만 붙어야 합니다. central 모드는 렌더 단계에서 명시적으로 실패합니다.
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set resourceExplorer.enabled=false > "$TMP/resources-disabled-explicit.yaml"
+cmp "$TMP/validation/dev.yaml" "$TMP/resources-disabled-explicit.yaml"
+expect_render_failure --set resourceExplorer.enabled=true --set clusterState.mode=central
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set resourceExplorer.enabled=true > "$TMP/resources-enabled.yaml"
+docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/resources-enabled.yaml"
+python3 - "$TMP/resources-enabled.yaml" "$TMP/validation/dev.yaml" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+base = [d for d in yaml.safe_load_all(open(sys.argv[2])) if d]
+
+cm = next(d for d in docs if d.get("kind") == "ConfigMap" and d["metadata"]["name"].endswith("-api"))
+assert cm["data"]["RESOURCE_EXPLORER_ENABLED"] == "true"
+assert cm["data"]["RESOURCE_EXPLORER_ALLOW_CRDS"] == "false"
+assert cm["data"]["RESOURCE_EXPLORER_REFRESH"] == "10m"
+configured = cm["data"]["RESOURCE_EXPLORER_RESOURCES"].split(",")
+assert configured and all(len(entry.split("/")) == 3 for entry in configured), configured
+# Secret 메타데이터는 기본 목록에 없습니다 — 켜는 것만으로 SA에 secrets 권한이 붙지 않습니다.
+assert "core/v1/secrets" not in configured, configured
+
+def explorer_rules(manifest):
+    role = next(d for d in manifest if d.get("kind") == "ClusterRole" and d["metadata"]["name"].endswith("-api-read"))
+    return role["rules"]
+
+before = explorer_rules(base)
+after = explorer_rules(docs)
+added = [rule for rule in after if rule not in before]
+assert added, "explorer rules were not added"
+allowed_resources = {entry.split("/")[2] for entry in configured}
+for rule in added:
+    assert sorted(rule["verbs"]) == ["get", "list", "watch"], rule
+    assert set(rule["resources"]) <= allowed_resources, rule
+    assert "secrets" not in rule["resources"], rule
+# 기존 규칙은 하나도 사라지지 않습니다.
+for rule in before:
+    assert rule in after, rule
+# manageWorkloads가 꺼진 이 렌더에서는 ClusterRole 전체에 write verb가 없어야 합니다.
+write_verbs = {"create", "update", "patch", "delete", "deletecollection", "*"}
+for rule in after:
+    assert not (set(rule["verbs"]) & write_verbs), rule
+PY
+
 expect_cutover_failure() {
   if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
     --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \

@@ -51,6 +51,28 @@
       "type": "object", "additionalProperties": false,
       "properties": {"enabled": {"type": "boolean"}}
     },
+    "resourceExplorer": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "refresh": {"type": "string", "pattern": "^([1-9][0-9]*(m|h))$"},
+        "allowCRDs": {"type": "boolean"},
+        "resources": {
+          "type": "array", "maxItems": 64, "uniqueItems": true,
+          "items": {"type": "string", "maxLength": 320, "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?$"}
+        },
+        "detail": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "rate": {"type": "number", "minimum": 0.1, "maximum": 100},
+            "burst": {"type": "integer", "minimum": 1, "maximum": 100},
+            "concurrent": {"type": "integer", "minimum": 1, "maximum": 16},
+            "timeout": {"type": "string", "pattern": "^([1-9][0-9]{0,4}(ms|s))$"},
+            "maxObjectBytes": {"type": "integer", "minimum": 4096, "maximum": 16777216}
+          }
+        }
+      }
+    },
     "redis": {
       "type": "object", "required": ["enabled", "image", "persistence", "resources"],
       "properties": {

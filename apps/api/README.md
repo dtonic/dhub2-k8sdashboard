@@ -131,6 +131,32 @@ OIDC Core상 refresh ID token은 선택 사항이므로, 이를 생략하는 pro
 호환되지 않으며 refresh 시 세션이 fail-closed 됩니다. API Bearer token의 audience는 기존
 `OIDC_AUDIENCE`를 그대로 사용합니다.
 
+### Resource Explorer 설정 (ADR 0018)
+
+API discovery 기반의 **조회 전용** 리소스 탐색기입니다. 기본은 비활성이며,
+`CLUSTER_STATE_MODE=direct`에서만 켤 수 있습니다 — central 모드는 로컬 informer가
+없으므로 `Config.Validate()`가 기동을 막습니다.
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `RESOURCE_EXPLORER_ENABLED` | `false` | 기능 opt-in. boolean이 아니면 기동 실패입니다. 끄면 관련 엔드포인트가 권한 판정 뒤 503이고 `/api/v1/scope`의 `canExploreResources`도 false입니다 — **이 값이 롤백 스위치입니다** |
+| `RESOURCE_EXPLORER_RESOURCES` | (비움 → 내장 기본 목록) | `group/version/resource` CSV. `core/v1/services`처럼 core group은 `core`로 씁니다. 비우면 관측 informer가 이미 watch하지 않는 보수적 기본 13종을 씁니다. 최대 64개이며 오타는 기동 실패입니다 |
+| `RESOURCE_EXPLORER_ALLOW_CRDS` | `false` | 내장 API group이 아닌(=CRD) 항목의 명시적 opt-in. 없으면 CRD가 목록에 있어도 기동에 실패합니다 |
+| `RESOURCE_EXPLORER_REFRESH` | `10m` | discovery snapshot 갱신 주기(1m..24h). **요청 경로에서는 discovery를 호출하지 않습니다** |
+| `RESOURCE_EXPLORER_DETAIL_RATE` / `_BURST` | `2` / `5` | 상세 live GET 전용 token bucket. 조회 경로의 `QUERY_*` 예산과 공유하지 않습니다 |
+| `RESOURCE_EXPLORER_DETAIL_CONCURRENT` | `2` | 상세 동시 실행 상한(1..16). 초과는 대기가 아니라 429입니다 |
+| `RESOURCE_EXPLORER_DETAIL_TIMEOUT` | `5s` | 상세 HTTP 요청 하나의 상한(0..30s) |
+| `RESOURCE_EXPLORER_MAX_OBJECT_BYTES` | `1048576` | 상세 응답 본문 상한(4KiB..16MiB). 넘으면 읽는 중에 끊고 502입니다 |
+
+allowlist 이름은 Kubernetes 규칙을 그대로 씁니다 — group은 DNS1123 subdomain,
+version과 복수형 resource는 DNS1035 label입니다. 하이픈이 들어간 CRD 복수형
+(`example.com/v1/my-widgets`)과 `v1beta1` 밖의 버전 이름도 정상 통과합니다.
+
+Helm에서는 `resourceExplorer.*` 값 하나가 **API allowlist와 ServiceAccount RBAC 양쪽**을
+만듭니다. 붙는 권한은 `get`/`list`/`watch`뿐이고 write verb는 어떤 경우에도 없습니다.
+`core/v1/secrets`는 chart 기본 목록에 없습니다 — 추가하면 Explorer가 Secret **메타데이터**를
+보여주지만 SA에 secrets list/watch 권한이 함께 붙으므로 그 영향을 감수할 때만 넣습니다.
+
 ### 실어댑터가 지키는 규칙
 
 - **질의는 등록형 쿼리 카탈로그에서만 나옵니다.** 프런트는 패널 id·검색어만 보낼 수
@@ -204,6 +230,9 @@ GET /api/v1/clusters/{clusterId}/logs?ns=&levels=&q=&cursor=
 GET /api/v1/clusters/{clusterId}/topology?ns=
 GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series
 GET /api/v1/clusters/{clusterId}/alerts?ns=
+GET /api/v1/clusters/{clusterId}/resources                                   (카탈로그 · ADR 0018)
+GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}      (목록 · cursor 페이징)
+GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object?namespace=&name=&uid=
 GET /api/v1/clusters/{clusterId}/events/stream        (SSE · #12)
 GET /healthz   GET /readyz   GET /version   GET /metrics
 ```
@@ -238,6 +267,41 @@ go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDa
 - 브라우저 기본 `EventSource`는 `Authorization: Bearer` 헤더를 설정할 수 없습니다.
   OIDC UI 연결은 토큰 query parameter를 쓰지 않고, 후속 authenticated fetch-stream
   또는 same-origin HttpOnly cookie proxy로 배선해야 합니다.
+
+### Resource Explorer (ADR 0018)
+
+`/resources` 세 경로는 **조회 전용**입니다. 생성·수정·삭제 경로가 없습니다.
+
+- **요청 경로에서 Kubernetes를 호출하지 않습니다.** 카탈로그는 시작 시점과
+  `RESOURCE_EXPLORER_REFRESH` 주기로 만든 불변 discovery snapshot에서, 목록은
+  allowlist GVR의 `PartialObjectMetadata` informer 인덱스에서만 나옵니다.
+- **406은 조용한 fallback이 아니라 상태입니다.** metadata 전용 조회를 받아주지 않는
+  aggregated API는 full-object list/watch로 물러나지 않고 `unsupported`로 노출되며,
+  되지 않을 LIST를 반복하지 않도록 해당 informer를 멈추고 다음 discovery 갱신에서만
+  다시 시도합니다. 카탈로그의 `state`는 `ready·syncing·unsupported·forbidden·missing`
+  다섯 가지이고 "결과 0건"과 절대 섞이지 않습니다.
+- **live GET은 상세 하나뿐입니다.** 사용자가 항목을 연 순간에만, 그리고 그 항목이
+  이미 로컬 metadata 인덱스에 있고 UID까지 일치할 때만 나갑니다. 지어낸 이름·UID로는
+  API 서버로 나가는 요청 자체가 없습니다(404/409). ADR 0004의 명시적 예외이며
+  조회 경로와 client·rate limit·timeout·본문 상한을 공유하지 않습니다.
+- **Secret 값은 0바이트입니다.** 상세 응답에서 `data`/`stringData`와 `managedFields`,
+  `kubectl.kubernetes.io/last-applied-configuration`을 포함한 민감 annotation은
+  **서버에서 제거된 뒤** 나갑니다. 무엇을 지웠는지는 `redacted` 배열로 알립니다.
+  Secret 값 조회 경로는 여전히 ADR 0014의 관리 화면 하나뿐입니다.
+- 목록은 서버 keyset cursor(기본 50 · 최대 200행 · 응답 1MiB)만 씁니다. offset 페이징이
+  없고, 필터·정렬은 인덱스가 있는 `(namespace, name)` 하나로 묶여 있습니다.
+- Scope는 서버가 강제 삽입합니다. 클러스터 범위 리소스는 클러스터 전체 권한이 필요하고,
+  namespace 사용자에게 0건이 아니라 403을 돌려줍니다.
+- **central 모드는 명시적으로 사용할 수 없습니다.** 서비스를 만들지 않고, 세 경로는
+  권한 판정이 끝난 뒤 안정적으로 503 `resources_unavailable`을 돌려줍니다.
+  빈 카탈로그를 흉내 내지 않습니다.
+
+100k 객체 인덱스의 페이지 비용은 벤치마크로 지킵니다:
+
+```bash
+cd apps/api && go test ./internal/resourcecatalog \
+  -run '^$' -bench 'BenchmarkResource' -benchmem -count=5
+```
 
 ### 응답 규칙
 

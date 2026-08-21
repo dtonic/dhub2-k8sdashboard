@@ -12,6 +12,9 @@ import type {
   ManagedWorkloadListResponse,
   PodDetailResponse,
   RangeKey,
+  ResourceCatalogResponse,
+  ResourceDetailResponse,
+  ResourceListResponse,
   ScopeResponse,
   TopologyEdgeSeriesResponse,
   TopologyLayout,
@@ -377,5 +380,125 @@ export function useAlerts(clusterId: string, ns: string, range: RangeKey, refres
         signal,
       ),
     refetchInterval: refreshMs > 0 ? refreshMs : false,
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Resource Explorer (ADR 0018)
+   --------------------------------------------------------------------------
+   조회 전용입니다. 브라우저는 Kubernetes를 직접 부르지 않고 BFF의 catalog/list/
+   detail 세 경로만 씁니다. 목록은 서버 cursor로만 이어보고(offset 없음),
+   **폴링하지 않습니다** — 갱신은 사용자가 명시적으로 일으킵니다.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+export const resourceKeys = {
+  catalog: (clusterId: string) => ["resource-catalog", clusterId] as const,
+  list: (clusterId: string, gvr: string, ns: string, namePrefix: string, labelSelector: string, order: string) =>
+    ["resource-list", clusterId, gvr, ns, namePrefix, labelSelector, order] as const,
+  object: (clusterId: string, gvr: string, ns: string, name: string, uid: string) =>
+    ["resource-object", clusterId, gvr, ns, name, uid] as const,
+};
+
+/* 상태(unsupported·forbidden·syncing·unavailable)는 재시도로 바뀌지 않습니다.
+   재시도하면 되지 않을 요청을 반복해 BFF와 클러스터에 부하만 더합니다. */
+const resourceRetry = (count: number, error: unknown) =>
+  !(error instanceof HttpError && error.status >= 400 && error.status !== 500) && count < 2;
+
+export function useResourceCatalog(clusterId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: resourceKeys.catalog(clusterId),
+    queryFn: ({ signal }) =>
+      apiGet<ResourceCatalogResponse>(`/api/v1/clusters/${encodeURIComponent(clusterId)}/resources`, {}, signal),
+    enabled: enabled && Boolean(clusterId),
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+    retry: resourceRetry,
+  });
+}
+
+export type ResourceListFilters = {
+  clusterId: string;
+  group: string;
+  version: string;
+  resource: string;
+  /** "all"이면 서버가 Scope 전체를 적용합니다. */
+  namespace: string;
+  namePrefix: string;
+  labelSelector: string;
+  order: "asc" | "desc";
+  limit: number;
+};
+
+function resourcePath(f: { clusterId: string; group: string; version: string; resource: string }) {
+  return `/api/v1/clusters/${encodeURIComponent(f.clusterId)}/resources/${encodeURIComponent(f.group)}/${encodeURIComponent(f.version)}/${encodeURIComponent(f.resource)}`;
+}
+
+/**
+ * 서버 keyset cursor로만 이어봅니다. offset 페이징은 만들지 않습니다 (ADR 0003).
+ * cursor는 서버가 만든 불투명 문자열이며 클라이언트는 해석하지 않습니다.
+ */
+export function useResourceList(f: ResourceListFilters, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: resourceKeys.list(
+      f.clusterId,
+      `${f.group}/${f.version}/${f.resource}`,
+      f.namespace,
+      f.namePrefix,
+      f.labelSelector,
+      f.order,
+    ),
+    initialPageParam: "" as string,
+    queryFn: ({ signal, pageParam }) =>
+      apiGet<ResourceListResponse>(
+        resourcePath(f),
+        {
+          limit: String(f.limit),
+          ...(f.namespace && f.namespace !== "all" ? { ns: f.namespace } : {}),
+          ...(f.namePrefix ? { name: f.namePrefix } : {}),
+          ...(f.labelSelector ? { labelSelector: f.labelSelector } : {}),
+          ...(f.order === "desc" ? { order: "desc" } : {}),
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      ),
+    getNextPageParam: (last) => last.nextCursor || undefined,
+    enabled: enabled && Boolean(f.clusterId) && Boolean(f.resource),
+    refetchOnWindowFocus: false,
+    retry: resourceRetry,
+    staleTime: 10_000,
+  });
+}
+
+/**
+ * 상세는 **사용자가 항목을 연 순간에만** 조회합니다. 서버가 격리된 client로
+ * live GET하고 정제한 YAML만 돌려줍니다 — 값이 아니라 메타만 옵니다.
+ */
+export function useResourceObject(
+  clusterId: string,
+  gvr: { group: string; version: string; resource: string },
+  target: { namespace: string; name: string; uid: string } | null,
+) {
+  return useQuery({
+    queryKey: resourceKeys.object(
+      clusterId,
+      `${gvr.group}/${gvr.version}/${gvr.resource}`,
+      target?.namespace ?? "",
+      target?.name ?? "",
+      target?.uid ?? "",
+    ),
+    queryFn: ({ signal }) =>
+      apiGet<ResourceDetailResponse>(
+        `${resourcePath({ clusterId, ...gvr })}/object`,
+        {
+          ...(target?.namespace ? { namespace: target.namespace } : {}),
+          name: target?.name ?? "",
+          uid: target?.uid ?? "",
+        },
+        signal,
+      ),
+    enabled: Boolean(clusterId) && Boolean(gvr.resource) && Boolean(target?.name) && Boolean(target?.uid),
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
+    retry: resourceRetry,
   });
 }

@@ -36,9 +36,11 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/observability"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/queryprotect"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
+	"k8s.io/client-go/rest"
 )
 
 // 빌드 정보 — GET /version이 그대로 돌려줍니다. 릴리스 빌드는 ldflags로 덮어씁니다:
@@ -218,6 +220,16 @@ func run(logger *slog.Logger) error {
 	guardCfg.SlowThreshold = cfg.QuerySlowThreshold
 	topoLayout := topologylayout.New(topologylayout.Config{RedisAddr: cfg.RedisAddr, OpTimeout: cfg.RedisOpTimeout, Logger: logger})
 	defer func() { _ = topoLayout.Close() }()
+
+	// Resource Explorer (ADR 0018) — 기본 비활성입니다. 켜졌을 때만 discovery·allowlist
+	// metadata informer·격리 dynamic client를 만듭니다. central 모드는 이 경로에 오지 않고
+	// Deps.Resources가 nil로 남아 엔드포인트가 503을 돌려줍니다.
+	resources, err := startResourceExplorer(ctx, logger, cfg, restCfg)
+	if err != nil {
+		return err
+	}
+	defer resources.Close()
+
 	srv := httpapi.NewServer(httpapi.Deps{
 		Store:              store,
 		ScopeNamespaces:    store,
@@ -240,7 +252,9 @@ func run(logger *slog.Logger) error {
 		DashboardQueryRefs: queries.Refs(),
 		TopologyLayout:     topoLayout,
 		// 관리(ADR 0014)는 direct 모드에서만 — clientset을 직접 씁니다. central은 nil.
-		KubeClient:    clients.Typed,
+		KubeClient: clients.Typed,
+		// Resource Explorer(ADR 0018)도 direct 모드 전용입니다. 비활성이면 nil입니다.
+		Resources:     resources,
 		AllowedOrigin: cfg.AllowedOrigin,
 		Version:       contract.VersionInfo{Version: version, Commit: commit, BuildDate: buildDate},
 	})
@@ -273,6 +287,54 @@ func run(logger *slog.Logger) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
 	}
+}
+
+// startResourceExplorer는 direct 모드에서만 Resource Explorer 서비스를 만듭니다. (ADR 0018)
+//
+// 비활성이면 nil을 돌려주고 엔드포인트는 권한 판정 뒤 503이 됩니다. 설정 오류는
+// 여기서 기동을 멈춥니다 — allowlist 오타가 조용히 "리소스 없음"이 되는 편보다 낫습니다.
+func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.Config, restCfg *rest.Config) (*resourcecatalog.Service, error) {
+	if !cfg.ResourceExplorer.Enabled {
+		return nil, nil
+	}
+	allowlist, err := cfg.ResourceAllowlist()
+	if err != nil {
+		return nil, err
+	}
+	clients, err := resourcecatalog.NewClients(restCfg, resourcecatalog.ClientOptions{
+		QPS:            cfg.QPS,
+		Burst:          cfg.Burst,
+		DetailQPS:      float32(cfg.ResourceExplorer.DetailRate),
+		DetailBurst:    cfg.ResourceExplorer.DetailBurst,
+		UserAgent:      "k8s-dashboard-resources",
+		MaxObjectBytes: int64(cfg.ResourceExplorer.MaxObjectBytes),
+		DetailTimeout:  cfg.ResourceExplorer.DetailTimeout,
+	})
+	if err != nil {
+		return nil, err
+	}
+	service, err := resourcecatalog.New(clients, resourcecatalog.Config{
+		ClusterID:        cfg.ClusterID,
+		Allowlist:        allowlist,
+		AllowCRDs:        cfg.ResourceExplorer.AllowCRDs,
+		RefreshInterval:  cfg.ResourceExplorer.Refresh,
+		Resync:           cfg.Resync,
+		DetailTimeout:    cfg.ResourceExplorer.DetailTimeout,
+		DetailRate:       cfg.ResourceExplorer.DetailRate,
+		DetailBurst:      cfg.ResourceExplorer.DetailBurst,
+		DetailConcurrent: cfg.ResourceExplorer.DetailConcurrent,
+		MaxObjectBytes:   cfg.ResourceExplorer.MaxObjectBytes,
+		Logger:           logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := service.Start(ctx); err != nil {
+		return nil, err
+	}
+	logger.Info("Resource Explorer 시작",
+		"resources", len(allowlist), "refresh", cfg.ResourceExplorer.Refresh.String(), "crds", cfg.ResourceExplorer.AllowCRDs)
+	return service, nil
 }
 
 func startDirectAlertPoller(parent context.Context, poller *stream.AlertPoller, logger *slog.Logger) func() {

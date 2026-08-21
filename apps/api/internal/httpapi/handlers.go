@@ -31,6 +31,9 @@ func (s *Server) handleScope(w http.ResponseWriter, r *http.Request) {
 		out := contract.ScopeResponse{
 			Clusters:           make([]contract.ScopeCluster, 0, len(sc.Clusters)),
 			CanManageWorkloads: sc.CanManageWorkloads && s.deps.KubeClient != nil,
+			// 권한(platform.admin 파생)과 **이 배포의 가용성**이 둘 다 참일 때만 true입니다.
+			// central 배포는 서비스 자체가 없으므로 항상 false입니다. (ADR 0018)
+			CanExploreResources: sc.CanExploreResources && s.deps.Resources.Available(),
 		}
 		for _, c := range sc.Clusters {
 			cluster := contract.ScopeCluster{

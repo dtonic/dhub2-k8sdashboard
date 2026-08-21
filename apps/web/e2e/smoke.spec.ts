@@ -15,6 +15,8 @@ const ROUTES = [
   { path: "/topology?range=1h", title: "Pod Topology" },
   { path: "/alerts?range=7d", title: "Alerts" },
   { path: "/dashboards/cluster-operations?range=1h&refresh=0", title: "Cluster Operations" },
+  /* Resources 진입점(ADR 0018). res를 고르기 전에는 카탈로그 한 건만 조회합니다. */
+  { path: "/resources?range=1h", title: "Resources" },
 ];
 
 for (const r of ROUTES) {

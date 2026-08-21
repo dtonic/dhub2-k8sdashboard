@@ -18,6 +18,21 @@ data:
   {{- if .Values.redis.enabled }}
   REDIS_ADDR: {{ printf "%s-redis:6379" (include "dashboard.fullname" .) | quote }}
   {{- end }}
+  {{- if .Values.resourceExplorer.enabled }}
+  {{- if ne .Values.clusterState.mode "direct" }}
+  {{- fail "resourceExplorer.enabled requires clusterState.mode=direct — central 모드에는 로컬 informer가 없어 API가 기동하지 않습니다" }}
+  {{- end }}
+  {{- /* allowlist는 API와 RBAC이 같은 목록을 씁니다(serviceaccounts-rbac.yaml 참고). */}}
+  RESOURCE_EXPLORER_ENABLED: "true"
+  RESOURCE_EXPLORER_REFRESH: {{ .Values.resourceExplorer.refresh | quote }}
+  RESOURCE_EXPLORER_ALLOW_CRDS: {{ .Values.resourceExplorer.allowCRDs | quote }}
+  RESOURCE_EXPLORER_RESOURCES: {{ join "," .Values.resourceExplorer.resources | quote }}
+  RESOURCE_EXPLORER_DETAIL_RATE: {{ .Values.resourceExplorer.detail.rate | quote }}
+  RESOURCE_EXPLORER_DETAIL_BURST: {{ printf "%d" (int .Values.resourceExplorer.detail.burst) | quote }}
+  RESOURCE_EXPLORER_DETAIL_CONCURRENT: {{ printf "%d" (int .Values.resourceExplorer.detail.concurrent) | quote }}
+  RESOURCE_EXPLORER_DETAIL_TIMEOUT: {{ .Values.resourceExplorer.detail.timeout | quote }}
+  RESOURCE_EXPLORER_MAX_OBJECT_BYTES: {{ printf "%d" (int64 .Values.resourceExplorer.detail.maxObjectBytes) | quote }}
+  {{- end }}
   {{- if .Values.authSession.enabled }}
   AUTH_SESSION_ENABLED: "true"
   AUTH_PUBLIC_ORIGIN: {{ .Values.authSession.publicOrigin | quote }}

@@ -371,6 +371,101 @@ type ScopeResponse struct {
 	Clusters []ScopeCluster `json:"clusters"`
 	// CanManageWorkloads는 Deployment/Secret 관리 탭·버튼 노출 여부입니다. (ADR 0014)
 	CanManageWorkloads bool `json:"canManageWorkloads"`
+	// CanExploreResources는 Resource Explorer 진입점 노출 여부입니다. platform.admin에서
+	// 파생한 capability이면서 **이 배포에 direct 모드 resource 서비스가 있을 때만** true입니다.
+	// (ADR 0018)
+	CanExploreResources bool `json:"canExploreResources"`
+}
+
+/* ── Resource Explorer (ADR 0018) ─────────────────────────────────────────
+   discovery snapshot + allowlisted metadata informer 위의 조회 전용 계약입니다.
+   목록은 로컬 인덱스에서만 나오고, 상세만 격리된 live GET입니다. */
+
+// ResourceState는 allowlist 한 항목의 현재 상태입니다.
+// "0건"과 "권한 없음"과 "미지원"을 같은 빈 화면으로 처리하지 않기 위해 값으로 내려갑니다.
+type ResourceState string
+
+const (
+	ResourceStateReady       ResourceState = "ready"
+	ResourceStateSyncing     ResourceState = "syncing"
+	ResourceStateUnsupported ResourceState = "unsupported"
+	ResourceStateForbidden   ResourceState = "forbidden"
+	ResourceStateMissing     ResourceState = "missing"
+)
+
+// ResourceDescriptor는 카탈로그 한 줄입니다. group은 core group일 때 "core"입니다.
+type ResourceDescriptor struct {
+	Group      string `json:"group"`
+	Version    string `json:"version"`
+	Resource   string `json:"resource"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
+	// Verbs는 discovery가 알려준 동사 목록입니다.
+	Verbs []string `json:"verbs"`
+	// PreferredVersion은 이 group에서 서버가 선호하는 버전입니다(진단용).
+	PreferredVersion string        `json:"preferredVersion,omitempty"`
+	State            ResourceState `json:"state"`
+	// Reason은 ready가 아닐 때의 짧은 사유입니다. 내부 주소·질의는 담지 않습니다.
+	Reason string `json:"reason,omitempty"`
+	// Count는 로컬 인덱스에 담긴 객체 수입니다(필터 전).
+	Count int `json:"count"`
+}
+
+type ResourceCatalogResponse struct {
+	ClusterID   string `json:"clusterId"`
+	GeneratedAt string `json:"generatedAt"`
+	// RefreshedAt은 discovery snapshot을 마지막으로 만든 시각입니다.
+	RefreshedAt string `json:"refreshedAt,omitempty"`
+	// Degraded는 discovery 자체가 부분/전체 실패했음을 뜻합니다.
+	Degraded bool                 `json:"degraded"`
+	Reason   string               `json:"reason,omitempty"`
+	Items    []ResourceDescriptor `json:"items"`
+}
+
+// ResourceListItem은 목록 한 줄입니다. 신원은 이름이 아니라 UID입니다. (README §5)
+type ResourceListItem struct {
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+	UID       string `json:"uid"`
+	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+type ResourceListResponse struct {
+	ClusterID    string             `json:"clusterId"`
+	Group        string             `json:"group"`
+	Version      string             `json:"version"`
+	Resource     string             `json:"resource"`
+	Kind         string             `json:"kind"`
+	Namespaced   bool               `json:"namespaced"`
+	GeneratedAt  string             `json:"generatedAt"`
+	ObservedAt   string             `json:"observedAt,omitempty"`
+	AppliedScope AppliedScope       `json:"appliedScope"`
+	Items        []ResourceListItem `json:"items"`
+	// NextCursor는 opaque keyset cursor입니다. offset은 어떤 요청에도 없습니다. (ADR 0003)
+	NextCursor string `json:"nextCursor,omitempty"`
+	// Truncated는 페이지·byte·scan 예산으로 조기 종료했음을 뜻합니다.
+	Truncated bool `json:"truncated"`
+	// Total은 인덱스에 담긴 전체 객체 수입니다(필터 전).
+	Total int `json:"total"`
+}
+
+// ResourceDetailResponse는 사용자가 항목을 연 순간의 정제된 읽기 전용 매니페스트입니다.
+type ResourceDetailResponse struct {
+	ClusterID       string `json:"clusterId"`
+	Group           string `json:"group"`
+	Version         string `json:"version"`
+	Resource        string `json:"resource"`
+	APIVersion      string `json:"apiVersion"`
+	Kind            string `json:"kind"`
+	Namespace       string `json:"namespace,omitempty"`
+	Name            string `json:"name"`
+	UID             string `json:"uid"`
+	ResourceVersion string `json:"resourceVersion"`
+	GeneratedAt     string `json:"generatedAt"`
+	// YAML은 서버가 정제한 매니페스트입니다. Secret의 data/stringData는 들어 있지 않습니다.
+	YAML string `json:"yaml"`
+	// Redacted는 제거한 필드 경로입니다. 가려졌다는 사실은 보이게 합니다.
+	Redacted []string `json:"redacted,omitempty"`
 }
 
 /* ── Workload/Secret 관리 (ADR 0014, #32) ─────────────────────────────────

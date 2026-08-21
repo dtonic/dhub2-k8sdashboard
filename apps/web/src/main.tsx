@@ -12,6 +12,7 @@ import { PodDetail } from "@/features/drill/PodDetail";
 import { LogsExplorer } from "@/features/logs/LogsExplorer";
 import { TopologyView } from "@/features/topology/TopologyView";
 import { ManageView } from "@/features/manage/ManageView";
+import { ResourcesView } from "@/features/resources/ResourcesView";
 import { AlertsView } from "@/features/alerts/AlertsView";
 import { DashboardView } from "@/features/dashboards/DashboardView";
 import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
@@ -54,6 +55,9 @@ async function bootstrap() {
               <Route path="/topology" element={<TopologyView />} />
               <Route path="/logs" element={<LogsExplorer />} />
               <Route path="/alerts" element={<AlertsView />} />
+              {/* Resources 진입점(ADR 0018). 아래 기존 관리 라우트는 그대로 둡니다 —
+                  탭에서 이동하는 대상이자 기존 링크·북마크의 목적지입니다. */}
+              <Route path="/resources" element={<ResourcesView />} />
               <Route path="/deployments" element={<ManageView kind="deployments" />} />
               <Route path="/secrets" element={<ManageView kind="secrets" />} />
               <Route path="/dashboards/:id" element={<DashboardView />} />
