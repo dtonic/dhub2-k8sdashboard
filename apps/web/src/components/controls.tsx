@@ -146,7 +146,11 @@ export function RefreshControl({
       <button type="button" className="linkish" onClick={onRefreshNow} aria-live="off">
         지금 갱신
       </button>
-      <span aria-live="polite">{fetching ? "갱신 중…" : updatedAtMs ? `마지막 갱신 ${clock(updatedAtMs)}` : ""}</span>
+      {/* 텍스트가 "갱신 중…"↔"마지막 갱신 HH:MM"로 바뀌어도 행 폭이 흔들리지 않게
+          최장 문구만큼 폭을 예약합니다. (#17) */}
+      <span className="refresh__status" aria-live="polite">
+        {fetching ? "갱신 중…" : updatedAtMs ? `마지막 갱신 ${clock(updatedAtMs)}` : ""}
+      </span>
     </div>
   );
 }

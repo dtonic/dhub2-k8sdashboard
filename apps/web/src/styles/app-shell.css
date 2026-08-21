@@ -266,6 +266,9 @@ a:hover { color: var(--color-text-link-hover); text-decoration: underline; }
   display: inline-flex; align-items: center; gap: var(--space-3);
   font: var(--type-meta); color: var(--color-text-muted);
 }
+/* 상태 문구 교대("갱신 중…"↔"마지막 갱신 HH:MM")가 컨트롤 행을 리플로우하지
+   않도록 최장 문구 폭을 예약합니다. (#17) */
+.refresh__status { display: inline-block; min-width: 9em; }
 .refresh select {
   height: var(--control-height-sm);
   padding: 0 var(--space-3);
