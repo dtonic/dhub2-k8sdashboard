@@ -2,10 +2,12 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ command, mode }) => ({
   plugins: [react()],
-  /* mock worker는 명시적 E2E bundle에만 복사하며 production dist에는 두지 않습니다. */
-  publicDir: mode === "e2e" ? "public" : false,
+  /* mock worker는 production dist에 넣지 않습니다. 단, 개발 서버(serve)는 MSW 위에서
+     돌아가는 것이 기본이므로 public/을 항상 서빙합니다 — 끄면 mock worker 404로
+     `make dev`가 빈 화면이 됩니다. build는 명시적 E2E 번들만 public을 복사합니다. */
+  publicDir: command === "serve" || mode === "e2e" ? "public" : false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
