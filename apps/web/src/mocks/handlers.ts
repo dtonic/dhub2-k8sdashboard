@@ -519,7 +519,10 @@ export const handlers = [
               observedAt: new Date(NOW_MS - 7 * 60 * 1000).toISOString(),
               data: { nodes, edges },
             }
-          : ok({ nodes, edges }),
+          : nodes.length === 0
+            ? /* 서버와 동일하게 노드 0개는 empty 섹션입니다 — ok+빈 그래프로 내리지 않습니다. (#16) */
+              empty()
+            : ok({ nodes, edges }),
       layout: mockLayouts.get(clusterId) ?? null,
       canEditLayout: true,
     };

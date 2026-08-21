@@ -516,6 +516,23 @@ func TestTopologyEdgesAreDirectional(t *testing.T) {
 	}
 }
 
+// TestTopologyEmptyNamespaceIsEmptySectionNotNullGraph — Pod가 없는 namespace는
+// "결과 0건"이므로 graph 섹션이 empty여야 합니다. ok + null/빈 그래프로 내리면
+// UI가 빈 캔버스 또는 렌더 크래시(nodes=null)로 보입니다. (#16)
+func TestTopologyEmptyNamespaceIsEmptySectionNotNullGraph(t *testing.T) {
+	f := newFixture(t, withClusterWideScope)
+	var res contract.TopologyResponse
+	f.get(t, base+"/topology?range=1h&ns=no-pods-here", &res)
+	if res.Graph.Status != contract.StatusEmpty {
+		t.Fatalf("graph.status=%s, want empty (data=%+v)", res.Graph.Status, res.Graph.Data)
+	}
+	// 기존 규약대로 empty에도 data(빈 배열)는 실릴 수 있습니다. 다만 null 배열은
+	// 클라이언트 렌더를 깨뜨리므로 절대 안 됩니다.
+	if res.Graph.Data != nil && (res.Graph.Data.Nodes == nil || res.Graph.Data.Edges == nil) {
+		t.Fatalf("graph 배열이 null입니다: %+v", res.Graph.Data)
+	}
+}
+
 func TestEdgeSeriesUsesTheSameWindow(t *testing.T) {
 	f := newFixture(t)
 	var res contract.TopologyEdgeSeriesResponse

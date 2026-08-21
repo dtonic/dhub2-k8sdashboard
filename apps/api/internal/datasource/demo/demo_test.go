@@ -2,6 +2,7 @@ package demo_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -354,5 +355,25 @@ func BenchmarkTopologyGraph500Workloads(b *testing.B) {
 		if _, err := d.Graph(context.Background(), target(""), window()); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// TestTopologyGraphEmptyNamespaceHasArraysNotNull — Pod가 없는 namespace의 그래프는
+// nil 슬라이스가 아니라 빈 배열이어야 합니다. JSON null이 나가면 UI 렌더가 깨집니다. (#16)
+func TestTopologyGraphEmptyNamespaceHasArraysNotNull(t *testing.T) {
+	d := newDemo(t)
+	g, err := d.Graph(context.Background(), target("no-pods-here"), window())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Nodes == nil || g.Edges == nil {
+		t.Fatalf("nil 슬라이스가 반환되었습니다: nodes=%v edges=%v", g.Nodes == nil, g.Edges == nil)
+	}
+	raw, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "null") {
+		t.Fatalf("JSON에 null이 있습니다: %s", raw)
 	}
 }

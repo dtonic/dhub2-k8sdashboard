@@ -450,9 +450,11 @@ func routesFor(protocol string) []string {
 }
 
 func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Window) (contract.TopologyGraph, error) {
+	// 계약은 배열입니다 — nil 슬라이스가 JSON null로 나가면 UI 렌더가 깨집니다. (#16)
+	empty := contract.TopologyGraph{Nodes: []contract.TopologyNode{}, Edges: []contract.TopologyEdge{}}
 	pods := s.pods(t)
 	if len(pods) == 0 {
-		return contract.TopologyGraph{}, nil
+		return empty, nil
 	}
 
 	// 워크로드 단위로 접습니다. Pod를 전부 그리면 노드가 수백 개가 되어 읽을 수 없습니다.
@@ -475,7 +477,7 @@ func (s *Source) Graph(_ context.Context, t datasource.Target, w datasource.Wind
 	}
 	sort.Strings(order)
 
-	g := contract.TopologyGraph{}
+	g := empty
 	// 열 수를 고정하면 노드가 적을 때 한 열에 몰려 엣지가 하나도 생기지 않습니다.
 	// 이웃한 노드가 서로 다른 열에 오도록 열을 먼저 채웁니다.
 	// 노드가 많으면 열을 √n에 비례해 늘려 한 열이 끝없이 길어지지 않게 합니다.

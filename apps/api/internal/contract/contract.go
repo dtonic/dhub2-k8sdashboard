@@ -116,6 +116,10 @@ func isEmpty(v any) bool {
 	switch t := v.(type) {
 	case nil:
 		return true
+	// 그래프는 struct라 슬라이스 규칙이 자동 적용되지 않습니다. 노드 0개는
+	// "결과 0건"이며, ok + null 배열로 나가면 UI 렌더가 깨집니다. (#16)
+	case TopologyGraph:
+		return len(t.Nodes) == 0
 	case []UnhealthyEntity:
 		return len(t) == 0
 	case []ClusterEvent:
