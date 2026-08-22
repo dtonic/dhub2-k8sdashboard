@@ -468,6 +468,79 @@ type ResourceDetailResponse struct {
 	Redacted []string `json:"redacted,omitempty"`
 }
 
+/* ── 전역 리소스 검색 (ADR 0023) ──────────────────────────────────────────
+   ADR 0018 metadata 인덱스 위의 조회 전용 접두사 검색입니다. */
+
+// ResourceMatchField는 결과가 어느 필드에서 걸렸는지입니다.
+// 색만으로 구분하지 않도록 UI가 텍스트로 함께 씁니다.
+type ResourceMatchField string
+
+const (
+	ResourceMatchName      ResourceMatchField = "name"
+	ResourceMatchNamespace ResourceMatchField = "namespace"
+	ResourceMatchKind      ResourceMatchField = "kind"
+	ResourceMatchLabel     ResourceMatchField = "label"
+)
+
+// ResourceSearchItem은 검색 결과 한 줄입니다.
+//
+// **status 필드는 없습니다.** 검색은 PartialObjectMetadata 인덱스에서만 읽고
+// 그 안에 status가 없으므로, 있는 척하는 필드를 계약에 만들지 않습니다.
+type ResourceSearchItem struct {
+	Group        string             `json:"group"`
+	Version      string             `json:"version"`
+	Resource     string             `json:"resource"`
+	Kind         string             `json:"kind"`
+	Namespaced   bool               `json:"namespaced"`
+	Namespace    string             `json:"namespace,omitempty"`
+	Name         string             `json:"name"`
+	UID          string             `json:"uid"`
+	MatchedField ResourceMatchField `json:"matchedField"`
+}
+
+// ResourceSearchResponse는 유계 검색 페이지 하나입니다.
+type ResourceSearchResponse struct {
+	ClusterID    string               `json:"clusterId"`
+	Query        string               `json:"query"`
+	GeneratedAt  string               `json:"generatedAt"`
+	ObservedAt   string               `json:"observedAt,omitempty"`
+	AppliedScope AppliedScope         `json:"appliedScope"`
+	Items        []ResourceSearchItem `json:"items"`
+	// NextCursor는 질의·Scope에 묶인 opaque keyset cursor입니다.
+	NextCursor string `json:"nextCursor,omitempty"`
+	// Truncated는 페이지·byte·scan 예산으로 조기 종료했음을 뜻합니다.
+	// **Scope 밖 객체는 이 값에 영향을 주지 않습니다.**
+	Truncated bool `json:"truncated"`
+	// Degraded는 일부 리소스가 색인되지 않았거나 label 색인이 잘렸다는 뜻입니다.
+	// 잘린 검색을 완전한 검색인 것처럼 보여주지 않기 위해 필요합니다.
+	Degraded bool   `json:"degraded"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// ResourceRecentItem은 서버가 다시 확인해 준 최근 항목입니다.
+// 제목의 근거(kind·이름)는 브라우저 저장값이 아니라 전부 서버 값입니다.
+type ResourceRecentItem struct {
+	Group      string `json:"group"`
+	Version    string `json:"version"`
+	Resource   string `json:"resource"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name"`
+	UID        string `json:"uid"`
+}
+
+// ResourceRecentResponse는 재해석된 최근 항목입니다.
+//
+// 요청 순서를 그대로 지킵니다. 해석되지 않은 참조(삭제·권한 상실·UID 교체)는
+// 오류가 아니라 **응답에서 빠지는 것**으로 표현합니다.
+type ResourceRecentResponse struct {
+	ClusterID    string               `json:"clusterId"`
+	GeneratedAt  string               `json:"generatedAt"`
+	AppliedScope AppliedScope         `json:"appliedScope"`
+	Items        []ResourceRecentItem `json:"items"`
+}
+
 /* ── Workload/Secret 관리 (ADR 0014, #32) ─────────────────────────────────
    관리 API는 조회 경로와 분리되어 요청 시점에 clientset을 직접 호출합니다.
    Secret 값은 캐시에 상주시키지 않고 관리 응답으로만 흘립니다. */

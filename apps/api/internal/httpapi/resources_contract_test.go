@@ -107,6 +107,72 @@ func resourceContractErrors(doc map[string]any) []string {
 		require(asMap(asMap(response["headers"])["X-Request-ID"]) != nil, name+" missing X-Request-ID")
 	}
 	require(asMap(asMap(asMap(responses["ResourceRateLimited"])["headers"])["Retry-After"]) != nil, "rate limited response must advertise Retry-After")
+
+	/* ── 전역 검색·최근 항목 (ADR 0023) ──────────────────────────────────── */
+
+	for operation, statuses := range map[string][]string{
+		"GET /api/v1/clusters/{clusterId}/resources/search": {"200", "400", "401", "403", "404", "405", "500", "503"},
+		"GET /api/v1/clusters/{clusterId}/resources/recent": {"200", "400", "401", "403", "404", "405", "500", "503"},
+	} {
+		definition := ops[operation]
+		require(definition != nil, operation+" is missing")
+		actual := asMap(definition["responses"])
+		for _, status := range statuses {
+			require(actual[status] != nil, operation+" missing status "+status)
+		}
+	}
+
+	query := asMap(asMap(params["ResourceQuery"])["schema"])
+	require(query["minLength"] == resourcecatalog.MinQueryLen, "search query minimum drift")
+	require(query["maxLength"] == resourcecatalog.MaxQueryLen, "search query maximum drift")
+	require(asMap(params["ResourceQuery"])["required"] == true, "search query must be required")
+
+	searchLimit := asMap(asMap(params["ResourceSearchLimit"])["schema"])
+	require(searchLimit["maximum"] == resourcecatalog.MaxSearchPageSize, "search limit bound drift")
+	require(searchLimit["default"] == resourcecatalog.DefaultSearchPageSize, "search default page bound drift")
+
+	searchCursor := asMap(asMap(params["ResourceSearchCursor"])["schema"])
+	require(searchCursor["maxLength"] == resourcecatalog.MaxSearchCursorLen, "search cursor length drift")
+	require(searchCursor["pattern"] == "^[A-Za-z0-9_-]+$", "search cursor must stay opaque base64url")
+
+	refs := asMap(asMap(params["ResourceRecentRefs"])["schema"])
+	require(refs["maxItems"] == resourcecatalog.MaxRecentRefs, "recent ref count bound drift")
+	require(asMap(refs["items"])["maxLength"] == resourcecatalog.MaxRecentRefLen, "recent ref length bound drift")
+
+	matchFields := asSlice(asMap(schemas["ResourceMatchField"])["enum"])
+	require(fmt.Sprint(matchFields) == fmt.Sprint(resourcecatalog.MatchedFieldNames()), "matched field vocabulary drift")
+
+	searchItem := asMap(schemas["ResourceSearchItem"])
+	require(searchItem["additionalProperties"] == false, "search item schema must be closed")
+	searchItemProps := asMap(searchItem["properties"])
+	// status는 PartialObjectMetadata에 없습니다. 계약에 선언되는 순간 서버가
+	// 없는 값을 지어내야 하므로, 없다는 것 자체를 고정합니다.
+	require(searchItemProps["status"] == nil, "search item must never declare status")
+	for _, field := range []string{"group", "version", "resource", "kind", "namespaced", "name", "uid", "matchedField"} {
+		require(searchItemProps[field] != nil, "search item missing "+field)
+	}
+
+	searchResponse := asMap(schemas["ResourceSearchResponse"])
+	require(searchResponse["x-max-response-bytes"] == resourcecatalog.MaxSearchResponseBytes, "search response byte bound drift")
+	searchProps := asMap(searchResponse["properties"])
+	require(asMap(searchProps["items"])["maxItems"] == resourcecatalog.MaxSearchPageSize, "search item bound drift")
+	require(asMap(searchProps["nextCursor"])["maxLength"] == resourcecatalog.MaxSearchCursorLen, "search next cursor drift")
+	searchRequired := map[string]bool{}
+	for _, field := range asSlice(searchResponse["required"]) {
+		searchRequired[fmt.Sprint(field)] = true
+	}
+	// degraded와 truncated는 선택 필드가 되면 안 됩니다 — 없으면 UI가 잘린 검색을
+	// 완전한 검색으로 그립니다.
+	for _, field := range []string{"appliedScope", "items", "truncated", "degraded"} {
+		require(searchRequired[field], "search response must always carry "+field)
+	}
+
+	recentResponse := asMap(schemas["ResourceRecentResponse"])
+	require(asMap(asMap(recentResponse["properties"])["items"])["maxItems"] == resourcecatalog.MaxRecentRefs, "recent response bound drift")
+
+	for _, code := range []string{"search_unavailable", "invalid_query"} {
+		require(codes[code], "APIError enum missing "+code)
+	}
 	return problems
 }
 
@@ -145,6 +211,27 @@ func TestResourceOpenAPIContractMatchesServerBounds(t *testing.T) {
 		{"uid no longer required", func(d map[string]any) {
 			asMap(asMap(asMap(d["components"])["parameters"])["ResourceObjectUID"])["required"] = false
 		}},
+		{"search route removed", func(d map[string]any) {
+			delete(asMap(d["paths"]), "/api/v1/clusters/{clusterId}/resources/search")
+		}},
+		{"single character query allowed", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["parameters"])["ResourceQuery"])["schema"] = map[string]any{"minLength": 1, "maxLength": 64}
+		}},
+		{"search page cap drift", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["parameters"])["ResourceSearchLimit"])["schema"] = map[string]any{"maximum": 500, "default": 20}
+		}},
+		{"matched field vocabulary drift", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["schemas"])["ResourceMatchField"])["enum"] = []any{"name", "label"}
+		}},
+		{"search item invents status", func(d map[string]any) {
+			asMap(asMap(asMap(asMap(d["components"])["schemas"])["ResourceSearchItem"])["properties"])["status"] = map[string]any{"type": "string"}
+		}},
+		{"degraded becomes optional", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["schemas"])["ResourceSearchResponse"])["required"] = []any{"clusterId", "query", "generatedAt", "appliedScope", "items", "truncated"}
+		}},
+		{"recent ref count drift", func(d map[string]any) {
+			asMap(asMap(asMap(d["components"])["parameters"])["ResourceRecentRefs"])["schema"] = map[string]any{"maxItems": 100, "items": map[string]any{"maxLength": 1024}}
+		}},
 	}
 	for _, mutation := range mutations {
 		raw, err := yaml.Marshal(doc)
@@ -179,10 +266,30 @@ func TestResourceTypeScriptContractMatchesGo(t *testing.T) {
 		"canManageWorkloads?: boolean;",
 		"nextCursor?: string;",
 		"redacted?: string[];",
+		// 전역 검색 (ADR 0023)
+		`export type ResourceMatchField = "name" | "namespace" | "kind" | "label";`,
+		"export interface ResourceSearchItem {",
+		"export interface ResourceSearchResponse {",
+		"export interface ResourceRecentItem {",
+		"export interface ResourceRecentResponse {",
+		"matchedField: ResourceMatchField;",
+		"degraded: boolean;",
 	} {
 		if !strings.Contains(ts, expected) {
 			t.Errorf("TypeScript 계약이 어긋났습니다: %s", expected)
 		}
+	}
+	// 검색 결과 계약도 status를 선언하지 않습니다.
+	searchStart := strings.Index(ts, "export interface ResourceSearchItem {")
+	if searchStart < 0 {
+		t.Fatal("ResourceSearchItem 선언을 찾지 못했습니다")
+	}
+	searchItem := ts[searchStart:]
+	if end := strings.Index(searchItem, "\n}"); end >= 0 {
+		searchItem = searchItem[:end]
+	}
+	if strings.Contains(searchItem, "status") {
+		t.Errorf("ResourceSearchItem이 status를 선언했습니다")
 	}
 	// 상세 계약은 값 필드를 절대 선언하지 않습니다.
 	start := strings.Index(ts, "export interface ResourceDetailResponse {")

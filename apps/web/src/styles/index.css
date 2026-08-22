@@ -14,6 +14,7 @@
 @import "@k8s-dashboard/design-system/components/combobox/combobox.css";
 @import "@k8s-dashboard/design-system/components/button/button.css";
 @import "./app-shell.css";
+@import "./command-palette.css";
 
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 64px; gap: var(--space-4); }
 .dashboard-grid > div > .panel { height: 100%; overflow: hidden; }

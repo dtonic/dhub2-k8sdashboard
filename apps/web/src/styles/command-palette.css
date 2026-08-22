@@ -1,0 +1,147 @@
+/* ==========================================================================
+   Command Palette (ADR 0023)
+   --------------------------------------------------------------------------
+   역할 토큰만 씁니다 — 원시 hex와 임의 픽셀값이 없습니다. Light/Dark는 토큰이
+   각각 선언되어 있으므로 여기서 모드를 분기하지 않습니다.
+   ========================================================================== */
+
+.palette__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding: var(--space-10) var(--space-5);
+  /* 모달 뒤 배경은 기존 모달과 같은 역할 토큰을 씁니다. `--color-scrim`은 어느
+     토큰 파일에도 없어 늘 fallback인 원시 rgb로 떨어졌고, Light/Dark 대비가
+     ConfirmDialog·Drawer와 달라졌습니다. */
+  background: var(--color-modal-overlay);
+}
+
+.palette {
+  width: min(100%, calc(var(--space-12) * 9));
+  max-height: calc(100vh - var(--space-12));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--color-surface-2);
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  box-shadow: var(--elevation-2);
+  color: var(--color-text-primary);
+}
+
+.palette__field {
+  display: block;
+}
+
+.palette__input {
+  width: 100%;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-4);
+  color: var(--color-text-primary);
+  background: var(--color-surface-1);
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  font: var(--type-body);
+}
+
+.palette__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font: var(--type-meta);
+}
+
+.palette__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.palette__group {
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  color: var(--color-text-muted);
+  font: var(--type-label);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.palette__option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-default);
+  cursor: pointer;
+}
+
+/* 선택 상태를 색 하나로만 전달하지 않습니다 — 배경과 함께 왼쪽 표시선을 둡니다. */
+.palette__option.is-active {
+  background: var(--color-surface-hover);
+  box-shadow: inset calc(var(--space-1) * -1) 0 0 0 var(--color-brand-primary);
+}
+
+.palette__primary {
+  color: var(--color-text-primary);
+  font: var(--type-body-strong);
+  overflow-wrap: anywhere;
+}
+
+.palette__meta {
+  flex: 0 1 auto;
+  color: var(--color-text-secondary);
+  font: var(--type-meta);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.palette__note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-1);
+  border-radius: var(--radius-default);
+  font: var(--type-meta);
+}
+
+.palette__note[data-state="error"],
+.palette__note[data-state="recent-error"] {
+  color: var(--color-text-primary);
+  box-shadow: inset calc(var(--space-1) * -1) 0 0 0 var(--status-critical);
+}
+
+.palette__note[data-state="degraded"],
+.palette__note[data-state="syncing"],
+.palette__note[data-state="truncated"] {
+  box-shadow: inset calc(var(--space-1) * -1) 0 0 0 var(--status-warning);
+}
+
+.palette__hint {
+  margin: 0;
+  font: var(--type-meta);
+}
+
+@media (max-width: 720px) {
+  .palette__scrim {
+    padding: var(--space-5) var(--space-3);
+  }
+  .palette__option {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+  .palette__meta {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette,
+  .palette__option {
+    transition: none;
+  }
+}

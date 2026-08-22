@@ -61,7 +61,7 @@ Scope·시간 범위·자동 갱신 주기는 모두 URL 쿼리(`cluster`, `ns`,
 ```text
 src/
 ├── api/            # 유일한 데이터 진입점 (client · TanStack Query 훅)
-├── app/            # AppShell, 자리 표시자 라우트
+├── app/            # AppShell, 라우트 레지스트리(routes.tsx), Command Palette, 최근 항목 저장
 ├── components/     # 공통 조각 (상태, primitives, LineChart, 컨트롤)
 ├── features/
 │   ├── overview/   # Cluster Overview 화면과 패널
@@ -89,6 +89,93 @@ src/
 | `/dashboards/:id` | `packages/dashboard-schema/dashboards/*.json` 자동 발견 Dashboard | #18 |
 | `/resources?res=&q=&labels=&order=&item=` | Resources 진입 화면 — Explorer / Deployments / Secrets 탭 | ADR 0018 |
 | `/deployments`, `/secrets` | Deployment · Secret 관리 (기존 화면 그대로. Resources 탭에서도 진입) | ADR 0014 |
+
+### Command Palette와 전역 검색 (ADR 0023)
+
+정적 라우트의 단일 원천은 `src/app/routes.tsx`입니다. 라우터(`main.tsx`)·좌측 nav
+(`AppShell`)·팔레트가 **같은 배열**을 읽으므로 셋이 어긋날 수 없습니다. catch-all(`*`)만
+레지스트리 밖에 있습니다 — 라우팅이 아니라 리다이렉트이기 때문입니다. 경로 집합은 이
+슬라이스에서 바뀌지 않았고 `/resources`·`/deployments`·`/secrets`는 그대로 서로 다른 화면입니다.
+
+| 단축키 | 동작 |
+|---|---|
+| `Cmd/Ctrl + K` | 팔레트 열기·닫기. IME 조합 중이거나 다른 모달(`dialog`·`alertdialog`)이 열려 있으면 열지 않습니다 |
+| `Tab` `Shift+Tab` | 다이얼로그 안에서만 돕니다 — 뒤 화면으로 빠져나가지 않습니다 |
+| `↑` `↓` `Home` `End` | 결과 이동(끝에서 순환) |
+| `Enter` | 선택 항목 열기 |
+| `Esc` | 포커스가 어디에 있든 닫고 **열기 전 포커스로 정확히 한 번 복귀** |
+| `/` (`/resources`에서만) | Explorer의 이름 검색 입력으로 포커스. 팔레트를 열지 않습니다 |
+
+`/`는 입력·textarea·select·contenteditable 안, IME 조합 중, 모달이 열려 있을 때는
+동작하지 않습니다. 하나라도 빠지면 타이핑이 사라집니다.
+
+- 팔레트의 결과는 **이동**(레지스트리, capability 필터)과 **리소스 찾기** 두 그룹입니다.
+  리소스 그룹은 서버가 준 `canExploreResources`로만 열리고, 이동 그룹은 기존 nav와 같은 규칙입니다.
+- 리소스 결과의 출처는 BFF의 `/resources/search` **하나**입니다. Kubernetes를 직접 부르지 않고
+  폴링하지 않습니다 — 입력이 멈춘 뒤 200ms에 한 번 나갑니다.
+- **취소는 실제로 요청을 끊습니다.** 입력이 앞서면 디바운스를 기다리지 않고 그 질의 하나를
+  `cancelQueries({ exact: true })`로 중단합니다. 최근 항목 요청은 닫을 때뿐 아니라 **입력을
+  시작해 검색으로 넘어갈 때와 클러스터를 바꿀 때**도 끊깁니다 — 그때부터 그 응답은 화면에
+  쓰이지 않습니다.
+  `enabled: false`만으로는 부족합니다 — QueryObserver는 마운트된 채 남고 이미 나간 fetch는
+  계속 달립니다. 취소는 키를 정확히 지목하므로 다른 화면의 질의는 건드리지 않습니다.
+- **화면의 입력과 손에 든 결과가 어긋나면 결과를 쓰지 않습니다.** 디바운스가 따라오지 못한
+  동안에는 이전 입력의 결과를 렌더하지도, degraded/truncated를 알리지도, Enter·클릭으로
+  실행하지도 않고 "찾는 중"으로 답합니다. 0·1자로 지우면 즉시 idle·short이 됩니다.
+- **질의 2..64자, 결과 최대 50건**으로 서버 상한과 같은 값을 UI도 강제합니다.
+- **지어낸 상태를 만들지 않습니다.** 검색 인덱스에 status가 없으므로 결과에는 kind·이름·
+  namespace와 어느 필드에 걸렸는지만 표시합니다.
+- `syncing` · `unavailable` · `degraded`(사유 포함) · `empty` · `error` · 상한 절단을 서로 다른
+  문구로 구분합니다. 같은 빈 화면으로 접지 않습니다.
+- 결과를 고르면 기존 `/resources` deep link로 이동합니다 — `res`(GVR) · `ns` · `item`(ns/name/uid).
+
+**최근 항목**은 `localStorage`에 버전이 붙은 봉투로 **브라우저 전체 20개**, UID와 이동 경로만
+담습니다. 표시할 제목은 열 때마다 서버 `/resources/recent`가 다시 정합니다 — 권한이 사라졌거나
+같은 이름의 다른 객체로 교체된 항목이 오래된 제목으로 남지 않게 하기 위해서입니다.
+
+- **클러스터가 신원의 일부입니다.** 목록 하나에 여러 클러스터가 섞여 살지만 읽고 보내는 것은
+  활성 클러스터의 참조뿐이고, 중복 판정도 `clusterId + GVR + UID`입니다. 클러스터를 신원에서
+  빼면 다른 클러스터의 같은 UID가 같은 객체로 보이고, 클러스터를 바꾼 순간 옛 클러스터의
+  참조가 새 클러스터 엔드포인트로 나갑니다. 장벽이 **열기 회차와 클러스터 둘 다**에 묶여
+  있어 화면에서 클러스터를 바꾸면 그 요청을 끊고 새 클러스터의 목록을 다시 읽습니다.
+- **서버로 가는 ref에는 클러스터가 들어가지 않습니다.** 엔드포인트 경로가 이미 소유합니다.
+- 저장 항목은 서버 `ValidateGVRSegments`·`safeCursorSegment`와 **같은 규칙**으로 검증합니다
+  (group은 `core` 또는 DNS1123 subdomain, version·resource는 DNS1035 label). 오염된 항목은
+  인코딩 전에 빠집니다 — 하나가 400을 받으면 같은 배치의 정상 참조까지 함께 죽습니다.
+- 최근 항목은 팔레트에서 고를 때뿐 아니라 **Resource Explorer 상세가 성공했을 때**도 남습니다.
+  신원의 근거는 URL이 아니라 서버 응답이고, 실패·미확정 조회는 남기지 않습니다.
+
+- **재확인이 끝나기 전에는 캐시된 제목을 쓰지 않습니다.** 도는 동안에는 목록 대신 "다시
+  확인하는 중"입니다. 옛 값을 먼저 그려 두면 권한을 잃은 항목이 잠깐이라도 보입니다.
+- **저장소를 다 읽은 뒤에만 조회를 켭니다.** 읽기 전 빈 목록으로 켜면 저장된 항목이 있는데도
+  0건 probe가 헛나가고 곧 두 번째 질의가 따라붙습니다. 닫으면 이 장벽이 되돌아가므로 다시
+  열 때마다 저장소를 다시 읽고 다시 물어봅니다.
+- **참조가 0개여도 정확히 한 번 물어봅니다.** 검색 플래그는 `canExploreResources`를 바꾸지
+  않으므로, 0건 probe의 응답만이 "최근이 비었다"와 "검색이 꺼졌다"를 구분해 줍니다. 실패는
+  조용한 빈 목록이 아니라 사유(`search_unavailable`·`resources_unavailable`은 "사용할 수 없음",
+  그 외는 오류)로 보여줍니다.
+- 요청을 나누는 기준은 **request target 6KiB**입니다 — 프록시가 보는 `pathname + "?" + query`
+  전체(클러스터 경로·모든 `ref=`와 `&`·apiGet이 덧붙이는 파라미터 포함)를 UTF-8 바이트로
+  잽니다. 서버 상한은 8KiB입니다. 재는 방법은 **`apiGet`과 같은 `URL`·`URLSearchParams`로 실제
+  후보를 만들어 보는 것**이고 `encodeURIComponent` 산술로 어림잡지 않습니다 — `URLSearchParams`는
+  `~`를 `%7E`로 늘리지만 `encodeURIComponent`는 그대로 둡니다. 참조 0개인 probe까지 같은 자로
+  먼저 재고, 그것조차 들어가지 않으면 **요청을 하나도 만들지 않고** 실패합니다.
+- 덩어리는 **하나의 취소 신호를 공유**하므로 닫으면 남은 덩어리는 아예 나가지 않습니다.
+  나눈 순서가 곧 원래 순서이므로 이어 붙이면 최신순이 보존됩니다.
+- 저장소 정리는 **완전히 성공한 해석 뒤에만**, 그리고 **이번에 물어본 참조 중** 해석되지 않은
+  것만 지웁니다. 중간에 끊긴 결과로 지우면 살아 있는 항목을 잃고, "응답에 없는 전부"를 지우면
+  다른 클러스터의 참조나 요청 뒤에 다른 탭이 넣은 항목까지 사라집니다.
+- 정리는 **저장소만** 바꿉니다. 이번 열기의 질의 키는 그대로 두므로 방금 받은 응답을 계속
+  보여주고, 전부 사라진 경우에도 뒤따르는 0건 probe가 나가지 않습니다. 줄어든 목록은 다음에
+  열 때 반영됩니다.
+
+**롤백** — 검색만 끄려면 API에 `RESOURCE_EXPLORER_SEARCH_ENABLED=false`를 주면 됩니다
+(Helm은 `api.config`에 넣습니다). 그때 팔레트는 이동 그룹만 남고 리소스 그룹은 이유를
+명시한 안내로 바뀝니다. Explorer 전체를 끄는 스위치는 기존 `RESOURCE_EXPLORER_ENABLED`입니다.
+
+**알려진 P2 비용** — 검색 색인 부트스트랩 때문에 API 기동 직후 CPU·메모리 정점이
+카탈로그/목록만 쓸 때보다 높습니다. 첫 질의는 색인이 아직 준비되지 않았으면 `syncing`으로
+답할 수 있습니다. 두 값 모두 상한이 서버에 있고 초과분은 `degraded`로 노출됩니다.
 
 ### Resources (ADR 0018)
 

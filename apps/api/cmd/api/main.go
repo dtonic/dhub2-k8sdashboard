@@ -324,7 +324,13 @@ func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.
 		DetailBurst:      cfg.ResourceExplorer.DetailBurst,
 		DetailConcurrent: cfg.ResourceExplorer.DetailConcurrent,
 		MaxObjectBytes:   cfg.ResourceExplorer.MaxObjectBytes,
-		Logger:           logger,
+		// 전역 검색(ADR 0023)은 같은 informer 캐시 위에서만 돕니다. 예산은 서비스 전체 보유량입니다.
+		SearchEnabled: cfg.ResourceExplorer.SearchEnabled,
+		// 증분 갱신은 watch 이벤트를 100ms 창으로 합쳐 적용합니다. 끄면 dirty →
+		// 전체 재구성으로 돌아갑니다(비파괴 롤백).
+		SearchIncremental:   cfg.ResourceExplorer.SearchIncremental,
+		MaxSearchIndexBytes: int64(cfg.ResourceExplorer.SearchMaxBytes),
+		Logger:              logger,
 	})
 	if err != nil {
 		return nil, err
@@ -333,7 +339,9 @@ func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.
 		return nil, err
 	}
 	logger.Info("Resource Explorer 시작",
-		"resources", len(allowlist), "refresh", cfg.ResourceExplorer.Refresh.String(), "crds", cfg.ResourceExplorer.AllowCRDs)
+		"resources", len(allowlist), "refresh", cfg.ResourceExplorer.Refresh.String(), "crds", cfg.ResourceExplorer.AllowCRDs,
+		"search", cfg.ResourceExplorer.SearchEnabled, "searchMaxBytes", cfg.ResourceExplorer.SearchMaxBytes,
+		"searchIncremental", cfg.ResourceExplorer.SearchIncremental)
 	return service, nil
 }
 

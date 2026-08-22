@@ -380,6 +380,75 @@ export interface ResourceDetailResponse {
   redacted?: string[];
 }
 
+/* ── 전역 리소스 검색 (ADR 0023) ─────────────────────────────────────────────
+   ADR 0018 metadata 인덱스 위의 조회 전용 접두사 검색입니다.
+   Scope는 후보 순회 전에 적용되므로 권한 밖 객체는 truncated·cursor에도
+   영향을 주지 않습니다. namespace 파라미터가 없는 것이 계약입니다. */
+
+/** 결과가 걸린 필드. 색이 아니라 텍스트로 함께 표시합니다. */
+export type ResourceMatchField = "name" | "namespace" | "kind" | "label";
+
+/**
+ * 검색 결과 한 줄.
+ *
+ * **status 필드는 없습니다** — 검색은 PartialObjectMetadata 인덱스에서만 읽고
+ * 그 안에 status가 없으므로, 있는 척하는 필드를 계약에 만들지 않습니다.
+ */
+export interface ResourceSearchItem {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  namespace?: string;
+  name: string;
+  uid: string;
+  matchedField: ResourceMatchField;
+}
+
+export interface ResourceSearchResponse {
+  clusterId: string;
+  query: string;
+  generatedAt: string;
+  /** 인덱스를 마지막으로 만든 시각. */
+  observedAt?: string;
+  appliedScope: { clusterId: string; namespaces: string[] | "all" };
+  items: ResourceSearchItem[];
+  /** 질의어와 Scope에 묶인 opaque keyset cursor. */
+  nextCursor?: string;
+  /** 페이지·byte·scan 예산으로 조기 종료했는지. Scope 밖 객체는 영향을 주지 않습니다. */
+  truncated: boolean;
+  /** 색인 예산으로 일부 리소스나 label이 빠졌는지. 잘린 검색을 완전한 검색처럼 보여주지 않습니다. */
+  degraded: boolean;
+  reason?: string;
+}
+
+/** 서버가 다시 확인해 준 최근 항목. 제목의 근거는 전부 서버 값입니다. */
+export interface ResourceRecentItem {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  namespace?: string;
+  name: string;
+  uid: string;
+}
+
+/**
+ * 재해석된 최근 항목. 요청 순서를 그대로 지킵니다.
+ *
+ * 참조는 compact base64url이며 요청당 최대 20개, 참조 하나는 1024자, query string
+ * 전체는 8KiB가 상한입니다. 웹은 6KiB에서 요청을 나누고 하나의 취소 신호를
+ * 공유하며 입력 순서대로 합칩니다. 해석되지 않은 참조는 오류가 아니라 목록에서 빠집니다.
+ */
+export interface ResourceRecentResponse {
+  clusterId: string;
+  generatedAt: string;
+  appliedScope: { clusterId: string; namespaces: string[] | "all" };
+  items: ResourceRecentItem[];
+}
+
 export type AuthSessionResponse =
   | { authenticated: false }
   | { authenticated: false; refreshable: true; csrfToken: string }

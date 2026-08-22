@@ -904,6 +904,86 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ResourceUnavailable"
+  /api/v1/clusters/{clusterId}/resources/search:
+    get:
+      operationId: searchClusterResources
+      summary: "Scope 안 전역 리소스 검색 (metadata 접두사 인덱스, ADR 0023)"
+      description: >-
+        allowlist GVR의 metadata 인덱스 위에서만 도는 조회 전용 접두사 검색입니다.
+        name·namespace·kind·정규화된 label key/value의 **접두사만** 일치하며 regex와
+        fuzzy는 없습니다. Scope는 후보 순회 **전에** 적용되어, 권한 밖 namespace의
+        객체는 검사되지도 않고 truncated·cursor에도 영향을 주지 않습니다. namespace
+        파라미터가 없는 것이 계약입니다 — 범위는 언제나 "이 사용자가 볼 수 있는 전부"입니다.
+        결과에 status는 없습니다(PartialObjectMetadata에 status가 없습니다).
+        일부 리소스가 색인 예산으로 빠지거나 label 색인이 잘리면 degraded가 참이 됩니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/ResourceQuery"
+        - $ref: "#/components/parameters/ResourceSearchLimit"
+        - $ref: "#/components/parameters/ResourceSearchCursor"
+      responses:
+        "200":
+          description: ResourceSearchResponse
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceSearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
+  /api/v1/clusters/{clusterId}/resources/recent:
+    get:
+      operationId: resolveRecentClusterResources
+      summary: "브라우저가 보관한 최근 항목 참조를 서버가 다시 확인 (ADR 0023)"
+      description: >-
+        브라우저는 UID와 이동 경로만 보관하고 표시할 제목은 매번 서버가 다시 정합니다.
+        해석은 로컬 metadata 인덱스에서만 이뤄지며 Kubernetes 호출은 0회입니다.
+        참조는 compact base64url 문자열이고 최대 20개, 참조 하나는 1024자, 원본
+        query string 전체는 8KiB를 넘을 수 없습니다. 웹 클라이언트는 이보다 낮은
+        6KiB에서 요청을 나눠 보내고 하나의 취소 신호를 공유하며 입력 순서대로 합칩니다.
+        크기·구조 위반은 400이고, 삭제·권한 상실·UID 교체로 **해석되지 않는 참조는
+        오류가 아니라 응답에서 빠집니다.** 응답 순서는 요청 순서 그대로입니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/ResourceRecentRefs"
+      responses:
+        "200":
+          description: ResourceRecentResponse
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceRecentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
   /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}:
     get:
       operationId: listClusterResources
@@ -1223,6 +1303,40 @@ components:
       required: true
       description: 목록에서 본 객체의 UID. 다르면 409입니다.
       schema: {type: string, minLength: 1, maxLength: 64}
+    ResourceQuery:
+      name: q
+      in: query
+      required: true
+      description: >-
+        접두사 검색어. 소문자로 정규화되며 name·namespace·kind·label key/value에
+        접두사 일치합니다. 1자는 사실상 전체 순회이므로 거절합니다.
+      schema: {type: string, minLength: 2, maxLength: 64}
+    ResourceSearchLimit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+    ResourceSearchCursor:
+      name: cursor
+      in: query
+      required: false
+      description: >-
+        opaque keyset cursor. 질의어와 Scope에 묶여 있어 둘 중 하나가 바뀌면 400입니다.
+        위치 번호가 아니라 값이므로 인덱스가 다시 만들어져도 이어집니다.
+      schema: {type: string, maxLength: 1536, pattern: "^[A-Za-z0-9_-]+$"}
+    ResourceRecentRefs:
+      name: ref
+      in: query
+      required: false
+      explode: true
+      style: form
+      description: >-
+        compact base64url 참조. 반복 지정하며 최대 20개입니다.
+        원본 query string 전체는 8192바이트를 넘을 수 없습니다.
+      schema:
+        type: array
+        maxItems: 20
+        items: {type: string, minLength: 1, maxLength: 1024, pattern: "^[A-Za-z0-9_-]+$"}
     LastEventID:
       name: Last-Event-ID
       in: header
@@ -1570,6 +1684,8 @@ components:
             - uid_mismatch
             - object_too_large
             - upstream_timeout
+            - search_unavailable
+            - invalid_query
         message:
           type: string
         requestId:
@@ -1739,6 +1855,97 @@ components:
           type: array
           uniqueItems: true
           items: {type: string, minLength: 1}
+    # 전역 리소스 검색 (ADR 0023) — 조회 전용 계약입니다.
+    AppliedScope:
+      type: object
+      additionalProperties: false
+      description: >-
+        서버가 실제로 적용한 Scope입니다. 요청이 보낸 값이 아니라 강제 삽입된 값입니다.
+        ResourceListResponse의 인라인 정의와 같은 모양이며, 새 응답이 이 이름을 공유합니다.
+      required: [clusterId, namespaces]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        namespaces:
+          oneOf:
+            - {type: string, const: all}
+            - type: array
+              uniqueItems: true
+              items: {type: string, minLength: 1}
+    ResourceMatchField:
+      type: string
+      description: 결과가 걸린 필드. 색이 아니라 텍스트로 함께 표시합니다.
+      enum: [name, namespace, kind, label]
+    ResourceSearchItem:
+      type: object
+      additionalProperties: false
+      description: >-
+        검색 결과 한 줄입니다. **status는 없습니다** — 검색은 PartialObjectMetadata
+        인덱스에서만 읽고 그 안에 status가 없으므로 지어내지 않습니다.
+      required: [group, version, resource, kind, namespaced, name, uid, matchedField]
+      properties:
+        group: {type: string, minLength: 1, description: 'core group은 "core"로 표기합니다.'}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        kind: {type: string}
+        namespaced: {type: boolean}
+        namespace: {type: string}
+        name: {type: string, minLength: 1}
+        uid: {type: string, minLength: 1}
+        matchedField: {$ref: "#/components/schemas/ResourceMatchField"}
+    ResourceSearchResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        유계 keyset 페이지입니다. 응답 본문은 256KiB, 행은 50개를 넘지 않습니다.
+        Scope 밖 객체는 truncated·nextCursor 어디에도 영향을 주지 않습니다.
+      x-max-response-bytes: 262144
+      required: [clusterId, query, generatedAt, appliedScope, items, truncated, degraded]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        query: {type: string, minLength: 2, maxLength: 64}
+        generatedAt: {type: string, format: date-time}
+        observedAt: {type: string, format: date-time}
+        appliedScope: {$ref: "#/components/schemas/AppliedScope"}
+        items:
+          type: array
+          maxItems: 50
+          items: {$ref: "#/components/schemas/ResourceSearchItem"}
+        nextCursor: {type: string, maxLength: 1536, pattern: "^[A-Za-z0-9_-]+$"}
+        truncated: {type: boolean}
+        degraded:
+          type: boolean
+          description: >-
+            일부 리소스가 색인 예산으로 검색에서 빠졌거나 label 색인이 잘렸다는 뜻입니다.
+            잘린 검색을 완전한 검색인 것처럼 보여주지 않기 위한 신호입니다.
+        reason: {type: string}
+    ResourceRecentItem:
+      type: object
+      additionalProperties: false
+      required: [group, version, resource, kind, namespaced, name, uid]
+      properties:
+        group: {type: string, minLength: 1}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        kind: {type: string}
+        namespaced: {type: boolean}
+        namespace: {type: string}
+        name: {type: string, minLength: 1}
+        uid: {type: string, minLength: 1}
+    ResourceRecentResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        재해석된 최근 항목입니다. 요청 순서를 그대로 지키며, 해석되지 않은 참조는
+        오류가 아니라 목록에서 빠지는 것으로 표현합니다.
+      required: [clusterId, generatedAt, appliedScope, items]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        generatedAt: {type: string, format: date-time}
+        appliedScope: {$ref: "#/components/schemas/AppliedScope"}
+        items:
+          type: array
+          maxItems: 20
+          items: {$ref: "#/components/schemas/ResourceRecentItem"}
     AuthSessionResponse:
       oneOf:
         - type: object

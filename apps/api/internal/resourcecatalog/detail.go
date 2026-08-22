@@ -93,15 +93,28 @@ func (s *Service) Get(ctx context.Context, req DetailRequest) (Detail, error) {
 	if !ok {
 		return Detail{}, ErrNotAllowlisted
 	}
-	snap := entry.snap.Load()
-	if snap == nil {
+	// 인덱스 조회는 **잠금 없이** 포인터 하나를 집어 끝냅니다. 서비스 전역 잠금에
+	// 묶이지 않으므로, 상세 요청이 다른 GVR의 게시를 밀지 않습니다.
+	//
+	// **신원 판정은 목록 스냅숏 하나입니다.** (ADR 0018 그대로)
+	//
+	// 증분 검색 인덱스를 여기에 끌어들이면 상세의 신원이 검색 인덱스의 수명·회수
+	// 상태에 묶입니다. 숨겨진 namespace 하나가 회수 대기라는 이유로 허용된 참조의
+	// 해석이 달라질 수 있고, 그것은 볼 수 없는 데이터의 상태가 응답에 비치는 것입니다.
+	// 그래서 이 경로는 baseline 목록 스냅숏만 봅니다.
+	index := entry.baselineIndex()
+	if index == nil {
 		return Detail{}, ErrSyncing
 	}
-	row, found := snap.lookup(req.Namespace, req.Name)
+	var cachedUID string
+	row, found := index.lookup(req.Namespace, req.Name)
 	if !found {
 		return Detail{}, ErrObjectNotFound
 	}
-	if row.obj == nil || string(row.obj.UID) != req.ExpectedUID {
+	if row.obj != nil {
+		cachedUID = string(row.obj.UID)
+	}
+	if cachedUID != req.ExpectedUID {
 		return Detail{}, ErrUIDMismatch
 	}
 

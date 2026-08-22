@@ -5,16 +5,9 @@ import { useDashboardParams } from "@/state/useDashboardParams";
 import { embeddedDashboards } from "@/generated/dashboards";
 import { useAuth } from "@/app/AuthGate";
 import { StreamInvalidator } from "@/app/StreamInvalidator";
+import { CommandPalette } from "@/app/CommandPalette";
+import { NAV_GROUPS, navRoutesInGroup, type RouteCapabilities } from "@/app/routes";
 import { usingMockApi } from "@/lib/env";
-
-const NAV = [
-  { to: "/", label: "Cluster Overview", end: true },
-  { to: "/nodes", label: "Nodes" },
-  { to: "/namespaces", label: "Namespaces" },
-  { to: "/topology", label: "Pod Topology" },
-  { to: "/logs", label: "Logs Explorer" },
-  { to: "/alerts", label: "Alerts" },
-];
 
 /* 화면을 넘어가도 유지할 공용 파라미터 — Scope와 시간 범위뿐입니다.
    from/to·edge·uid·workload·container·levels·q·tab 같은 **화면 전용 필터**는
@@ -46,6 +39,12 @@ export function AppShell() {
   /* Resources 진입점은 서버가 준 capability로만 노출합니다 — 관리 그룹 조건과 별개입니다.
      서버는 platform.admin(또는 AUTH_MODE=none)이고 direct 모드 서비스가 있을 때만 true를 줍니다. (ADR 0018) */
   const canExplore = scope.data?.canExploreResources ?? false;
+  /* 라우트 레지스트리와 팔레트가 함께 보는 capability 한 벌입니다.
+     서버 응답이 아직 없으면 **닫힌 쪽**으로 답합니다. */
+  const caps: RouteCapabilities = useMemo(
+    () => ({ canExploreResources: canExplore, canManageWorkloads: canManage }),
+    [canExplore, canManage],
+  );
   const { clusterId } = useDashboardParams();
   const cluster = scope.data?.clusters.find((c) => c.id === clusterId);
   const auth = useAuth();
@@ -92,38 +91,44 @@ export function AppShell() {
       </header>
 
       <nav className="app__nav" aria-label="주요 화면">
-        {/* 3개 그룹으로 관리: 관측 / 관리 / Custom. 그룹 사이는 점선 구분선으로 나눕니다. */}
-        <div className="app__nav-group">
-          <div className="app__nav-title">관측</div>
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={{ pathname: n.to, search: navSearch }} end={n.end} className="app__nav-link">
-              {n.label}
-            </NavLink>
-          ))}
-        </div>
-        {canExplore && (
-          <div className="app__nav-group">
-            <div className="app__nav-title">리소스</div>
-            <NavLink to={{ pathname: "/resources", search: navSearch }} className="app__nav-link">Resources</NavLink>
-          </div>
-        )}
-        {canManage && (
-          <div className="app__nav-group">
-            <div className="app__nav-title">관리</div>
-            <NavLink to={{ pathname: "/deployments", search: navSearch }} className="app__nav-link">Deployments</NavLink>
-            <NavLink to={{ pathname: "/secrets", search: navSearch }} className="app__nav-link">Secrets</NavLink>
-          </div>
-        )}
-        <div className="app__nav-group">
-          <div className="app__nav-title">Custom</div>
-          {embeddedDashboards.map((dashboard) => (
-            <NavLink key={dashboard.id} to={{ pathname: `/dashboards/${dashboard.id}`, search: navSearch }} className="app__nav-link">
-              {dashboard.title}
-            </NavLink>
-          ))}
-          <NavLink to={{ pathname: "/dashboard-builder", search: navSearch }} className="app__nav-link">Dashboard Builder</NavLink>
-        </div>
+        {/* 목적지는 라우트 레지스트리 하나에서 옵니다 — 라우터·nav·팔레트가 같은
+            배열을 읽으므로 "nav에는 있는데 라우터에는 없는 경로"가 생기지 않습니다.
+            그룹 순서·제목·노출 조건은 기존 그대로입니다. */}
+        {NAV_GROUPS.map((group) => {
+          const entries = navRoutesInGroup(group.id, caps);
+          const dashboards = group.id === "custom" ? embeddedDashboards : [];
+          if (entries.length === 0 && dashboards.length === 0) return null;
+          return (
+            <div className="app__nav-group" key={group.id}>
+              <div className="app__nav-title">{group.title}</div>
+              {/* Git에서 발견한 embedded dashboard는 개수가 배포마다 달라 레지스트리에
+                  담을 수 없습니다. 표시 순서는 기존과 같이 dashboard 먼저입니다. */}
+              {dashboards.map((dashboard) => (
+                <NavLink
+                  key={dashboard.id}
+                  to={{ pathname: `/dashboards/${dashboard.id}`, search: navSearch }}
+                  className="app__nav-link"
+                >
+                  {dashboard.title}
+                </NavLink>
+              ))}
+              {entries.map((route) => (
+                <NavLink
+                  key={route.id}
+                  to={{ pathname: route.path, search: navSearch }}
+                  end={route.end}
+                  className="app__nav-link"
+                >
+                  {route.label}
+                </NavLink>
+              ))}
+            </div>
+          );
+        })}
       </nav>
+
+      {/* 팔레트는 셸에 한 번만 붙습니다. 화면마다 붙이면 단축키가 여러 번 걸립니다. */}
+      <CommandPalette clusterId={clusterId} caps={caps} navSearch={navSearch} />
 
       <main className="app__main" id="main">
         {clusterId ? (

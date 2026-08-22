@@ -188,6 +188,22 @@ type ResourceExplorerConfig struct {
 	DetailTimeout    time.Duration
 	// MaxObjectBytes는 상세 응답 본문 상한입니다.
 	MaxObjectBytes int
+
+	// SearchEnabled는 전역 검색(ADR 0023)의 opt-out 스위치입니다. 기본은 켜짐이며,
+	// Resource Explorer 자체가 꺼져 있으면 이 값과 무관하게 검색도 없습니다.
+	// 끄면 검색·최근 항목 경로만 사라지고 카탈로그·목록·상세는 그대로입니다.
+	SearchEnabled bool
+	// SearchInvalid는 RESOURCE_EXPLORER_SEARCH_ENABLED가 boolean이 아닐 때입니다.
+	SearchInvalid bool
+	// SearchMaxBytes는 **모든 GVR이 동시에 보유하는** 검색 인덱스 바이트 합의 상한입니다.
+	SearchMaxBytes int
+
+	// SearchIncremental은 watch 이벤트로 검색 인덱스를 증분 갱신할지입니다(기본 켜짐).
+	// 끄면 오늘까지의 경로 그대로 dirty → 전체 검색 재구성으로 돌아갑니다.
+	// 검색 자체를 끄는 상위 스위치는 SearchEnabled입니다.
+	SearchIncremental bool
+	// SearchIncrementalInvalid는 RESOURCE_EXPLORER_SEARCH_INCREMENTAL이 boolean이 아닐 때입니다.
+	SearchIncrementalInvalid bool
 }
 
 // UsesSQLite는 SQLite 파일 백엔드(ADR 0016)를 쓰는지 알려줍니다.
@@ -223,6 +239,11 @@ func Load() Config {
 	sessionEnabled, sessionEnabledInvalid := strictEnvBool("AUTH_SESSION_ENABLED", false)
 	alertmanagerEnabled, alertmanagerEnabledInvalid := strictEnvBool("ALERTMANAGER_ENABLED", false)
 	resourcesEnabled, resourcesEnabledInvalid := strictEnvBool("RESOURCE_EXPLORER_ENABLED", false)
+	// 전역 검색은 Resource Explorer 안에서만 기본 켜짐입니다. Explorer가 꺼져 있으면
+	// 이 값과 무관하게 검색 경로도 없습니다. (ADR 0023 롤백 스위치)
+	searchEnabled, searchInvalid := strictEnvBool("RESOURCE_EXPLORER_SEARCH_ENABLED", true)
+	// 증분 갱신은 검색 안에서 기본 켜짐입니다. 끄면 dirty → 전체 재구성으로 돌아갑니다.
+	searchIncremental, searchIncrementalInvalid := strictEnvBool("RESOURCE_EXPLORER_SEARCH_INCREMENTAL", true)
 	return Config{
 		Addr:                     env("ADDR", ":8080"),
 		Kubeconfig:               env("KUBECONFIG", ""),
@@ -282,6 +303,12 @@ func Load() Config {
 			DetailConcurrent: strictEnvInt("RESOURCE_EXPLORER_DETAIL_CONCURRENT", 2),
 			DetailTimeout:    strictEnvDuration("RESOURCE_EXPLORER_DETAIL_TIMEOUT", 5*time.Second),
 			MaxObjectBytes:   strictEnvInt("RESOURCE_EXPLORER_MAX_OBJECT_BYTES", 1<<20),
+			SearchEnabled:    searchEnabled,
+			SearchInvalid:    searchInvalid,
+			SearchMaxBytes:   strictEnvInt("RESOURCE_EXPLORER_SEARCH_MAX_BYTES", resourcecatalog.DefaultMaxSearchIndexBytes),
+
+			SearchIncremental:        searchIncremental,
+			SearchIncrementalInvalid: searchIncrementalInvalid,
 		},
 		Auth: AuthConfig{
 			Mode:                  env("AUTH_MODE", "none"),
@@ -419,6 +446,12 @@ func (c Config) Validate() error {
 	}
 	if c.ResourceExplorer.EnabledInvalid {
 		errs = append(errs, errors.New("RESOURCE_EXPLORER_ENABLED must be a boolean"))
+	}
+	if c.ResourceExplorer.SearchInvalid {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_SEARCH_ENABLED must be a boolean"))
+	}
+	if c.ResourceExplorer.SearchIncrementalInvalid {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_SEARCH_INCREMENTAL must be a boolean"))
 	}
 	if c.ResourceExplorer.Enabled {
 		errs = append(errs, c.validateResourceExplorer()...)
@@ -602,6 +635,13 @@ func (c Config) validateResourceExplorer() []error {
 	}
 	if c.ResourceExplorer.DetailBurst < 1 || c.ResourceExplorer.DetailBurst > 100 {
 		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_BURST must be between 1 and 100"))
+	}
+	// 검색 인덱스 상한은 **서비스 전체** 보유량입니다. 너무 작으면 큰 리소스가 통째로
+	// 검색에서 빠지고, 너무 크면 프로세스 메모리를 삼킵니다. 둘 다 기동 시점에 막습니다.
+	if int64(c.ResourceExplorer.SearchMaxBytes) < resourcecatalog.MinMaxSearchIndexBytes ||
+		int64(c.ResourceExplorer.SearchMaxBytes) > resourcecatalog.MaxMaxSearchIndexBytes {
+		errs = append(errs, fmt.Errorf("RESOURCE_EXPLORER_SEARCH_MAX_BYTES must be between %d and %d",
+			resourcecatalog.MinMaxSearchIndexBytes, resourcecatalog.MaxMaxSearchIndexBytes))
 	}
 	if c.ResourceExplorer.DetailConcurrent < 1 || c.ResourceExplorer.DetailConcurrent > 16 {
 		errs = append(errs, errors.New("RESOURCE_EXPLORER_DETAIL_CONCURRENT must be between 1 and 16"))

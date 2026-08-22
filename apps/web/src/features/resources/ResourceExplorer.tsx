@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { ResourceDescriptor } from "@k8s-dashboard/contracts";
 import { useResourceCatalog, useResourceList, useResourceObject, useScope } from "@/api/queries";
@@ -7,6 +7,8 @@ import { Combobox } from "@/components/Combobox";
 import { ScopeSelector } from "@/components/controls";
 import { Panel } from "@/components/primitives";
 import { LoadingState } from "@/components/SectionState";
+import { useSlashFocus } from "@/app/useSlashFocus";
+import { rememberRecent } from "@/app/recent";
 import { ResourceDetailDrawer } from "./ResourceDetailDrawer";
 import { explorerState, requestErrorMessage, stateFromError, stateNotice, type StateNotice } from "./state";
 
@@ -77,6 +79,10 @@ export function ResourceExplorer() {
   const [nameDraft, setNameDraft] = useState(namePrefix);
   const [labelDraft, setLabelDraft] = useState(labelSelector);
 
+  /* `/`는 이 화면의 이름 입력으로만 포커스를 옮깁니다. 팔레트를 열지 않습니다. */
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  useSlashFocus(nameInputRef);
+
   const descriptor: ResourceDescriptor | undefined = useMemo(
     () => descriptors.find((d) => descriptorKey(d) === selectedKey),
     [descriptors, selectedKey],
@@ -108,6 +114,28 @@ export function ResourceExplorer() {
   const [selNs, selName, selUid] = item ? item.split("/") : ["", "", ""];
   const target = selName && selUid ? { namespace: selNs, name: selName, uid: selUid } : null;
   const object = useResourceObject(clusterId, gvr ?? { group: "", version: "", resource: "" }, target);
+
+  /**
+   * 상세를 **실제로 열어본 것**만 최근 항목에 남깁니다. (ADR 0023)
+   *
+   * 신원의 근거는 전부 서버 응답입니다 — URL의 `item`은 사용자가 손댈 수 있고,
+   * 404·403·UID 불일치로 끝난 조회는 "본 적 없는 리소스"입니다. 실패했거나 아직
+   * 확정되지 않은 조회를 남기면 다음에 팔레트를 열었을 때 존재하지 않는 항목이
+   * 제목을 달고 나옵니다.
+   */
+  const detail = object.isSuccess ? object.data : undefined;
+  useEffect(() => {
+    if (!detail) return;
+    rememberRecent({
+      clusterId: detail.clusterId,
+      group: detail.group,
+      version: detail.version,
+      resource: detail.resource,
+      namespace: detail.namespace ?? "",
+      name: detail.name,
+      uid: detail.uid,
+    });
+  }, [detail]);
 
   const setParam = (key: string, value: string) =>
     setParams(
@@ -192,6 +220,7 @@ export function ResourceExplorer() {
             <span className="field__label">이름 prefix</span>
             <input
               id="resource-name"
+              ref={nameInputRef}
               type="search"
               value={nameDraft}
               maxLength={MAX_NAME_FILTER}

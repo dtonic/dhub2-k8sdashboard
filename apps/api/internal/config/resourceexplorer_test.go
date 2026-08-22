@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 )
 
 func TestResourceExplorerIsDisabledByDefault(t *testing.T) {
@@ -35,6 +37,91 @@ func enabledExplorerConfig() Config {
 	cfg := Load()
 	cfg.ResourceExplorer.Enabled = true
 	return cfg
+}
+
+// TestResourceExplorerSearchDefaultsAndBounds — 전역 검색(ADR 0023) 설정입니다.
+//
+// 검색은 Explorer 안에서 기본 켜짐입니다(Explorer 자체가 꺼져 있으면 함께 없습니다).
+// 인덱스 상한은 **서비스 전체 보유량**이며, GVR별 상한만 두면 allowlist 크기만큼
+// 곱해져 상한이 되지 못하기 때문입니다.
+func TestResourceExplorerSearchDefaultsAndBounds(t *testing.T) {
+	cfg := Load()
+	if !cfg.ResourceExplorer.SearchEnabled {
+		t.Fatal("검색은 Resource Explorer 안에서 기본 켜짐이어야 합니다")
+	}
+	if cfg.ResourceExplorer.SearchInvalid {
+		t.Fatal("기본값이 boolean 파싱 실패로 표시되었습니다")
+	}
+	if int64(cfg.ResourceExplorer.SearchMaxBytes) != resourcecatalog.DefaultMaxSearchIndexBytes {
+		t.Fatalf("검색 인덱스 기본 상한이 %d입니다", cfg.ResourceExplorer.SearchMaxBytes)
+	}
+
+	// 비활성 Explorer는 검색 상한이 무엇이든 기동을 막지 않습니다(기존 동작 유지).
+	cfg.ResourceExplorer.SearchMaxBytes = 1
+	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "SEARCH_MAX_BYTES") {
+		t.Fatalf("비활성 설정이 기동을 막았습니다: %v", err)
+	}
+
+	for _, bad := range []int64{
+		resourcecatalog.MinMaxSearchIndexBytes - 1,
+		resourcecatalog.MaxMaxSearchIndexBytes + 1,
+		0,
+	} {
+		enabled := enabledExplorerConfig()
+		enabled.ResourceExplorer.SearchMaxBytes = int(bad)
+		err := enabled.Validate()
+		if err == nil || !strings.Contains(err.Error(), "RESOURCE_EXPLORER_SEARCH_MAX_BYTES") {
+			t.Errorf("검색 인덱스 상한 %d를 받아들였습니다: %v", bad, err)
+		}
+	}
+	for _, ok := range []int64{resourcecatalog.MinMaxSearchIndexBytes, resourcecatalog.DefaultMaxSearchIndexBytes, resourcecatalog.MaxMaxSearchIndexBytes} {
+		enabled := enabledExplorerConfig()
+		enabled.ResourceExplorer.SearchMaxBytes = int(ok)
+		if err := enabled.Validate(); err != nil {
+			t.Errorf("허용 범위 %d가 거절되었습니다: %v", ok, err)
+		}
+	}
+
+	// boolean이 아니면 조용히 기본값으로 흐르지 않고 기동을 막습니다.
+	invalid := enabledExplorerConfig()
+	invalid.ResourceExplorer.SearchInvalid = true
+	if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "RESOURCE_EXPLORER_SEARCH_ENABLED") {
+		t.Errorf("boolean이 아닌 값을 받아들였습니다: %v", err)
+	}
+}
+
+// TestResourceExplorerSearchIncrementalIsStrictAndDefaultsOn — 증분 갱신은
+// 검색 안에서 기본 켜짐이고, boolean이 아니면 기동을 막아야 합니다. (Round 6)
+//
+// 이 플래그가 롤백 스위치입니다. 끄면 오늘까지의 dirty → 전체 재구성 경로로
+// 돌아가고, 검색 자체를 끄는 상위 스위치는 RESOURCE_EXPLORER_SEARCH_ENABLED입니다.
+func TestResourceExplorerSearchIncrementalIsStrictAndDefaultsOn(t *testing.T) {
+	cfg := Load()
+	if !cfg.ResourceExplorer.SearchIncremental {
+		t.Fatal("증분 갱신 기본값은 켜짐이어야 합니다")
+	}
+	if cfg.ResourceExplorer.SearchIncrementalInvalid {
+		t.Fatal("기본값이 invalid로 표시됐습니다")
+	}
+	invalid := enabledExplorerConfig()
+	invalid.ResourceExplorer.SearchIncrementalInvalid = true
+	if err := invalid.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "RESOURCE_EXPLORER_SEARCH_INCREMENTAL") {
+		t.Errorf("boolean이 아닌 값을 받아들였습니다: %v", err)
+	}
+	// 끈 상태도 유효한 설정이어야 합니다(비파괴 롤백).
+	off := enabledExplorerConfig()
+	off.ResourceExplorer.SearchIncremental = false
+	if err := off.Validate(); err != nil && strings.Contains(err.Error(), "RESOURCE_EXPLORER_SEARCH_INCREMENTAL") {
+		t.Errorf("증분을 끈 설정이 거절되었습니다: %v", err)
+	}
+	// 검색이 꺼져 있으면 증분 값과 무관하게 유효해야 합니다.
+	searchOff := enabledExplorerConfig()
+	searchOff.ResourceExplorer.SearchEnabled = false
+	searchOff.ResourceExplorer.SearchIncremental = true
+	if err := searchOff.Validate(); err != nil && strings.Contains(err.Error(), "RESOURCE_EXPLORER_SEARCH") {
+		t.Errorf("검색을 끈 설정이 거절되었습니다: %v", err)
+	}
 }
 
 func TestResourceExplorerDefaultAllowlistIsUsableAndCRDFree(t *testing.T) {

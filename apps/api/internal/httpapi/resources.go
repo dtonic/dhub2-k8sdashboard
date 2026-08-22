@@ -308,6 +308,13 @@ func writeResourceError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, resourcecatalog.ErrSyncing):
 		w.Header().Set("Retry-After", "5")
 		writeError(w, r, http.StatusServiceUnavailable, "resource_syncing", "리소스 캐시를 동기화하는 중입니다.")
+	case errors.Is(err, resourcecatalog.ErrSearchDisabled):
+		// Explorer는 살아 있고 검색만 꺼진 상태입니다. resources_unavailable과 구분합니다. (ADR 0023 롤백)
+		writeError(w, r, http.StatusServiceUnavailable, "search_unavailable", "이 배포에서는 전역 검색을 사용할 수 없습니다.")
+	case errors.Is(err, resourcecatalog.ErrInvalidQuery):
+		writeError(w, r, http.StatusBadRequest, "invalid_query", "검색어는 2자 이상 64자 이하여야 합니다.")
+	case errors.Is(err, resourcecatalog.ErrSearchTooBroad):
+		writeError(w, r, http.StatusBadRequest, "invalid_query", "검색 범위가 너무 넓습니다. 더 긴 접두사를 입력하세요.")
 	case errors.Is(err, resourcecatalog.ErrInvalidCursor):
 		writeError(w, r, http.StatusBadRequest, "invalid_cursor", "cursor가 올바르지 않습니다.")
 	case errors.Is(err, resourcecatalog.ErrInvalidFilter):

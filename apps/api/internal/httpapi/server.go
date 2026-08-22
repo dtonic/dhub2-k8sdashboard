@@ -158,6 +158,8 @@ func (s *Server) routes() {
 		if s.deps.StreamMetrics != nil {
 			_ = s.deps.StreamMetrics.WritePrometheus(w)
 		}
+		// 검색 인덱스 보유·정점 바이트는 운영이 예산을 확인하는 유일한 창입니다. (ADR 0023)
+		_ = s.deps.Resources.WriteSearchMetrics(w)
 		s.deps.Observability.SetInformerSynced(s.deps.ProviderRegistry.Ready())
 		_ = s.deps.Observability.WritePrometheus(w)
 	})
@@ -197,6 +199,10 @@ func (s *Server) routes() {
 	// Resource Explorer(ADR 0018) — 조회 전용. 카탈로그·목록은 로컬 snapshot,
 	// 상세 하나만 격리된 live GET입니다.
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources", s.handleResourceCatalog)
+	// 전역 검색·최근 항목(ADR 0023)은 세그먼트 수가 달라 목록 라우트와 겹치지 않습니다 —
+	// 목록은 {group}/{version}/{resource} 세 개를 요구하고 이 둘은 한 개입니다.
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/search", s.handleResourceSearch)
+	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/recent", s.handleResourceRecent)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}", s.handleResourceList)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object", s.handleResourceDetail)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
@@ -488,6 +494,10 @@ func routeName(mux *http.ServeMux, r *http.Request) string {
 		return "resource_list"
 	case "GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object":
 		return "resource_detail"
+	case "GET /api/v1/clusters/{clusterId}/resources/search":
+		return "resource_search"
+	case "GET /api/v1/clusters/{clusterId}/resources/recent":
+		return "resource_recent"
 	case streamRoute:
 		return "stream"
 	default:

@@ -95,6 +95,23 @@ Keycloak dhub2 realm에 만들었던 전환기 임시 client는 2026-08-20 제�
 Dashboard Builder는 기본 `enabled=false`이며 disabled render에는 DB env/egress가 추가되지 않습니다. 활성화할 때는 `api.existingSecret.name`, `dashboardBuilder.databaseURLKey`, `cursorKeyKey`, `postgresEgress.cidrs/port`를 환경 소유 값으로 지정합니다. chart는 PostgreSQL을 배포하지 않으며 Secret의 URL을 출력하지 않습니다.
 stage/prod에서는 `dashboardBuilder.requireTLS=true`와 `sslmode=verify-full` DSN, 신뢰 CA 및 일치하는 DB hostname이 필수입니다. NetworkPolicy port와 Secret DSN port는 chart가 Secret을 읽을 수 없으므로 운영자가 동일하게 유지하며, 불일치는 API 시작 또는 readiness 503으로 진단합니다.
 
+## 전역 리소스 검색 롤백 (ADR 0023)
+
+검색·최근 항목은 `resourceExplorer.enabled=true`일 때 **기본으로 켜져** 있고 chart에 별도
+값이 없습니다. `api.config`가 그대로 API ConfigMap env가 되므로 롤백은 거기 한 줄입니다.
+
+```yaml
+api:
+  config:
+    RESOURCE_EXPLORER_SEARCH_ENABLED: "false"   # 검색·최근 항목만 503, 목록·상세는 그대로
+```
+
+`RESOURCE_EXPLORER_SEARCH_INCREMENTAL=false`는 증분 갱신만 끄고 전체 재구성 경로로 되돌립니다.
+`RESOURCE_EXPLORER_SEARCH_MAX_BYTES`(16MiB..512MiB, 기본 64MiB)는 모든 GVR이 동시에 보유하는
+색인 합의 상한이며, 상한에 걸린 GVR은 검색에서 `degraded`로 빠지고 목록·상세는 영향받지
+않습니다. Explorer 전체를 끄는 스위치는 기존 `resourceExplorer.enabled`이며 ServiceAccount
+권한까지 함께 사라집니다. **이 변경은 RBAC·ServiceAccount·NetworkPolicy를 바꾸지 않습니다.**
+
 ## NetworkPolicy 제한
 
 기본 deny 후 UI→API, API→Kubernetes API/Redis/선언된 데이터소스, DNS만 엽니다. Ingress는 UI

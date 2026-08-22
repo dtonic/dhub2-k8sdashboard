@@ -78,7 +78,22 @@ func httpSecretObject() *unstructured.Unstructured {
 }
 
 // newResourceService는 fake 클러스터 위의 Resource Explorer 서비스를 만듭니다.
+// 전역 검색(ADR 0023)은 켜져 있습니다 — 기존 목록·상세 테스트도 검색 인덱스가 함께
+// 만들어지는 재구성 경로를 그대로 지나게 하려는 것입니다.
 func newResourceService(t *testing.T, metaObjects []runtime.Object) *resourcecatalog.Service {
+	t.Helper()
+	return newResourceServiceTuned(t, metaObjects, true)
+}
+
+// newResourceServiceTuned는 검색 롤백 스위치까지 지정합니다. (ADR 0023)
+func newResourceServiceTuned(t *testing.T, metaObjects []runtime.Object, searchEnabled bool) *resourcecatalog.Service {
+	t.Helper()
+	return newResourceServiceBudget(t, metaObjects, searchEnabled, resourcecatalog.DefaultMaxSearchIndexBytes)
+}
+
+// newResourceServiceBudget은 검색 인덱스 예산까지 지정합니다.
+// 예산이 모자라 리소스가 검색에서 빠지는 경계를 HTTP 계층에서 확인할 때 씁니다.
+func newResourceServiceBudget(t *testing.T, metaObjects []runtime.Object, searchEnabled bool, searchMaxBytes int64) *resourcecatalog.Service {
 	t.Helper()
 	scheme := metadatafake.NewTestScheme()
 	if err := metav1.AddMetaToScheme(scheme); err != nil {
@@ -103,7 +118,9 @@ func newResourceService(t *testing.T, metaObjects []runtime.Object) *resourcecat
 			IndexInterval:   20 * time.Millisecond,
 			SyncTimeout:     5 * time.Second,
 			DetailRate:      100, DetailBurst: 50, DetailConcurrent: 4,
-			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			SearchEnabled:       searchEnabled,
+			MaxSearchIndexBytes: searchMaxBytes,
+			Logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +173,29 @@ func resourceFixtureFor(t *testing.T, sc scope.Scope, withService bool) fixture 
 	if withService {
 		service = newResourceService(t, exploreObjects())
 	}
+	return resourceFixtureWithService(t, sc, service)
+}
+
+// resourceFixtureWithSearchOff는 검색 롤백 스위치가 내려간 배포입니다. (ADR 0023)
+// Explorer는 살아 있고 검색·최근 항목 경로만 없습니다.
+func resourceFixtureWithSearchOff(t *testing.T, sc scope.Scope) fixture {
+	t.Helper()
+	return resourceFixtureWithService(t, sc, newResourceServiceTuned(t, exploreObjects(), false))
+}
+
+// resourceFixtureWithTinySearchBudget은 어떤 리소스도 색인 예산에 들어가지 않는 배포입니다.
+// 검색이 "동기화 중"이 아니라 "예산 초과"로 분류하는지 확인할 때 씁니다. (P1-D)
+func resourceFixtureWithTinySearchBudget(t *testing.T, sc scope.Scope) fixture {
+	t.Helper()
+	// GVR 몫은 전체의 1/2이므로 512는 256바이트입니다. 스냅숏 하나의 고정 비용만으로도
+	// 그 몫을 넘기므로 **모든** GVR이 색인되지 않습니다. 객체 수에 기대지 않는 값이어야
+	// 픽스처가 우연히 ready를 만들어 내는 일이 없습니다.
+	// 설정 계층의 하한(16MiB)은 운영 값이고, 여기서는 경계 자체를 확인하려고 그 아래를 직접 넣습니다.
+	return resourceFixtureWithService(t, sc, newResourceServiceBudget(t, exploreObjects(), true, 512))
+}
+
+func resourceFixtureWithService(t *testing.T, sc scope.Scope, service *resourcecatalog.Service) fixture {
+	t.Helper()
 	return newFixture(t, func(d *httpapi.Deps) {
 		d.Resolver = scope.Static{S: sc}
 		d.Resources = service

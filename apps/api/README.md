@@ -147,6 +147,9 @@ API discovery 기반의 **조회 전용** 리소스 탐색기입니다. 기본�
 | `RESOURCE_EXPLORER_DETAIL_CONCURRENT` | `2` | 상세 동시 실행 상한(1..16). 초과는 대기가 아니라 429입니다 |
 | `RESOURCE_EXPLORER_DETAIL_TIMEOUT` | `5s` | 상세 HTTP 요청 하나의 상한(0..30s) |
 | `RESOURCE_EXPLORER_MAX_OBJECT_BYTES` | `1048576` | 상세 응답 본문 상한(4KiB..16MiB). 넘으면 읽는 중에 끊고 502입니다 |
+| `RESOURCE_EXPLORER_SEARCH_ENABLED` | `true` | 전역 검색·최근 항목(ADR 0023)의 opt-out. **이 값이 검색의 롤백 스위치입니다** — 끄면 두 경로만 503 `search_unavailable`이 되고 카탈로그·목록·상세는 그대로입니다. Explorer 자체가 꺼져 있으면 이 값과 무관하게 검색도 없습니다 |
+| `RESOURCE_EXPLORER_SEARCH_INCREMENTAL` | `true` | watch 이벤트로 검색 색인을 증분 갱신할지. 끄면 dirty tick마다 전체 재구성으로 되돌아갑니다(느리지만 안전한 경로) |
+| `RESOURCE_EXPLORER_SEARCH_MAX_BYTES` | `67108864` | **모든 GVR이 동시에 보유하는** 검색 색인 바이트 합의 상한(16MiB..512MiB). GVR별 상한만 두면 allowlist 크기만큼 곱해져 상한이 되지 못합니다 |
 
 allowlist 이름은 Kubernetes 규칙을 그대로 씁니다 — group은 DNS1123 subdomain,
 version과 복수형 resource는 DNS1035 label입니다. 하이픈이 들어간 CRD 복수형
@@ -231,6 +234,8 @@ GET /api/v1/clusters/{clusterId}/topology?ns=
 GET /api/v1/clusters/{clusterId}/topology/edges/{edgeId}/series
 GET /api/v1/clusters/{clusterId}/alerts?ns=
 GET /api/v1/clusters/{clusterId}/resources                                   (카탈로그 · ADR 0018)
+GET /api/v1/clusters/{clusterId}/resources/search?q=&cursor=&limit=          (전역 검색 · ADR 0023)
+GET /api/v1/clusters/{clusterId}/resources/recent?ref=&ref=…                 (최근 항목 재해석 · ADR 0023)
 GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}      (목록 · cursor 페이징)
 GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object?namespace=&name=&uid=
 GET /api/v1/clusters/{clusterId}/events/stream        (SSE · #12)
@@ -295,6 +300,34 @@ go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDa
 - **central 모드는 명시적으로 사용할 수 없습니다.** 서비스를 만들지 않고, 세 경로는
   권한 판정이 끝난 뒤 안정적으로 503 `resources_unavailable`을 돌려줍니다.
   빈 카탈로그를 흉내 내지 않습니다.
+
+### 전역 검색과 최근 항목 (ADR 0023)
+
+`/resources/search`와 `/resources/recent`도 **조회 전용**이며 요청 경로에서 Kubernetes를
+호출하지 않습니다. 둘 다 ADR 0018의 metadata 인덱스 위에서만 동작합니다.
+
+- **검색에는 namespace 파라미터가 없습니다.** 범위는 언제나 "이 사용자가 볼 수 있는 전부"이고,
+  넓히거나 좁혀서 다른 범위를 떠볼 방법을 두지 않습니다. Scope는 후보 순회 **전에** 적용되므로
+  권한 밖 객체는 결과·`truncated`·cursor 어디에도 영향을 주지 않습니다.
+- **질의는 2..64자**입니다(`invalid_query`). 1자 접두사는 사실상 전체 순회입니다.
+  페이지는 기본 20 · 최대 50건이고 cursor는 질의어와 Scope에 묶여 있습니다.
+- **결과에 status가 없습니다.** `PartialObjectMetadata`에 status가 없으므로 있는 척하는
+  필드를 계약에 만들지 않습니다. 색인 예산으로 일부가 빠지면 `degraded`와 사유로 알립니다 —
+  잘린 검색을 완전한 검색처럼 보여주지 않습니다.
+- **최근 항목은 브라우저가 들고 있던 참조를 다시 확인해 줍니다.** 참조는 compact base64url이며
+  요청당 20개, 참조 하나 1024자, query string 전체 8KiB가 상한입니다. 크기·구조 위반은 400이고,
+  **해석되지 않는 참조(삭제·교체·Scope 밖)는 오류가 아니라 조용한 제거**입니다.
+- 검색이 꺼진 배포에서는 최근 항목도 함께 503입니다 — 롤백 스위치가 "검색을 끈다"는 약속을
+  절반만 지키면 팔레트가 반쯤 살아 있는 상태가 됩니다.
+- 색인 보유·정점 바이트는 `/metrics`로 나갑니다. 운영이 예산을 확인하는 유일한 창입니다.
+
+알려진 P2 비용: 색인 부트스트랩은 informer 최초 동기화 뒤 GVR마다 한 번 전체 빌드를 하므로
+**기동 직후 CPU·메모리 정점이 카탈로그/목록만 쓸 때보다 높습니다.** 증분 경로가 켜져 있으면
+이후 tick은 변경분만 반영합니다. 상한에 걸린 GVR은 검색에서 `degraded`로 빠지고 목록·상세는
+영향을 받지 않습니다.
+
+Helm chart에는 검색 전용 값이 없습니다 — `api.config`가 그대로 ConfigMap env가 되므로
+`RESOURCE_EXPLORER_SEARCH_ENABLED: "false"`를 거기 넣는 것이 지원되는 롤백 경로입니다.
 
 100k 객체 인덱스의 페이지 비용은 벤치마크로 지킵니다:
 

@@ -3,19 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
-import { ClusterOverview } from "@/features/overview/ClusterOverview";
-import { NodesView } from "@/features/nodes/NodesView";
-import { NamespaceList } from "@/features/drill/NamespaceList";
-import { NamespaceDetail } from "@/features/drill/NamespaceDetail";
-import { WorkloadDetail } from "@/features/drill/WorkloadDetail";
-import { PodDetail } from "@/features/drill/PodDetail";
-import { LogsExplorer } from "@/features/logs/LogsExplorer";
-import { TopologyView } from "@/features/topology/TopologyView";
-import { ManageView } from "@/features/manage/ManageView";
-import { ResourcesView } from "@/features/resources/ResourcesView";
-import { AlertsView } from "@/features/alerts/AlertsView";
-import { DashboardView } from "@/features/dashboards/DashboardView";
-import { DashboardBuilderEditor, DashboardBuilderList } from "@/features/dashboard-builder/DashboardBuilder";
+import { APP_ROUTES } from "@/app/routes";
 import "./styles/fonts.css";
 import "./styles/index.css";
 import { AuthGate } from "@/app/AuthGate";
@@ -46,23 +34,12 @@ async function bootstrap() {
         <AuthGate><BrowserRouter>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/" element={<ClusterOverview />} />
-              <Route path="/nodes" element={<NodesView />} />
-              <Route path="/namespaces" element={<NamespaceList />} />
-              <Route path="/namespaces/:namespace" element={<NamespaceDetail />} />
-              <Route path="/workloads/:kind/:name" element={<WorkloadDetail />} />
-              <Route path="/pods/:name" element={<PodDetail />} />
-              <Route path="/topology" element={<TopologyView />} />
-              <Route path="/logs" element={<LogsExplorer />} />
-              <Route path="/alerts" element={<AlertsView />} />
-              {/* Resources 진입점(ADR 0018). 아래 기존 관리 라우트는 그대로 둡니다 —
-                  탭에서 이동하는 대상이자 기존 링크·북마크의 목적지입니다. */}
-              <Route path="/resources" element={<ResourcesView />} />
-              <Route path="/deployments" element={<ManageView kind="deployments" />} />
-              <Route path="/secrets" element={<ManageView kind="secrets" />} />
-              <Route path="/dashboards/:id" element={<DashboardView />} />
-              <Route path="/dashboard-builder" element={<DashboardBuilderList />} />
-              <Route path="/dashboard-builder/:id" element={<DashboardBuilderEditor />} />
+              {/* 경로 집합의 단일 원천은 `@/app/routes`입니다. 라우터·좌측 nav·
+                  Command Palette가 같은 배열을 읽으므로 셋이 어긋날 수 없습니다.
+                  catch-all만 여기 남습니다 — 라우팅이 아니라 리다이렉트입니다. */}
+              {APP_ROUTES.map((route) => (
+                <Route key={route.id} path={route.path} element={route.element} />
+              ))}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

@@ -92,6 +92,68 @@ beforeEach(() => {
   stubList({ pages: [page()] });
 });
 
+describe("최근 항목 기록 (ADR 0023)", () => {
+  const DETAIL = {
+    clusterId: "prod-seoul",
+    group: "core",
+    version: "v1",
+    resource: "services",
+    apiVersion: "v1",
+    kind: "Service",
+    namespace: "payments",
+    name: "payments-api",
+    uid: "uid-1",
+    resourceVersion: "42",
+    generatedAt: "2026-08-13T04:00:00Z",
+    yaml: "kind: Service\n",
+  };
+  const DETAIL_PATH = "/resources?cluster=prod-seoul&res=core/v1/services&item=payments/payments-api/uid-1";
+  const stored = () => JSON.parse(window.localStorage.getItem("k8s-dashboard.recent.v1") ?? '{"items":[]}').items;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("상세가 성공하면 서버가 준 신원으로 최근 항목에 남는다", () => {
+    hooks.object.mockReturnValue({ data: DETAIL, isSuccess: true, isLoading: false, error: undefined });
+    renderExplorer(DETAIL_PATH);
+    /* 신원의 근거는 URL이 아니라 응답입니다 — 클러스터·GVR·ns·이름·UID 전부. */
+    expect(stored()).toEqual([
+      {
+        clusterId: "prod-seoul",
+        group: "core",
+        version: "v1",
+        resource: "services",
+        namespace: "payments",
+        name: "payments-api",
+        uid: "uid-1",
+      },
+    ]);
+  });
+
+  it("상세가 실패하면 남기지 않는다 — 본 적 없는 리소스입니다", () => {
+    hooks.object.mockReturnValue({
+      data: undefined,
+      isSuccess: false,
+      isLoading: false,
+      error: new HttpError(404, { code: "not_found", message: "gone", requestId: "r" }),
+    });
+    renderExplorer(DETAIL_PATH);
+    expect(stored()).toEqual([]);
+  });
+
+  it("아직 확정되지 않은 조회는 남기지 않는다", () => {
+    hooks.object.mockReturnValue({ data: undefined, isSuccess: false, isLoading: true, error: undefined });
+    renderExplorer(DETAIL_PATH);
+    expect(stored()).toEqual([]);
+  });
+
+  it("목록만 보고 상세를 열지 않았으면 남지 않는다", () => {
+    renderExplorer();
+    expect(stored()).toEqual([]);
+  });
+});
+
 describe("ResourceExplorer", () => {
   it("BFF 목록 결과를 이름·Namespace와 함께 그린다", () => {
     renderExplorer();

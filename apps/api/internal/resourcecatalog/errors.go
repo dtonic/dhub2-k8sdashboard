@@ -32,4 +32,13 @@ var (
 	ErrUIDMismatch = errors.New("object uid does not match the requested uid")
 	// ErrTooLarge는 상세 객체가 응답 상한을 넘은 경우입니다.
 	ErrTooLarge = errors.New("object exceeds the response size limit")
+	// ErrSearchDisabled는 이 배포에서 전역 검색을 끈 상태입니다. (ADR 0023 롤백 스위치)
+	// Resource Explorer 자체는 그대로 동작하므로 ErrUnavailable과 다른 상태입니다.
+	ErrSearchDisabled = errors.New("global resource search is disabled")
+	// ErrInvalidQuery는 길이·문자 규칙을 벗어난 검색어입니다.
+	// 1자 접두사는 사실상 전체 순회이므로 거절합니다.
+	ErrInvalidQuery = errors.New("search query is invalid")
+	// ErrSearchTooBroad는 질의가 여는 (리소스, namespace) 스트림이 상한을 넘은 경우입니다.
+	// 결과를 조용히 자르는 대신 더 긴 접두사를 요구합니다.
+	ErrSearchTooBroad = errors.New("search query matches too many namespaces")
 )

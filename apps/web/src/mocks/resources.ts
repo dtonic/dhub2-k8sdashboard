@@ -5,6 +5,10 @@ import type {
   ResourceDetailResponse,
   ResourceListItem,
   ResourceListResponse,
+  ResourceRecentItem,
+  ResourceRecentResponse,
+  ResourceSearchItem,
+  ResourceSearchResponse,
 } from "@k8s-dashboard/contracts";
 import { NOW_MS } from "./data";
 
@@ -55,7 +59,176 @@ const STATE_ERROR: Record<string, { status: number; code: string; message: strin
 const apiError = (status: number, code: string, message: string) =>
   HttpResponse.json({ code, message, requestId: "mock-request" }, { status });
 
+/* ── 전역 검색 · 최근 항목 (ADR 0023) ───────────────────────────────────────
+   서버 계약을 그대로 흉내 냅니다 — 질의는 2..64자이고, 결과에 **status가 없으며**,
+   Scope 밖 객체는 애초에 후보에 없습니다. 최근 항목은 해석되지 않는 참조를
+   오류가 아니라 **조용한 제거**로 답합니다. */
+
+/** 검색 가능한 후보. ready 상태 리소스에서만 만듭니다. */
+function searchCorpus(): ResourceSearchItem[] {
+  const out: ResourceSearchItem[] = [];
+  for (const d of RESOURCE_CATALOG) {
+    if (d.state !== "ready") continue;
+    for (const row of rowsFor(d.resource, d.namespaced)) {
+      out.push({
+        group: d.group,
+        version: d.version,
+        resource: d.resource,
+        kind: d.kind,
+        namespaced: d.namespaced,
+        ...(row.namespace ? { namespace: row.namespace } : {}),
+        name: row.name,
+        uid: row.uid,
+        matchedField: "name",
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * mock 전용 label 색인.
+ *
+ * 서버는 label **값**에도 걸리고 `matchedField: "label"`을 답합니다. 여기서
+ * 그 경우를 만들지 않으면 UI의 "Label 일치" 표시가 한 번도 실행되지 않은 채로
+ * 남습니다 — 실서버에서 처음 보이는 문구가 됩니다.
+ */
+function labelValueOf(item: ResourceSearchItem): string {
+  return item.namespace ? `team-${item.namespace}` : "team-platform";
+}
+
+/** 서버와 같은 규칙 — 이름·namespace·kind·label 값 접두사에 걸립니다. */
+function matchOf(item: ResourceSearchItem, q: string): ResourceSearchItem["matchedField"] | null {
+  if (item.name.toLowerCase().startsWith(q)) return "name";
+  if ((item.namespace ?? "").toLowerCase().startsWith(q)) return "namespace";
+  if (item.kind.toLowerCase().startsWith(q)) return "kind";
+  if (labelValueOf(item).toLowerCase().startsWith(q)) return "label";
+  return null;
+}
+
+/** 서버 ValidateGVRSegments와 같은 규칙 — mock도 같은 것을 거절해야 대조가 됩니다. */
+const DNS1123_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+const DNS1035_LABEL = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
+const SAFE_SEGMENT = /^[A-Za-z0-9._:-]*$/;
+
+function validGVR(gvr: string): boolean {
+  const parts = gvr.split("/");
+  if (parts.length !== 3) return false;
+  const [group, version, resource] = parts;
+  const groupOk =
+    group === "core" ||
+    (group.length > 0 &&
+      group.length <= 253 &&
+      group.split(".").every((l) => l.length > 0 && l.length <= 63 && DNS1123_LABEL.test(l)));
+  return (
+    groupOk &&
+    version.length <= 63 &&
+    DNS1035_LABEL.test(version) &&
+    resource.length <= 63 &&
+    DNS1035_LABEL.test(resource)
+  );
+}
+
+/**
+ * 서버 EncodeRecentRef와 같은 형식을 되돌립니다(mock 전용 디코더).
+ *
+ * 형식뿐 아니라 **세그먼트 규칙까지** 봅니다 — 서버가 400을 줄 참조를 mock이
+ * 조용히 받아 주면, 웹이 오염된 참조를 걸러 내는지 아무도 확인하지 못합니다.
+ */
+function decodeRef(encoded: string): { gvr: string; namespace: string; name: string; uid: string } | null {
+  try {
+    const padded = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+    const parts = raw.split("\x1f");
+    if (parts.length !== 5 || parts[0] !== "1") return null;
+    const [, gvr, namespace, name, uid] = parts;
+    if (!validGVR(gvr)) return null;
+    if (namespace.length > 63 || !SAFE_SEGMENT.test(namespace)) return null;
+    if (name.length === 0 || name.length > 253 || !SAFE_SEGMENT.test(name)) return null;
+    if (uid.length === 0 || uid.length > 64 || !SAFE_SEGMENT.test(uid)) return null;
+    return { gvr, namespace, name, uid };
+  } catch {
+    return null;
+  }
+}
+
 export const resourceHandlers = [
+  /* 검색·최근은 목록 라우트(`:group/:version/:resource`)보다 **먼저** 등록합니다 —
+     MSW는 배열 순서로 맞추므로 뒤에 두면 목록 핸들러가 먼저 가로챕니다. */
+  http.get("/api/v1/clusters/:clusterId/resources/search", async ({ params, request }) => {
+    await delay(60);
+    const url = new URL(request.url);
+    const raw = (url.searchParams.get("q") ?? "").trim();
+    if (raw.length < 2 || raw.length > 64) {
+      return apiError(400, "invalid_query", "검색어는 2자 이상 64자 이하여야 합니다.");
+    }
+    const limit = Math.min(Number(url.searchParams.get("limit") ?? "20") || 20, 50);
+    const q = raw.toLowerCase();
+
+    const hits: ResourceSearchItem[] = [];
+    for (const item of searchCorpus()) {
+      const matchedField = matchOf(item, q);
+      if (matchedField) hits.push({ ...item, matchedField });
+    }
+    hits.sort((a, b) => `${a.namespace ?? ""}/${a.name}`.localeCompare(`${b.namespace ?? ""}/${b.name}`));
+    const page = hits.slice(0, limit);
+
+    const body: ResourceSearchResponse = {
+      clusterId: String(params.clusterId),
+      query: q,
+      generatedAt: iso,
+      observedAt: iso,
+      appliedScope: { clusterId: String(params.clusterId), namespaces: "all" },
+      items: page,
+      truncated: hits.length > page.length,
+      /* 시나리오로 "부분 색인"을 재현합니다 — 잘린 검색을 완전한 검색처럼 보여주지 않습니다. */
+      degraded: url.searchParams.get("scenario") === "degraded",
+      ...(url.searchParams.get("scenario") === "degraded"
+        ? { reason: "색인 예산으로 일부 label이 제외되었습니다" }
+        : {}),
+    };
+    return HttpResponse.json(body);
+  }),
+
+  http.get("/api/v1/clusters/:clusterId/resources/recent", async ({ params, request }) => {
+    await delay(60);
+    const url = new URL(request.url);
+    if (url.search.length > 8 << 10) {
+      return apiError(400, "invalid_filter", "최근 항목 요청이 너무 큽니다. 나눠서 보내세요.");
+    }
+    const encoded = url.searchParams.getAll("ref");
+    if (encoded.length > 20) return apiError(400, "invalid_filter", "참조가 너무 많습니다.");
+
+    const corpus = searchCorpus();
+    const items: ResourceRecentItem[] = [];
+    for (const value of encoded) {
+      const ref = decodeRef(value);
+      if (!ref) return apiError(400, "invalid_filter", "참조 형식이 올바르지 않습니다.");
+      const hit = corpus.find(
+        (c) =>
+          `${c.group}/${c.version}/${c.resource}` === ref.gvr &&
+          (c.namespace ?? "") === ref.namespace &&
+          c.name === ref.name &&
+          c.uid === ref.uid,
+      );
+      /* 해석되지 않는 참조는 오류가 아니라 **조용한 제거**입니다. */
+      if (!hit) continue;
+      items.push({
+        group: hit.group, version: hit.version, resource: hit.resource,
+        kind: hit.kind, namespaced: hit.namespaced,
+        ...(hit.namespace ? { namespace: hit.namespace } : {}),
+        name: hit.name, uid: hit.uid,
+      });
+    }
+    const body: ResourceRecentResponse = {
+      clusterId: String(params.clusterId),
+      generatedAt: iso,
+      appliedScope: { clusterId: String(params.clusterId), namespaces: "all" },
+      items,
+    };
+    return HttpResponse.json(body);
+  }),
+
   http.get("/api/v1/clusters/:clusterId/resources", async ({ params }) => {
     await delay(80);
     const body: ResourceCatalogResponse = {

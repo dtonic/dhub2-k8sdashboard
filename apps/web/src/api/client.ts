@@ -128,11 +128,21 @@ async function parseError(res: Response): Promise<never> {
   });
 }
 
+/**
+ * apiGet이 모든 요청에 덧붙이는 mock 시나리오 파라미터.
+ *
+ * 요청 크기를 미리 재야 하는 쪽(최근 항목 청킹)이 같은 값을 봐야 하므로 여기서만
+ * 읽습니다. 두 곳에서 각자 읽으면 한쪽만 바뀌어 계산이 조용히 어긋납니다.
+ */
+export function currentScenarioParam(): readonly (readonly [string, string])[] {
+  const scenario = new URLSearchParams(window.location.search).get("scenario");
+  return scenario ? [["scenario", scenario] as const] : [];
+}
+
 export async function apiGet<T>(path: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
   const url = new URL(path, window.location.origin);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  const scenario = new URLSearchParams(window.location.search).get("scenario");
-  if (scenario) url.searchParams.set("scenario", scenario);
+  for (const [key, value] of currentScenarioParam()) url.searchParams.set(key, value);
   const res = await request(url.pathname + url.search, { signal });
   if (!res.ok) return parseError(res);
   return (await res.json()) as T;
