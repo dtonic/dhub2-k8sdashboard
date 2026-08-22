@@ -20,13 +20,175 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/demo"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/querycatalog"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/testcluster"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+}
+
+/* ── Resource Explorer 배선 (ADR 0018 · ADR 0019 Phase 1) ─────────────────
+
+   순수 빌더 두 개만 확인합니다. 클러스터도 네트워크도 없이 "설정이 실제로
+   전달되는가"를 보는 것이 목적이고, 그 이상의 주입 지점은 만들지 않았습니다.
+
+   전용 클라이언트가 상세와 다른 인스턴스라는 것과 disabled면 capability가
+   false라는 것은 U2 core 테스트가 이미 증명하므로 여기서 중복하지 않습니다.
+   이 테스트들은 env를 읽지 않으므로 t.Parallel 제약과 무관하지만, 같은 파일의
+   관례를 따라 병렬로 돌리지 않습니다. */
+
+func dryRunWiringConfig(dryRunEnabled bool) config.Config {
+	cfg := config.Config{
+		ClusterID: "prod-seoul",
+		QPS:       20,
+		Burst:     30,
+		Resync:    10 * time.Minute,
+	}
+	// 기본값과 구분되는 값만 씁니다 — 그래야 "전달되었다"와 "우연히 같다"가 갈립니다.
+	cfg.ResourceExplorer = config.ResourceExplorerConfig{
+		Enabled:          true,
+		Refresh:          11 * time.Minute,
+		AllowCRDs:        true,
+		DetailRate:       2,
+		DetailBurst:      5,
+		DetailConcurrent: 2,
+		DetailTimeout:    5 * time.Second,
+		MaxObjectBytes:   2 << 20,
+
+		SearchEnabled:     true,
+		SearchIncremental: true,
+		SearchMaxBytes:    48 << 20,
+
+		DryRunEnabled:          dryRunEnabled,
+		DryRunTimeout:          9 * time.Second,
+		DryRunRate:             2,
+		DryRunBurst:            7,
+		DryRunConcurrent:       3,
+		DryRunMaxManifestBytes: 128 << 10,
+		DryRunMaxObjectBytes:   512 << 10,
+	}
+	return cfg
+}
+
+// TestResourceClientOptionsCarryDryRunSettingsOnlyWhenEnabled — 검토 클라이언트는
+// 켰을 때만 만들어지고, 상한은 상세와 별개로 전달되어야 합니다.
+func TestResourceClientOptionsCarryDryRunSettingsOnlyWhenEnabled(t *testing.T) {
+	off := resourceClientOptions(dryRunWiringConfig(false))
+	if off.DryRunEnabled {
+		t.Error("꺼져 있는데 검토 클라이언트를 만들라고 지시했습니다")
+	}
+
+	on := resourceClientOptions(dryRunWiringConfig(true))
+	if !on.DryRunEnabled {
+		t.Fatal("켰는데 검토 클라이언트 생성 지시가 없습니다")
+	}
+	if on.DryRunQPS != 2 {
+		t.Errorf("DryRunQPS=%v want 2", on.DryRunQPS)
+	}
+	if on.DryRunBurst != 7 {
+		t.Errorf("DryRunBurst=%d want 7", on.DryRunBurst)
+	}
+	if on.DryRunTimeout != 9*time.Second {
+		t.Errorf("DryRunTimeout=%v want 9s", on.DryRunTimeout)
+	}
+	if on.MaxDryRunObjectBytes != int64(512<<10) {
+		t.Errorf("MaxDryRunObjectBytes=%d want %d", on.MaxDryRunObjectBytes, 512<<10)
+	}
+	// 상세 상한은 검토와 **섞이지 않습니다.**
+	if on.DetailQPS != 2 || on.DetailBurst != 5 || on.DetailTimeout != 5*time.Second {
+		t.Errorf("상세 상한이 바뀌었습니다: %+v", on)
+	}
+	if on.MaxObjectBytes != int64(2<<20) {
+		t.Errorf("상세 본문 상한이 검토 값으로 덮였습니다: %d", on.MaxObjectBytes)
+	}
+	if on.UserAgent != "k8s-dashboard-resources" {
+		t.Errorf("UserAgent=%q", on.UserAgent)
+	}
+}
+
+// TestResourceServiceConfigCarriesFinalAllowlistAndNilDeny — main은 config가 이미
+// deny까지 적용해 돌려준 **최종 목록**을 그대로 넘기고 deny는 넘기지 않습니다.
+// 두 곳에서 빼면 어느 쪽이 적용됐는지 알 수 없고 한쪽만 고치면 우회가 생깁니다.
+func TestResourceServiceConfigCarriesFinalAllowlistAndNilDeny(t *testing.T) {
+	allowlist := []schema.GroupVersionResource{
+		{Group: "", Version: "v1", Resource: "configmaps"},
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
+	}
+	dryRunAllow := []schema.GroupVersionResource{{Group: "", Version: "v1", Resource: "configmaps"}}
+
+	got := resourceServiceConfig(dryRunWiringConfig(true), allowlist, dryRunAllow, discardLogger())
+
+	if !got.DryRunEnabled {
+		t.Fatal("DryRunEnabled가 전달되지 않았습니다")
+	}
+	if got.DryRunDeny != nil {
+		t.Errorf("DryRunDeny는 nil이어야 합니다: %v", got.DryRunDeny)
+	}
+	if len(got.DryRunAllowlist) != 1 || got.DryRunAllowlist[0] != dryRunAllow[0] {
+		t.Errorf("최종 대상 목록이 전달되지 않았습니다: %v", got.DryRunAllowlist)
+	}
+	if got.DryRunTimeout != 9*time.Second {
+		t.Errorf("DryRunTimeout=%v want 9s", got.DryRunTimeout)
+	}
+	if got.DryRunRate != 2 {
+		t.Errorf("DryRunRate=%v want 2", got.DryRunRate)
+	}
+	if got.DryRunBurst != 7 {
+		t.Errorf("DryRunBurst=%d want 7", got.DryRunBurst)
+	}
+	if got.DryRunConcurrent != 3 {
+		t.Errorf("DryRunConcurrent=%d want 3", got.DryRunConcurrent)
+	}
+	if got.MaxManifestBytes != 128<<10 {
+		t.Errorf("MaxManifestBytes=%d want %d", got.MaxManifestBytes, 128<<10)
+	}
+
+	// 기존 Resource Explorer·검색 배선은 그대로여야 합니다.
+	if len(got.Allowlist) != 2 || !got.AllowCRDs || got.RefreshInterval != 11*time.Minute {
+		t.Errorf("Explorer 배선이 바뀌었습니다: %+v", got)
+	}
+	if got.DetailRate != 2 || got.DetailBurst != 5 || got.DetailConcurrent != 2 ||
+		got.DetailTimeout != 5*time.Second || got.MaxObjectBytes != 2<<20 {
+		t.Errorf("상세 배선이 바뀌었습니다: %+v", got)
+	}
+	if !got.SearchEnabled || !got.SearchIncremental || got.MaxSearchIndexBytes != int64(48<<20) {
+		t.Errorf("검색 배선이 바뀌었습니다: %+v", got)
+	}
+	if got.ClusterID != "prod-seoul" || got.Resync != 10*time.Minute || got.Logger == nil {
+		t.Errorf("공통 배선이 바뀌었습니다: %+v", got)
+	}
+	// 최종 목록은 core가 nil deny로 재검증해도 그대로여야 합니다(고정점).
+	again, err := resourcecatalog.NormalizeDryRunAllowlist(got.DryRunAllowlist, got.Allowlist, got.DryRunDeny)
+	if err != nil {
+		t.Fatalf("nil deny 재검증이 실패했습니다: %v", err)
+	}
+	if len(again) != len(got.DryRunAllowlist) {
+		t.Fatalf("재검증이 목록을 바꿨습니다: %v → %v", got.DryRunAllowlist, again)
+	}
+}
+
+// TestResourceServiceConfigLeavesDryRunOffByDefault — 꺼져 있으면 대상 목록은
+// nil이고 스위치도 false입니다.
+func TestResourceServiceConfigLeavesDryRunOffByDefault(t *testing.T) {
+	allowlist := []schema.GroupVersionResource{{Group: "", Version: "v1", Resource: "configmaps"}}
+	got := resourceServiceConfig(dryRunWiringConfig(false), allowlist, nil, discardLogger())
+	if got.DryRunEnabled {
+		t.Error("꺼져 있는데 서비스에 켜라고 전달했습니다")
+	}
+	if got.DryRunAllowlist != nil {
+		t.Errorf("꺼져 있는데 대상 목록이 전달되었습니다: %v", got.DryRunAllowlist)
+	}
+	if got.DryRunDeny != nil {
+		t.Errorf("DryRunDeny는 nil이어야 합니다: %v", got.DryRunDeny)
+	}
+	// 기존 Explorer 배선은 검토 여부와 무관하게 같습니다.
+	if len(got.Allowlist) != 1 || !got.SearchEnabled {
+		t.Errorf("Explorer 배선이 검토 스위치에 딸려 바뀌었습니다: %+v", got)
+	}
 }
 
 func defaultCatalog(t *testing.T) querycatalog.Catalog {

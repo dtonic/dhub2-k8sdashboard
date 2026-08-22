@@ -32,6 +32,64 @@ data:
   RESOURCE_EXPLORER_DETAIL_CONCURRENT: {{ printf "%d" (int .Values.resourceExplorer.detail.concurrent) | quote }}
   RESOURCE_EXPLORER_DETAIL_TIMEOUT: {{ .Values.resourceExplorer.detail.timeout | quote }}
   RESOURCE_EXPLORER_MAX_OBJECT_BYTES: {{ printf "%d" (int64 .Values.resourceExplorer.detail.maxObjectBytes) | quote }}
+  {{- if .Values.resourceExplorer.dryRun.enabled }}
+  {{- /* 변경 검토(ADR 0019 Phase 1)는 두 번째 opt-in입니다. 대상 목록은 API의
+       allowlist로 그대로 나가고, deny는 **서버가 한 번만** 적용합니다. RBAC은
+       serviceaccounts-rbac.yaml이 deny를 뺀 최종 목록으로 따로 계산합니다. */}}
+  {{- $dry := .Values.resourceExplorer.dryRun }}
+  {{- if eq (len $dry.resources) 0 }}
+  {{- fail "resourceExplorer.dryRun.enabled requires a non-empty resourceExplorer.dryRun.resources" }}
+  {{- end }}
+  {{- if gt (len $dry.resources) 64 }}
+  {{- fail "resourceExplorer.dryRun.resources must not exceed 64 entries" }}
+  {{- end }}
+  {{- range $dry.resources }}
+  {{- if not (has . $.Values.resourceExplorer.resources) }}
+  {{- fail (printf "resourceExplorer.dryRun.resources %q must also be in resourceExplorer.resources" .) }}
+  {{- end }}
+  {{- $parts := splitList "/" . }}
+  {{- $group := index $parts 0 }}
+  {{- $name := index $parts 2 }}
+  {{- if eq $group "core" }}{{- $group = "" }}{{- end }}
+  {{- /* 설정으로 뚫을 수 없는 거부. 정확히 이것뿐이고 더 넓히지 않습니다.
+       조용히 빼지 않고 렌더를 실패시킵니다 — 켰다고 믿는 채로 없는 것보다 낫습니다. */}}
+  {{- if eq $group "rbac.authorization.k8s.io" }}
+  {{- fail (printf "resourceExplorer.dryRun.resources %q is permanently denied (rbac.authorization.k8s.io)" .) }}
+  {{- end }}
+  {{- if and (eq $group "") (has $name (list "secrets" "serviceaccounts" "nodes" "namespaces")) }}
+  {{- fail (printf "resourceExplorer.dryRun.resources %q is permanently denied (core %s)" . $name) }}
+  {{- end }}
+  {{- if and (eq $group "apiextensions.k8s.io") (eq $name "customresourcedefinitions") }}
+  {{- fail (printf "resourceExplorer.dryRun.resources %q is permanently denied (customresourcedefinitions)" .) }}
+  {{- end }}
+  {{- end }}
+  {{- range $dry.denyResources }}
+  {{- if not (has . $dry.resources) }}
+  {{- fail (printf "resourceExplorer.dryRun.denyResources %q must also be in resourceExplorer.dryRun.resources" .) }}
+  {{- end }}
+  {{- end }}
+  {{- $final := list }}
+  {{- range $dry.resources }}
+  {{- if not (has . $dry.denyResources) }}{{- $final = append $final . }}{{- end }}
+  {{- end }}
+  {{- if eq (len $final) 0 }}
+  {{- fail "resourceExplorer.dryRun.denyResources removed every entry — nothing would be reviewable" }}
+  {{- end }}
+  RESOURCE_EXPLORER_DRY_RUN_ENABLED: "true"
+  RESOURCE_EXPLORER_DRY_RUN_RESOURCES: {{ join "," $dry.resources | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES: {{ join "," $dry.denyResources | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_TIMEOUT: {{ $dry.timeout | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_RATE: {{ $dry.rate | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_BURST: {{ printf "%d" (int $dry.burst) | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_CONCURRENT: {{ printf "%d" (int $dry.concurrent) | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_MAX_MANIFEST_BYTES: {{ printf "%d" (int64 $dry.maxManifestBytes) | quote }}
+  RESOURCE_EXPLORER_DRY_RUN_MAX_OBJECT_BYTES: {{ printf "%d" (int64 $dry.maxObjectBytes) | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if and .Values.resourceExplorer.dryRun.enabled (not .Values.resourceExplorer.enabled) }}
+  {{- /* Explorer 블록 **밖**이어야 합니다. 안에 두면 Explorer가 꺼진 채 검토만 켠
+       설정이 검사 자체를 건너뛰고 통과합니다. central 조합은 Explorer 검사가 막습니다. */}}
+  {{- fail "resourceExplorer.dryRun.enabled requires resourceExplorer.enabled" }}
   {{- end }}
   {{- if .Values.authSession.enabled }}
   AUTH_SESSION_ENABLED: "true"

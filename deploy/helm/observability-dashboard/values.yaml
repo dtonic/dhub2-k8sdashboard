@@ -196,6 +196,29 @@ resourceExplorer:
     concurrent: 2
     timeout: 5s
     maxObjectBytes: 1048576
+  # 변경 검토 dry-run (ADR 0019 Phase 1 · GitHub Issue #7) — **검토만** 합니다.
+  # 적용·삭제·생성·change token·force는 없습니다.
+  #
+  # 두 번 opt-in해야 열립니다: resourceExplorer.enabled 그리고 dryRun.enabled.
+  # 기본은 꺼짐이고 resources도 비어 있어, 이 블록은 렌더 결과에 아무것도 더하지 않습니다.
+  #
+  # resources는 위 resourceExplorer.resources의 **부분집합**이어야 하고,
+  # denyResources는 다시 resources의 부분집합입니다. 아래는 설정으로 뚫을 수 없습니다 —
+  # core secrets/serviceaccounts/nodes/namespaces, rbac.authorization.k8s.io group 전체,
+  # apiextensions.k8s.io/customresourcedefinitions. 넣으면 조용히 빠지지 않고 렌더가 실패합니다.
+  #
+  # 켜면 deny를 뺀 최종 목록에 대해 SA에 **get·patch 두 verb만** 붙습니다.
+  # dryRun=All 서버사이드 apply를 API 서버가 patch로 인가하기 때문입니다.
+  dryRun:
+    enabled: false
+    resources: []
+    denyResources: []
+    timeout: 8s
+    rate: 1
+    burst: 3
+    concurrent: 1
+    maxManifestBytes: 262144
+    maxObjectBytes: 1048576
 
 redis:
   enabled: true

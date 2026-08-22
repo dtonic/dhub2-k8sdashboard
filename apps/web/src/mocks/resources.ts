@@ -3,6 +3,7 @@ import type {
   ResourceCatalogResponse,
   ResourceDescriptor,
   ResourceDetailResponse,
+  ResourceDryRunResponse,
   ResourceListItem,
   ResourceListResponse,
   ResourceRecentItem,
@@ -10,6 +11,7 @@ import type {
   ResourceSearchItem,
   ResourceSearchResponse,
 } from "@k8s-dashboard/contracts";
+import { DRY_RUN_ABSOLUTE_MAX_BYTES, manifestByteLength } from "@/features/resources/dryrun";
 import { NOW_MS } from "./data";
 
 /**
@@ -26,8 +28,10 @@ import { NOW_MS } from "./data";
 const iso = new Date(NOW_MS).toISOString();
 
 export const RESOURCE_CATALOG: ResourceDescriptor[] = [
-  { group: "core", version: "v1", resource: "services", kind: "Service", namespaced: true, verbs: ["get", "list", "watch"], state: "ready", count: 42 },
-  { group: "core", version: "v1", resource: "configmaps", kind: "ConfigMap", namespaced: true, verbs: ["get", "list", "watch"], state: "ready", count: 18 },
+  /* dryRun은 **서버가 주는 배포 capability**입니다(ADR 0019 Phase 1).
+     Secret은 어떤 설정으로도 검토 대상이 될 수 없으므로 여기서도 켜지 않습니다. */
+  { group: "core", version: "v1", resource: "services", kind: "Service", namespaced: true, verbs: ["get", "list", "watch"], state: "ready", count: 42, dryRun: true },
+  { group: "core", version: "v1", resource: "configmaps", kind: "ConfigMap", namespaced: true, verbs: ["get", "list", "watch"], state: "ready", count: 18, dryRun: true },
   { group: "core", version: "v1", resource: "secrets", kind: "Secret", namespaced: true, verbs: ["get", "list", "watch"], state: "ready", count: 7 },
   { group: "storage.k8s.io", version: "v1", resource: "storageclasses", kind: "StorageClass", namespaced: false, verbs: ["get", "list", "watch"], state: "ready", count: 3 },
   { group: "batch", version: "v1", resource: "jobs", kind: "Job", namespaced: true, verbs: ["get", "list", "watch"], state: "syncing", reason: "", count: 0 },
@@ -58,6 +62,24 @@ const STATE_ERROR: Record<string, { status: number; code: string; message: strin
 
 const apiError = (status: number, code: string, message: string) =>
   HttpResponse.json({ code, message, requestId: "mock-request" }, { status });
+
+/* 변경 검토 요청이 담을 수 있는 필드 전부입니다. 그 밖의 키는 거절합니다 —
+   force·token 같은 필드가 조용히 무시되면 계약이 있는 척하게 됩니다. */
+const DRY_RUN_REQUEST_FIELDS = new Set([
+  "apiVersion",
+  "kind",
+  "namespace",
+  "name",
+  "uid",
+  "resourceVersion",
+  "manifest",
+]);
+
+/** 비어 있지 않고 상한 안인 문자열만 통과시킵니다. 그 외에는 undefined입니다. */
+function boundedField(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > max) return undefined;
+  return value;
+}
 
 /* ── 전역 검색 · 최근 항목 (ADR 0023) ───────────────────────────────────────
    서버 계약을 그대로 흉내 냅니다 — 질의는 2..64자이고, 결과에 **status가 없으며**,
@@ -335,5 +357,171 @@ export const resourceHandlers = [
       redacted: isSecret ? ["data", "metadata.managedFields"] : ["metadata.managedFields"],
     };
     return HttpResponse.json(body);
+  }),
+
+  /* ── 변경 검토 dry-run (ADR 0019 Phase 1) ───────────────────────────────
+     서버 계약을 그대로 흉내 냅니다 — 검토만 하고 적용하지 않으며, 적용·삭제·생성
+     mock은 만들지 않습니다.
+
+     **매니페스트 원문을 보관하지도, 로그로 남기지도, 응답에 되비추지도 않습니다.**
+     본문은 여기서 한 번 읽어 결과 종류를 고르는 데만 쓰고 그대로 버립니다. 응답에
+     실리는 문자열은 아래 고정 문구뿐이고, 신원은 요청과 일치하는 값만 돌려줍니다. */
+  http.post("/api/v1/clusters/:clusterId/resources/:group/:version/:resource/object/dry-run", async ({ params, request }) => {
+    await delay(120);
+    const { group, version, resource } = params as Record<string, string>;
+    const descriptor = RESOURCE_CATALOG.find(
+      (d) => d.group === group && d.version === version && d.resource === resource,
+    );
+    if (!descriptor) return apiError(404, "resource_not_allowlisted", "이 리소스는 탐색 대상으로 등록되어 있지 않습니다.");
+    if (descriptor.dryRun !== true) {
+      return apiError(403, "dryrun_resource_denied", "이 리소스는 변경 검토 대상이 아닙니다.");
+    }
+
+    /* 계약이 선언한 것은 application/json 하나입니다. charset 같은 파라미터는 허용합니다. */
+    const mediaType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (mediaType !== "application/json") {
+      return apiError(415, "unsupported_media_type", "요청 본문은 application/json이어야 합니다.");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = await request.json();
+    } catch {
+      return apiError(400, "bad_request", "요청 본문은 알려진 필드만 담은 JSON 객체 하나여야 합니다.");
+    }
+    /* 배열도 null도 객체가 아닙니다. */
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return apiError(400, "bad_request", "요청 본문은 알려진 필드만 담은 JSON 객체 하나여야 합니다.");
+    }
+    const submitted = parsed as Record<string, unknown>;
+    for (const key of Object.keys(submitted)) {
+      if (!DRY_RUN_REQUEST_FIELDS.has(key)) {
+        return apiError(400, "bad_request", "요청 본문에 알 수 없는 필드가 있습니다.");
+      }
+    }
+
+    /* 경로의 clusterId도 검증합니다. 검증하지 않고 응답 신원에 그대로 실으면
+       임의 경로 문자열이 응답으로 되돌아옵니다. */
+    const clusterId = boundedField(params.clusterId, 253);
+    const apiVersion = boundedField(submitted.apiVersion, 253);
+    const kind = boundedField(submitted.kind, 253);
+    const name = boundedField(submitted.name, 253);
+    const uid = boundedField(submitted.uid, 64);
+    const resourceVersion = boundedField(submitted.resourceVersion, 64);
+    /* namespace는 아예 없을 수도, 빈 문자열일 수도 있습니다(cluster 범위).
+       있으면 문자열이고 상한 안이어야 합니다. */
+    const namespaceRaw = submitted.namespace;
+    if (namespaceRaw !== undefined && (typeof namespaceRaw !== "string" || namespaceRaw.length > 63)) {
+      return apiError(400, "invalid_filter", "namespace 값이 올바르지 않습니다.");
+    }
+    const namespace = typeof namespaceRaw === "string" ? namespaceRaw : "";
+    if (!clusterId || !apiVersion || !kind || !name || !uid || !resourceVersion) {
+      return apiError(400, "invalid_filter", "요청 신원 값이 올바르지 않습니다.");
+    }
+
+    /* 매니페스트는 **재기 전에** 끊습니다. trim()도 TextEncoder도 사본을 만들기
+       때문에, 거대한 입력에서는 그 호출 자체가 비용입니다.
+       UTF-8 바이트 수는 UTF-16 코드 단위 수보다 작을 수 없으므로 length로 먼저
+       끊어도 정상 입력을 잘못 거절하지 않습니다 — 정확히 1MiB는 그대로 통과합니다. */
+    if (typeof submitted.manifest !== "string") {
+      return apiError(400, "invalid_manifest", "매니페스트를 해석하지 못했습니다.");
+    }
+    const manifest = submitted.manifest;
+    if (manifest.length > DRY_RUN_ABSOLUTE_MAX_BYTES) {
+      return apiError(413, "manifest_too_large", "매니페스트가 허용 상한을 넘었습니다.");
+    }
+    /* 상한은 dryrun.ts와 공유합니다. 결과를 고르기 전에 적용합니다. */
+    if (manifestByteLength(manifest) > DRY_RUN_ABSOLUTE_MAX_BYTES) {
+      return apiError(413, "manifest_too_large", "매니페스트가 허용 상한을 넘었습니다.");
+    }
+    if (!manifest.trim()) {
+      return apiError(400, "invalid_manifest", "매니페스트를 해석하지 못했습니다.");
+    }
+
+    if (apiVersion !== (group === "core" ? version : `${group}/${version}`) || kind !== descriptor.kind) {
+      return apiError(400, "manifest_mismatch", "매니페스트가 가리키는 대상이 요청과 다릅니다.");
+    }
+    const row = rowsFor(resource, descriptor.namespaced).find((r) => r.name === name);
+    if (!row) return apiError(404, "not_found", "목록에 없는 항목입니다.");
+    /* namespace는 정확히 일치해야 합니다. cluster 범위에는 아예 없어야 합니다. */
+    if (descriptor.namespaced) {
+      if (namespace !== (row.namespace ?? "")) {
+        return apiError(404, "not_found", "목록에 없는 항목입니다.");
+      }
+    } else if (namespace !== "") {
+      return apiError(400, "invalid_filter", "클러스터 범위 리소스에는 namespace를 지정할 수 없습니다.");
+    }
+    if (row.uid !== uid) return apiError(409, "uid_mismatch", "같은 이름의 다른 객체로 교체되었습니다.");
+    if (resourceVersion !== "4242") {
+      return apiError(409, "resource_version_mismatch", "객체가 그 사이에 바뀌었습니다.");
+    }
+
+    /* 결과 종류만 본문에서 고릅니다. 고른 뒤 manifest는 쓰지 않습니다. */
+    const wantsRejection = manifest.includes("x-mock-reject");
+    const wantsUnchanged = manifest.includes("x-mock-unchanged");
+
+    const identity = {
+      clusterId,
+      group,
+      version,
+      resource,
+      apiVersion,
+      kind,
+      ...(descriptor.namespaced ? { namespace } : {}),
+      name,
+      uid: row.uid,
+      resourceVersion: "4242",
+      generatedAt: iso,
+      fieldManager: "k8s-dashboard-dryrun",
+      redacted: ["metadata.managedFields", "metadata.resourceVersion", "metadata.uid", "status"],
+    };
+
+    /* 응답은 전부 ResourceDryRunResponse로 못박습니다 — enum·필드가 어긋나면
+       런타임이 아니라 TypeScript가 먼저 막습니다. */
+    if (wantsRejection) {
+      const rejected: ResourceDryRunResponse = {
+        ...identity,
+        outcome: "rejected",
+        rejectedBy: "conflict",
+        changes: [],
+        changeCount: 0,
+        truncated: false,
+        warnings: [],
+        violations: [
+          { message: "다른 field manager가 이 필드를 소유하고 있습니다. 이 대시보드는 강제 적용을 지원하지 않습니다." },
+        ],
+      };
+      return HttpResponse.json(rejected);
+    }
+    if (wantsUnchanged) {
+      const unchanged: ResourceDryRunResponse = {
+        ...identity,
+        outcome: "unchanged",
+        changes: [],
+        changeCount: 0,
+        truncated: false,
+        warnings: [],
+        violations: [],
+      };
+      return HttpResponse.json(unchanged);
+    }
+    const changed: ResourceDryRunResponse = {
+      ...identity,
+      outcome: "changed",
+      changes: [
+        { path: "data.LOG_LEVEL", op: "changed", before: '"info"', after: '"debug"' },
+        { path: "metadata.labels.tier", op: "added", after: '"frontend"' },
+        {
+          path: 'metadata.annotations["example.com/api-token"]',
+          op: "changed",
+          valueRedacted: true,
+        },
+      ],
+      changeCount: 3,
+      truncated: false,
+      warnings: ["API 서버가 검토 요청에 경고를 반환했습니다. 원문은 보안상 표시하지 않습니다."],
+      violations: [],
+    };
+    return HttpResponse.json(changed);
   }),
 ];

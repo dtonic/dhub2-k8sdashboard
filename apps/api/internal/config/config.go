@@ -22,6 +22,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/auth"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterid"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/clusterstate/registry"
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/datasource/alertmanager"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/resourcecatalog"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
@@ -204,6 +205,32 @@ type ResourceExplorerConfig struct {
 	SearchIncremental bool
 	// SearchIncrementalInvalid는 RESOURCE_EXPLORER_SEARCH_INCREMENTAL이 boolean이 아닐 때입니다.
 	SearchIncrementalInvalid bool
+
+	/* ── 변경 검토 dry-run (ADR 0019 Phase 1) ─────────────────────────────
+	   전부 RESOURCE_EXPLORER_DRY_RUN_* 접두사입니다. 기본은 꺼짐이고 대상 목록도
+	   비어 있습니다 — 두 번 opt-in해야 실제로 열립니다. */
+
+	// DryRunEnabled는 기능 스위치입니다. Resource Explorer가 켜져 있어야만 켤 수 있습니다.
+	DryRunEnabled bool
+	// DryRunEnabledInvalid는 RESOURCE_EXPLORER_DRY_RUN_ENABLED가 boolean이 아닐 때입니다.
+	DryRunEnabledInvalid bool
+	// DryRunResources는 검토를 허용할 "group/version/resource" 목록입니다.
+	// core group은 "core/v1/resource"로 적습니다.
+	DryRunResources []string
+	// DryRunDenyResources는 위 목록에서 다시 빼는 GVR입니다.
+	// **DryRunResources의 부분집합**이어야 합니다 — 목록 밖 항목은 오타로 봅니다.
+	DryRunDenyResources []string
+	// DryRunTimeout은 검토 한 건(live GET + dry-run patch)의 상한입니다.
+	DryRunTimeout time.Duration
+	// DryRunRate/DryRunBurst/DryRunConcurrent는 검토 전용 예산입니다.
+	DryRunRate       float64
+	DryRunBurst      int
+	DryRunConcurrent int
+	// DryRunMaxManifestBytes는 파싱 전에 적용하는 매니페스트 바이트 상한입니다.
+	DryRunMaxManifestBytes int
+	// DryRunMaxObjectBytes는 검토 전용 클라이언트의 응답 본문 상한입니다.
+	// 상세 조회(MaxObjectBytes)와 별개이며 더 좁습니다.
+	DryRunMaxObjectBytes int
 }
 
 // UsesSQLite는 SQLite 파일 백엔드(ADR 0016)를 쓰는지 알려줍니다.
@@ -244,6 +271,8 @@ func Load() Config {
 	searchEnabled, searchInvalid := strictEnvBool("RESOURCE_EXPLORER_SEARCH_ENABLED", true)
 	// 증분 갱신은 검색 안에서 기본 켜짐입니다. 끄면 dirty → 전체 재구성으로 돌아갑니다.
 	searchIncremental, searchIncrementalInvalid := strictEnvBool("RESOURCE_EXPLORER_SEARCH_INCREMENTAL", true)
+	// 변경 검토는 Resource Explorer 안에서도 **따로** 켜야 합니다. (ADR 0019 Phase 1)
+	dryRunEnabled, dryRunEnabledInvalid := strictEnvBool("RESOURCE_EXPLORER_DRY_RUN_ENABLED", false)
 	return Config{
 		Addr:                     env("ADDR", ":8080"),
 		Kubeconfig:               env("KUBECONFIG", ""),
@@ -309,6 +338,17 @@ func Load() Config {
 
 			SearchIncremental:        searchIncremental,
 			SearchIncrementalInvalid: searchIncrementalInvalid,
+
+			DryRunEnabled:          dryRunEnabled,
+			DryRunEnabledInvalid:   dryRunEnabledInvalid,
+			DryRunResources:        splitCSV(env("RESOURCE_EXPLORER_DRY_RUN_RESOURCES", "")),
+			DryRunDenyResources:    splitCSV(env("RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES", "")),
+			DryRunTimeout:          strictEnvDuration("RESOURCE_EXPLORER_DRY_RUN_TIMEOUT", 8*time.Second),
+			DryRunRate:             strictEnvFloat("RESOURCE_EXPLORER_DRY_RUN_RATE", 1),
+			DryRunBurst:            strictEnvInt("RESOURCE_EXPLORER_DRY_RUN_BURST", 3),
+			DryRunConcurrent:       strictEnvInt("RESOURCE_EXPLORER_DRY_RUN_CONCURRENT", 1),
+			DryRunMaxManifestBytes: strictEnvInt("RESOURCE_EXPLORER_DRY_RUN_MAX_MANIFEST_BYTES", contract.DefaultDryRunManifestBytes),
+			DryRunMaxObjectBytes:   strictEnvInt("RESOURCE_EXPLORER_DRY_RUN_MAX_OBJECT_BYTES", resourcecatalog.DefaultMaxObjectBytes),
 		},
 		Auth: AuthConfig{
 			Mode:                  env("AUTH_MODE", "none"),
@@ -452,6 +492,18 @@ func (c Config) Validate() error {
 	}
 	if c.ResourceExplorer.SearchIncrementalInvalid {
 		errs = append(errs, errors.New("RESOURCE_EXPLORER_SEARCH_INCREMENTAL must be a boolean"))
+	}
+	// 기능 스위치의 파싱 실패는 **언제나** 기동을 막습니다. 조용히 꺼진 것으로
+	// 접으면 운영자는 켰다고 믿는데 실제로는 없는 상태가 됩니다.
+	if c.ResourceExplorer.DryRunEnabledInvalid {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_ENABLED must be a boolean"))
+	}
+	// 이 검사는 Enabled 블록 **밖**이어야 합니다. 안에 두면 Explorer가 꺼진 채
+	// 검토만 켠 설정이 검사 자체를 건너뛰고 통과합니다.
+	// central 조합도 이 경로로 막힙니다 — Explorer가 켜져 있으면
+	// validateResourceExplorer가, 꺼져 있으면 아래가 잡습니다.
+	if c.ResourceExplorer.DryRunEnabled && !c.ResourceExplorer.Enabled {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_ENABLED requires RESOURCE_EXPLORER_ENABLED"))
 	}
 	if c.ResourceExplorer.Enabled {
 		errs = append(errs, c.validateResourceExplorer()...)
@@ -618,6 +670,94 @@ func (c Config) ResourceAllowlist() ([]schema.GroupVersionResource, error) {
 	return list, nil
 }
 
+// ResourceDryRunAllowlist는 변경 검토 대상의 **최종** 목록입니다. (ADR 0019 Phase 1)
+//
+// deny는 여기서 **정확히 한 번** 적용됩니다. 호출자는 반환값을 그대로 쓰고 deny를
+// 다시 넘기지 않습니다 — 두 곳에서 빼면 어느 쪽이 실제로 적용됐는지 알 수 없고,
+// 한쪽만 고치면 조용히 우회가 생깁니다.
+//
+// hard-deny(core secrets·serviceaccounts·nodes·namespaces, RBAC group 전체,
+// apiextensions CRD)는 core의 NormalizeDryRunAllowlist가 판정합니다. 이 함수는
+// 더 넓은 group·kind 규칙을 새로 만들지 않습니다.
+func (c Config) ResourceDryRunAllowlist() ([]schema.GroupVersionResource, error) {
+	explorer, err := c.ResourceAllowlist()
+	if err != nil {
+		return nil, err
+	}
+	allow := make([]schema.GroupVersionResource, 0, len(c.ResourceExplorer.DryRunResources))
+	for _, entry := range c.ResourceExplorer.DryRunResources {
+		gvr, parseErr := resourcecatalog.ParseGVR(entry)
+		if parseErr != nil {
+			return nil, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_RESOURCES: %w", parseErr)
+		}
+		allow = append(allow, gvr)
+	}
+	// deny는 **opt-in 목록의 부분집합**이어야 합니다. Explorer 전체 allowlist가
+	// 기준이 아닙니다 — 검토 대상이 아닌 것을 빼겠다고 적는 것은 오타입니다.
+	inAllow := make(map[schema.GroupVersionResource]bool, len(allow))
+	for _, gvr := range allow {
+		inAllow[gvr] = true
+	}
+	deny := make([]schema.GroupVersionResource, 0, len(c.ResourceExplorer.DryRunDenyResources))
+	for _, entry := range c.ResourceExplorer.DryRunDenyResources {
+		gvr, parseErr := resourcecatalog.ParseGVR(entry)
+		if parseErr != nil {
+			return nil, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES: %w", parseErr)
+		}
+		if !inAllow[gvr] {
+			return nil, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES: %s는 RESOURCE_EXPLORER_DRY_RUN_RESOURCES에 없습니다",
+				resourcecatalog.FormatGVR(gvr))
+		}
+		deny = append(deny, gvr)
+	}
+	final, err := resourcecatalog.NormalizeDryRunAllowlist(allow, explorer, deny)
+	if err != nil {
+		return nil, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_RESOURCES: %w", err)
+	}
+	return final, nil
+}
+
+// validateResourceDryRun은 활성화된 변경 검토 설정의 상한을 검사합니다.
+// 조용한 clamp는 없습니다 — 상한을 벗어나면 기동이 실패합니다.
+func (c Config) validateResourceDryRun() []error {
+	var errs []error
+	d := c.ResourceExplorer
+	if d.DryRunTimeout <= 0 || d.DryRunTimeout > 30*time.Second {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_TIMEOUT must be between 0 and 30s"))
+	}
+	// NaN·±Inf는 <=0 과 >10 비교를 **둘 다** 통과합니다. 그대로 두면 검토 token
+	// bucket이 fail-open 됩니다. 파싱 실패도 NaN으로 들어오므로 같이 걸립니다.
+	if math.IsNaN(d.DryRunRate) || math.IsInf(d.DryRunRate, 0) || d.DryRunRate <= 0 || d.DryRunRate > 10 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_RATE must be a finite value between 0 and 10"))
+	}
+	if d.DryRunBurst < 1 || d.DryRunBurst > 20 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_BURST must be between 1 and 20"))
+	}
+	if d.DryRunConcurrent < 1 || d.DryRunConcurrent > 4 {
+		errs = append(errs, errors.New("RESOURCE_EXPLORER_DRY_RUN_CONCURRENT must be between 1 and 4"))
+	}
+	if d.DryRunMaxManifestBytes < 4096 || d.DryRunMaxManifestBytes > contract.MaxDryRunManifestBytes {
+		errs = append(errs, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_MAX_MANIFEST_BYTES must be between 4096 and %d",
+			contract.MaxDryRunManifestBytes))
+	}
+	if d.DryRunMaxObjectBytes < 4096 || d.DryRunMaxObjectBytes > resourcecatalog.DefaultMaxObjectBytes {
+		errs = append(errs, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_MAX_OBJECT_BYTES must be between 4096 and %d",
+			resourcecatalog.DefaultMaxObjectBytes))
+	}
+	final, err := c.ResourceDryRunAllowlist()
+	if err != nil {
+		errs = append(errs, err)
+		return errs
+	}
+	// 켜 놓고 대상이 없으면 기능이 있는 줄 알고 쓰다가 매번 403을 봅니다.
+	// deny로 전부 빠진 경우도 여기서 걸립니다.
+	if len(final) < 1 || len(final) > resourcecatalog.MaxDryRunAllowlistEntries {
+		errs = append(errs, fmt.Errorf("RESOURCE_EXPLORER_DRY_RUN_RESOURCES must resolve to between 1 and %d resources",
+			resourcecatalog.MaxDryRunAllowlistEntries))
+	}
+	return errs
+}
+
 // validateResourceExplorer는 활성화된 Resource Explorer 설정의 상한을 검사합니다.
 func (c Config) validateResourceExplorer() []error {
 	var errs []error
@@ -655,6 +795,11 @@ func (c Config) validateResourceExplorer() []error {
 	// central 모드는 로컬 informer도 kubeconfig도 없습니다. 켜졌다면 설정 오류입니다.
 	if c.ClusterState.Mode != "direct" {
 		errs = append(errs, errors.New("RESOURCE_EXPLORER_ENABLED requires CLUSTER_STATE_MODE=direct"))
+	}
+	// 검토는 Explorer 안에서만 존재하므로 여기서 이어 검사합니다. Explorer가 꺼져
+	// 있으면 이 함수 자체가 불리지 않고, 그 조합은 Validate가 따로 막습니다.
+	if c.ResourceExplorer.DryRunEnabled {
+		errs = append(errs, c.validateResourceDryRun()...)
 	}
 	return errs
 }
@@ -777,6 +922,23 @@ func envFloat(k string, def float64) float64 {
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return def
+	}
+	return f
+}
+
+// strictEnvFloat는 파싱 실패를 조용한 기본값으로 덮지 않습니다.
+//
+// 실패하면 NaN을 돌려줍니다. 검증이 "유한한 값"을 요구하므로, 오타(`abc`)와 리터럴
+// `NaN`·`Inf`가 **같은 거절 경로**로 수렴합니다. rate가 조용히 기본값으로 흐르면
+// 운영자는 자기가 적은 값이 적용된 줄 알고, token bucket은 다른 예산으로 돕니다.
+func strictEnvFloat(k string, def float64) float64 {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return math.NaN()
 	}
 	return f
 }

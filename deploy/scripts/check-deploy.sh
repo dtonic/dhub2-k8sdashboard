@@ -279,6 +279,163 @@ for rule in after:
     assert not (set(rule["verbs"]) & write_verbs), rule
 PY
 
+# 변경 검토 dry-run(ADR 0019 Phase 1 · #7)은 Explorer 위의 **두 번째** opt-in입니다.
+# 끄면 렌더가 정확한 무차이여야 하고, 켜면 deny를 뺀 최종 목록에만 get·patch가
+# 붙습니다. 설정으로 뚫을 수 없는 거부는 조용히 빠지지 않고 렌더를 실패시킵니다.
+#
+# 의미 검증은 exit 코드만으로 부족합니다 — 다른 이유로 실패해도 통과해 버립니다.
+# stderr를 받아 chart가 쓴 고정 문구까지 확인합니다. 그 출력에는 Secret도 사용자
+# 원문도 없고 values 키 이름과 GVR 문자열뿐입니다.
+expect_render_failure_containing() {
+  needle=$1
+  shift
+  if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+    --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml "$@" \
+    >/dev/null 2>"$TMP/dryrun-render-error.txt"; then
+    echo "dry-run negative values mutation unexpectedly rendered: $*" >&2
+    exit 1
+  fi
+  if ! grep -qF -- "$needle" "$TMP/dryrun-render-error.txt"; then
+    echo "dry-run negative values mutation failed for the wrong reason, expected: $needle" >&2
+    exit 1
+  fi
+}
+
+# 기본 opt-out은 정확한 무차이입니다 — Explorer가 꺼진 렌더와도, 켜진 렌더와도.
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set resourceExplorer.dryRun.enabled=false > "$TMP/dryrun-disabled-explicit.yaml"
+cmp "$TMP/validation/dev.yaml" "$TMP/dryrun-disabled-explicit.yaml"
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=false > "$TMP/dryrun-explorer-parity.yaml"
+cmp "$TMP/resources-enabled.yaml" "$TMP/dryrun-explorer-parity.yaml"
+
+# Explorer 없이는 열리지 않고, 대상이 비면 켜지지 않습니다.
+expect_render_failure_containing 'resourceExplorer.dryRun.enabled requires resourceExplorer.enabled' \
+  --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/configmaps"]'
+expect_render_failure_containing 'resourceExplorer.dryRun.enabled requires a non-empty resourceExplorer.dryRun.resources' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.dryRun.resources=[]'
+# central 경계. dev 값으로는 dashboard.validate의 central 검사가 Explorer 검사보다
+# 먼저 실패하므로 여기서는 "렌더되지 않음"만 주장합니다 — 문구를 고정하면 거짓입니다.
+expect_render_failure --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/configmaps"]' --set clusterState.mode=central
+
+# 부분집합 위반. 배열을 통째로 지정해 다른 항목이 먼저 실패할 여지를 없앱니다.
+expect_render_failure_containing '"core/v1/pods" must also be in resourceExplorer.resources' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.resources=["core/v1/configmaps"]' \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/pods"]'
+expect_render_failure_containing '"core/v1/services" must also be in resourceExplorer.dryRun.resources' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.resources=["core/v1/configmaps","core/v1/services"]' \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/configmaps"]' \
+  --set-json 'resourceExplorer.dryRun.denyResources=["core/v1/services"]'
+
+# 영구 거부. Explorer allowlist에도 같이 넣어 부분집합 검사를 먼저 통과시키고,
+# 실패 이유가 hard-deny임을 문구로 고정합니다.
+for denied in secrets serviceaccounts nodes namespaces; do
+  expect_render_failure_containing "\"core/v1/$denied\" is permanently denied (core $denied)" \
+    --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+    --set-json "resourceExplorer.resources=[\"core/v1/$denied\"]" \
+    --set-json "resourceExplorer.dryRun.resources=[\"core/v1/$denied\"]"
+done
+expect_render_failure_containing '"rbac.authorization.k8s.io/v1/roles" is permanently denied (rbac.authorization.k8s.io)' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.resources=["rbac.authorization.k8s.io/v1/roles"]' \
+  --set-json 'resourceExplorer.dryRun.resources=["rbac.authorization.k8s.io/v1/roles"]'
+expect_render_failure_containing '"apiextensions.k8s.io/v1/customresourcedefinitions" is permanently denied (customresourcedefinitions)' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.resources=["apiextensions.k8s.io/v1/customresourcedefinitions"]' \
+  --set-json 'resourceExplorer.dryRun.resources=["apiextensions.k8s.io/v1/customresourcedefinitions"]'
+
+# deny가 전부를 지우면 "켰다고 믿는 채로 아무것도 없는" 상태입니다 — 실패해야 합니다.
+expect_render_failure_containing 'denyResources removed every entry' \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/configmaps"]' \
+  --set-json 'resourceExplorer.dryRun.denyResources=["core/v1/configmaps"]'
+
+# 수치·타입 경계는 values.schema.json이 봅니다. timeout은 스키마가 실제로 보장하는
+# 타입·단위·0 오류만 검사합니다 — 상한 시간은 현재 chart 계약이 아닙니다.
+expect_render_failure --set resourceExplorer.dryRun.rate=0
+expect_render_failure --set resourceExplorer.dryRun.rate=11
+expect_render_failure --set resourceExplorer.dryRun.burst=0
+expect_render_failure --set resourceExplorer.dryRun.burst=21
+expect_render_failure --set resourceExplorer.dryRun.concurrent=0
+expect_render_failure --set resourceExplorer.dryRun.concurrent=5
+expect_render_failure --set resourceExplorer.dryRun.maxManifestBytes=4095
+expect_render_failure --set resourceExplorer.dryRun.maxManifestBytes=1048577
+expect_render_failure --set resourceExplorer.dryRun.maxObjectBytes=4095
+expect_render_failure --set resourceExplorer.dryRun.maxObjectBytes=1048577
+expect_render_failure --set resourceExplorer.dryRun.timeout=8
+expect_render_failure --set resourceExplorer.dryRun.timeout=8m
+expect_render_failure --set resourceExplorer.dryRun.timeout=0s
+
+# 켠 렌더. ConfigMap은 **원본** 목록과 deny를 그대로 내보내고(정규화는 서버가 한 번만),
+# RBAC은 deny를 뺀 최종 목록 하나에만 get·patch를 붙입니다.
+docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
+  --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \
+  --set resourceExplorer.enabled=true --set resourceExplorer.dryRun.enabled=true \
+  --set-json 'resourceExplorer.dryRun.resources=["core/v1/configmaps","networking.k8s.io/v1/ingresses"]' \
+  --set-json 'resourceExplorer.dryRun.denyResources=["networking.k8s.io/v1/ingresses"]' > "$TMP/dryrun-enabled.yaml"
+docker run --rm -i "$KUBECONFORM_IMAGE" -strict -summary -kubernetes-version 1.31.0 < "$TMP/dryrun-enabled.yaml"
+python3 - "$TMP/dryrun-enabled.yaml" "$TMP/resources-enabled.yaml" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+base = [d for d in yaml.safe_load_all(open(sys.argv[2])) if d]
+
+cm = next(d for d in docs if d.get("kind") == "ConfigMap" and d["metadata"]["name"].endswith("-api"))
+# deny는 여기서 빼지 않습니다 — 서버가 정확히 한 번 적용합니다.
+expected = {
+    "RESOURCE_EXPLORER_DRY_RUN_ENABLED": "true",
+    "RESOURCE_EXPLORER_DRY_RUN_RESOURCES": "core/v1/configmaps,networking.k8s.io/v1/ingresses",
+    "RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES": "networking.k8s.io/v1/ingresses",
+    "RESOURCE_EXPLORER_DRY_RUN_TIMEOUT": "8s",
+    "RESOURCE_EXPLORER_DRY_RUN_RATE": "1",
+    "RESOURCE_EXPLORER_DRY_RUN_BURST": "3",
+    "RESOURCE_EXPLORER_DRY_RUN_CONCURRENT": "1",
+    "RESOURCE_EXPLORER_DRY_RUN_MAX_MANIFEST_BYTES": "262144",
+    "RESOURCE_EXPLORER_DRY_RUN_MAX_OBJECT_BYTES": "1048576",
+}
+for key, value in expected.items():
+    assert cm["data"][key] == value, (key, cm["data"].get(key))
+emitted = sorted(k for k in cm["data"] if k.startswith("RESOURCE_EXPLORER_DRY_RUN_"))
+assert emitted == sorted(expected), emitted
+# Explorer 조회 설정은 이 opt-in으로 바뀌지 않습니다.
+basecm = next(d for d in base if d.get("kind") == "ConfigMap" and d["metadata"]["name"].endswith("-api"))
+for key, value in basecm["data"].items():
+    assert cm["data"][key] == value, (key, value, cm["data"].get(key))
+
+def read_rules(manifest):
+    role = next(d for d in manifest if d.get("kind") == "ClusterRole" and d["metadata"]["name"].endswith("-api-read"))
+    return role["rules"]
+
+before = read_rules(base)
+after = read_rules(docs)
+# 늘어난 규칙은 정확히 하나이고, deny를 뺀 최종 대상에 get·patch뿐입니다.
+added = [rule for rule in after if rule not in before]
+assert len(added) == 1, added
+assert added[0] == {"apiGroups": [""], "resources": ["configmaps"], "verbs": ["get", "patch"]}, added[0]
+# 조회 전용 규칙은 하나도 사라지거나 바뀌지 않습니다.
+for rule in before:
+    assert rule in after, rule
+# deny된 Ingress에는 patch가 붙지 않습니다.
+for rule in after:
+    if "ingresses" in rule["resources"]:
+        assert "patch" not in rule["verbs"], rule
+# get·patch 밖의 write verb는 어떤 경우에도 붙지 않습니다.
+forbidden = {"create", "update", "delete", "deletecollection", "*"}
+for rule in after:
+    assert not (set(rule["verbs"]) & forbidden), rule
+# 영구 거부 대상은 patch를 받지 못합니다.
+for rule in after:
+    denied = set(rule["resources"]) & {"secrets", "serviceaccounts", "nodes", "namespaces", "customresourcedefinitions"}
+    if denied or rule["apiGroups"] == ["rbac.authorization.k8s.io"]:
+        assert "patch" not in rule["verbs"], rule
+PY
+
 expect_cutover_failure() {
   if docker run --rm -v "$ROOT:/work:ro" "$HELM_IMAGE" template release-name /work/deploy/helm/observability-dashboard \
     --namespace observability --values /work/deploy/helm/observability-dashboard/values-dev.yaml \

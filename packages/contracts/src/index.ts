@@ -321,6 +321,12 @@ export interface ResourceDescriptor {
   reason?: string;
   /** 로컬 인덱스에 담긴 객체 수(필터 전). */
   count: number;
+  /**
+   * 이 GVR에 변경 검토(dry-run)를 요청할 수 있는지. **권한이 아니라 배포 설정**이며,
+   * 기능 스위치·opt-in 목록·hard-deny를 모두 통과할 때만 true입니다. (ADR 0019)
+   * false면 UI는 검토 진입점을 만들지 않습니다.
+   */
+  dryRun?: boolean;
 }
 
 export interface ResourceCatalogResponse {
@@ -449,6 +455,123 @@ export interface ResourceRecentResponse {
   items: ResourceRecentItem[];
 }
 
+/* ── 변경 검토 dry-run (ADR 0019 Phase 1) ────────────────────────────────────
+   ADR 0018 Explorer 위에 얹는 **검토 전용** 계약입니다.
+
+   적용·삭제·생성·change token·force·범용 write proxy는 **Phase 1 범위에
+   없습니다(deferred)** — 기존 Deployment/Secret write 경로는 그대로 보존되고,
+   뒤 단계에서 무엇을 되살릴지는 별도 ADR의 결정입니다. 응답에 매니페스트 원문·
+   dry-run 객체·Secret 값·Kubernetes Status 원문이 없는 것은 이 계약 자체의
+   고정 사항입니다 — raw 매니페스트는 브라우저→BFF 요청 본문에만 존재하고
+   응답·오류·로그로 되돌아오지 않습니다.
+
+   정본 경로: POST /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run
+
+   서버가 강제하는 것: 본문 apiVersion·kind·namespace·name·uid·resourceVersion을
+   선택 GVR·매니페스트·서버 Scope와 전부 대조, Secret·serviceaccounts는 설정과
+   무관하게 거부, 나머지 hard-deny·미등록 GVR·기능 비활성·central 모드는 fail-closed,
+   매니페스트는 단일 문서·중복 키 거부, 현재본과 결과 양쪽을 정제한 뒤 유계·결정적
+   diff, live GET과 patch 본문 양쪽에서 UID/resourceVersion 재검증. */
+
+/** 검토 대상 하나와 그 대상의 apply configuration. 동사·force·token은 없습니다. */
+export interface ResourceDryRunRequest {
+  /** 경로 GVR·매니페스트와 정확히 일치해야 합니다. */
+  apiVersion: string;
+  kind: string;
+  /** namespaced면 필수, cluster 범위면 비어야 합니다. 힌트가 아니라 대조 대상입니다. */
+  namespace?: string;
+  name: string;
+  /** 목록에서 본 UID. 다르면 Kubernetes로 나가지 않고 409입니다. */
+  uid: string;
+  /** CAS 기준. live GET 결과와 대조하고 patch 본문에도 실립니다. */
+  resourceVersion: string;
+  /** YAML/JSON 단일 문서. 기본 상한 256KiB, 절대 상한 1MiB. 초과 시 413. */
+  manifest: string;
+}
+
+/** 변경 종류. 색이 아니라 텍스트로 함께 표시합니다. */
+export type ResourceDryRunChangeOp = "added" | "removed" | "changed";
+
+/** 정제된 현재본과 정제된 dry-run 결과의 leaf 차이 하나. */
+export interface ResourceDryRunChange {
+  /** canonical 경로. 배열은 name 키 또는 인덱스입니다. */
+  path: string;
+  op: ResourceDryRunChangeOp;
+  before?: string;
+  after?: string;
+  /** 정제가 값 비교에서 뺀 경로. 바뀌었다는 사실만 알리고 값은 없습니다. */
+  valueRedacted?: boolean;
+  /** 값이 512바이트에서 잘렸는지. */
+  valueTruncated?: boolean;
+}
+
+/**
+ * 거절 사유 하나. Kubernetes Status 원문(message·reason·details·causes[].field·
+ * causes[].message·code)은 **어느 필드로도 나가지 않습니다.** 서버는 Causes에서
+ * 개수와 타입만 읽고 자신이 쓴 고정 문장만 보여 줍니다.
+ */
+export interface ResourceDryRunViolation {
+  /**
+   * 거절된 필드 경로. **Phase 1에서는 언제나 비어 있습니다** — causes[].field는
+   * 구조적으로 보이지만 서버(특히 admission webhook)가 자유롭게 채우는 문자열이라
+   * 객체 값·내부 경로가 실려 올 수 있습니다.
+   */
+  field?: string;
+  /** 서버가 쓴 고정 문장. upstream 문자열이 아닙니다. */
+  message: string;
+  /**
+   * 그 필드를 소유한 fieldManager. **Phase 1에서는 언제나 비어 있습니다** —
+   * 소유자 이름이 전용 필드로 오지 않고 사람이 읽는 메시지 안에 섞여 오기
+   * 때문입니다. field·manager 모두 신뢰할 수 있는 타입 필드가 생기면 채웁니다.
+   */
+  manager?: string;
+}
+
+/**
+ * 검토 결과. `rejected`는 "검토가 성공적으로 끝났고 그 답이 거절"이며,
+ * 요청·신원·정책 실패(4xx)와 다릅니다.
+ */
+export type ResourceDryRunOutcome = "unchanged" | "changed" | "rejected";
+
+/** 거절 주체. force는 어떤 경우에도 지원하지 않습니다. */
+export type ResourceDryRunRejectedBy = "validation" | "admission" | "conflict";
+
+export interface ResourceDryRunResponse {
+  clusterId: string;
+  group: string;
+  version: string;
+  resource: string;
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+  uid: string;
+  resourceVersion: string;
+  generatedAt: string;
+  /** 항상 "k8s-dashboard-dryrun". 계약이 상수로 못박습니다. */
+  fieldManager: string;
+  outcome: ResourceDryRunOutcome;
+  rejectedBy?: ResourceDryRunRejectedBy;
+  /**
+   * canonical 경로 오름차순 정렬 후 최대 200개. 같은 정제 diff 집합은 항상 같은
+   * 순서의 changes를 냅니다 — 응답 전체는 generatedAt 때문에 바이트가 달라집니다.
+   */
+  changes: ResourceDryRunChange[];
+  /** 절단 이전 전체 변경 수. changes.length보다 클 수 있습니다. */
+  changeCount: number;
+  truncated: boolean;
+  /**
+   * **서버가 직접 쓴 고정 문장.** API 서버 Warning 헤더의 원문은 어떤 경우에도
+   * 들어오지 않습니다 — admission webhook이 쓰는 그 문자열에는 대상 객체의 필드
+   * 값이나 정책 세부가 실려 올 수 있습니다. 경고가 있었다는 사실만 전달하며,
+   * 개수도 헤더에서 오지 않습니다.
+   */
+  warnings: string[];
+  violations: ResourceDryRunViolation[];
+  /** 정제로 비교에서 제외한 경로. 가려졌다는 사실은 보이게 합니다. */
+  redacted: string[];
+}
+
 export type AuthSessionResponse =
   | { authenticated: false }
   | { authenticated: false; refreshable: true; csrfToken: string }
@@ -507,6 +630,16 @@ export interface ApiError {
 	| "uid_mismatch"
 	| "object_too_large"
 	| "upstream_timeout"
+	/* 변경 검토 dry-run (ADR 0019 Phase 1). 서버가 이미 내보내는 코드입니다 —
+	   전부 "검토 요청이 성립하지 않았다"는 사유이고 쓰기 결과가 아닙니다. */
+	| "dryrun_unavailable"
+	| "dryrun_resource_denied"
+	| "dryrun_rate_limited"
+	| "dryrun_forbidden"
+	| "invalid_manifest"
+	| "manifest_mismatch"
+	| "manifest_too_large"
+	| "resource_version_mismatch"
     | "internal";
   message: string;
   /** 응답 헤더 X-Request-ID와 항상 같은 값. 문의·로그 대조는 이 값 하나로 합니다. */

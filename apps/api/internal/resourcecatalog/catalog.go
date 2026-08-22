@@ -18,6 +18,8 @@ import (
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/xenx96/k8s-dashboard/apps/api/internal/contract"
 )
 
 // State는 allowlist 한 항목의 현재 상태입니다. 빈 목록으로 뭉개지 않기 위해 필요합니다.
@@ -45,6 +47,13 @@ const (
 	DefaultDetailTimeout   = 5 * time.Second
 	DefaultMaxObjectBytes  = 1 << 20
 
+	// 변경 검토 전용 기본값. 상세보다 더 조입니다 — 요청 하나가 API 서버에서
+	// admission chain 전체를 돌리므로 상세 GET보다 훨씬 비쌉니다. (ADR 0019)
+	DefaultDryRunTimeout    = 8 * time.Second
+	DefaultDryRunRate       = 1.0
+	DefaultDryRunBurst      = 3
+	DefaultDryRunConcurrent = 1
+
 	// MinRefreshInterval/MaxRefreshInterval은 discovery 갱신 주기의 허용 범위입니다.
 	MinRefreshInterval = time.Minute
 	MaxRefreshInterval = 24 * time.Hour
@@ -58,6 +67,12 @@ type Clients struct {
 	Metadata  metadata.Interface
 	Discovery discovery.DiscoveryInterface
 	Dynamic   dynamic.Interface
+	// DryRun은 변경 검토 전용 dynamic 클라이언트입니다. (ADR 0019 Phase 1)
+	//
+	// **nil이면 검토 기능이 없는 것**이고, 그 상태가 기본값입니다. Dynamic(상세 live
+	// GET)과 공유하지 않습니다 — rate·timeout·본문 상한·UserAgent가 다르고, 검토가
+	// 예산을 소진했다고 상세 조회까지 멈추면 안 됩니다. 반대도 같습니다.
+	DryRun dynamic.Interface
 }
 
 // Config는 이 기능이 클러스터에 주는 부하의 상한입니다.
@@ -96,6 +111,28 @@ type Config struct {
 	// GVR별 상한만 두면 allowlist 크기만큼 곱해져 상한이 되지 못합니다. (P1-1)
 	MaxSearchIndexBytes int64
 
+	/* ── 변경 검토 dry-run (ADR 0019 Phase 1) ─────────────────────────────
+	   기본은 전부 꺼짐입니다. 켜도 대상 목록이 비어 있으면 아무 GVR도 검토되지
+	   않습니다 — 두 번 opt-in해야 실제로 열립니다. */
+
+	// DryRunEnabled는 기능 스위치입니다. false면 DryRun이 항상 ErrDryRunDisabled입니다.
+	DryRunEnabled bool
+	// DryRunAllowlist는 검토를 허용할 GVR입니다. Allowlist의 부분집합이어야 하고
+	// hard-deny에 걸리면 기동이 실패합니다.
+	DryRunAllowlist []schema.GroupVersionResource
+	// DryRunDeny는 배포가 추가로 빼는 GVR입니다. hard-deny 위에 얹힙니다.
+	DryRunDeny []schema.GroupVersionResource
+	// DryRunTimeout은 검토 한 건(live GET + dry-run patch)의 상한입니다.
+	DryRunTimeout time.Duration
+	// DryRunRate/DryRunBurst/DryRunConcurrent는 검토 전용 예산입니다.
+	// 상세 조회 예산과 공유하지 않습니다.
+	DryRunRate       float64
+	DryRunBurst      int
+	DryRunConcurrent int
+	// MaxManifestBytes는 파싱 **전에** 적용하는 매니페스트 바이트 상한입니다.
+	// contract.MaxDryRunManifestBytes를 넘길 수 없습니다.
+	MaxManifestBytes int
+
 	// NewTicker는 100ms 합치기 창의 **테스트 seam**입니다. env·Helm 노브가 아닙니다.
 	NewTicker tickerFactory
 
@@ -133,6 +170,26 @@ func (c *Config) setDefaults() {
 	}
 	if c.MaxSearchIndexBytes <= 0 {
 		c.MaxSearchIndexBytes = DefaultMaxSearchIndexBytes
+	}
+	if c.DryRunTimeout <= 0 {
+		c.DryRunTimeout = DefaultDryRunTimeout
+	}
+	if c.DryRunRate <= 0 {
+		c.DryRunRate = DefaultDryRunRate
+	}
+	if c.DryRunBurst <= 0 {
+		c.DryRunBurst = DefaultDryRunBurst
+	}
+	if c.DryRunConcurrent <= 0 {
+		c.DryRunConcurrent = DefaultDryRunConcurrent
+	}
+	// 상한은 위아래 양쪽으로 조입니다. 설정이 절대 상한을 넘기면 조용히 따르지 않고
+	// 절대 상한으로 되돌립니다 — 계약(OpenAPI maxLength)이 그 값이기 때문입니다.
+	if c.MaxManifestBytes <= 0 {
+		c.MaxManifestBytes = contract.DefaultDryRunManifestBytes
+	}
+	if c.MaxManifestBytes > contract.MaxDryRunManifestBytes {
+		c.MaxManifestBytes = contract.MaxDryRunManifestBytes
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -189,6 +246,12 @@ type Descriptor struct {
 	State            State
 	Reason           string
 	Count            int
+	// DryRun은 이 GVR에 변경 검토를 요청할 수 있는지입니다. (ADR 0019 Phase 1)
+	//
+	// **capability이지 권한이 아닙니다.** 사용자 권한은 Scope가 정하고 U3 핸들러가
+	// 강제합니다. 이 값은 "이 배포에서 이 GVR이 검토 대상으로 열려 있고, 지금 캐시가
+	// ready이며, API가 get·patch를 제공한다"는 사실만 말합니다.
+	DryRun bool
 }
 
 // Snapshot은 한 시점의 카탈로그 전체입니다.
@@ -1135,6 +1198,11 @@ type Service struct {
 	eventSeq atomic.Uint64
 
 	guard *detailGuard
+	// dryRunGuard는 검토 전용 예산입니다. guard와 **별도 인스턴스**여야 합니다 —
+	// 하나를 공유하면 검토 한 건이 상세 조회 토큰을 먹습니다. (ADR 0019)
+	dryRunGuard *detailGuard
+	// dryRunAllow는 검토가 열린 GVR 집합입니다. 기동 시 확정되고 이후 바뀌지 않습니다.
+	dryRunAllow map[schema.GroupVersionResource]bool
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -1153,6 +1221,12 @@ func New(clients Clients, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resourcecatalog: %w", err)
 	}
+	// 검토 대상은 조회 allowlist가 확정된 **뒤에** 그 부분집합으로 확정합니다.
+	// 오타·범위 초과는 조용한 "대상 없음"이 아니라 기동 실패입니다.
+	dryRunAllow, err := NormalizeDryRunAllowlist(cfg.DryRunAllowlist, allow, cfg.DryRunDeny)
+	if err != nil {
+		return nil, fmt.Errorf("resourcecatalog: dry-run %w", err)
+	}
 	s := &Service{
 		cfg:     cfg,
 		clients: clients,
@@ -1163,6 +1237,15 @@ func New(clients Clients, cfg Config) (*Service, error) {
 			maxInflight: cfg.DetailConcurrent, tokens: float64(cfg.DetailBurst),
 			last: cfg.Now(), now: cfg.Now,
 		},
+		dryRunGuard: &detailGuard{
+			rate: cfg.DryRunRate, burst: cfg.DryRunBurst,
+			maxInflight: cfg.DryRunConcurrent, tokens: float64(cfg.DryRunBurst),
+			last: cfg.Now(), now: cfg.Now,
+		},
+		dryRunAllow: make(map[schema.GroupVersionResource]bool, len(dryRunAllow)),
+	}
+	for _, gvr := range dryRunAllow {
+		s.dryRunAllow[gvr] = true
 	}
 	s.delta = newDeltaState()
 	// 큐·회로 고정 구조를 계상할 원장을 연결합니다. 이것이 빠지면 큐 부속이
@@ -1839,6 +1922,7 @@ func (s *Service) Catalog() Snapshot {
 			State:            status.state,
 			Reason:           status.reason,
 		}
+		d.DryRun = s.dryRunCapable(gvr, d)
 		// 목록 스냅숏만 원자적으로 집습니다. 검색 세대를 붙잡지 않고, 서비스 전역
 		// 잠금도 잡지 않습니다.
 		if idx := e.baselineIndex(); idx != nil {
@@ -1876,6 +1960,7 @@ func (s *Service) describeBaseline(gvr schema.GroupVersionResource) (Descriptor,
 		Kind: entry.kind, Namespaced: entry.namespaced, Verbs: entry.verbs,
 		PreferredVersion: entry.preferred, State: status.state, Reason: status.reason,
 	}
+	d.DryRun = s.dryRunCapable(gvr, d)
 	if idx := e.baselineIndex(); idx != nil {
 		d.Count = len(idx.rows)
 	}
@@ -1906,6 +1991,7 @@ func (s *Service) describeWithIndex(gvr schema.GroupVersionResource, idx *indexS
 		Kind: entry.kind, Namespaced: entry.namespaced, Verbs: entry.verbs,
 		PreferredVersion: entry.preferred, State: status.state, Reason: status.reason,
 	}
+	d.DryRun = s.dryRunCapable(gvr, d)
 	if idx != nil {
 		d.Count = len(idx.rows)
 	}

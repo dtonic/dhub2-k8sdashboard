@@ -180,3 +180,104 @@ func NormalizeAllowlist(in []schema.GroupVersionResource, allowCRDs bool) ([]sch
 	sort.Slice(out, func(i, j int) bool { return FormatGVR(out[i]) < FormatGVR(out[j]) })
 	return out, nil
 }
+
+/* ── 변경 검토 dry-run 대상 (ADR 0019 Phase 1) ────────────────────────────
+
+   검토 대상은 조회 allowlist의 **부분집합**입니다. 조회조차 하지 않는 리소스를
+   검토 대상으로 삼을 수는 없고, 부분집합이어야 informer가 이미 들고 있는 metadata
+   인덱스로 신원 게이트를 통과시킬 수 있습니다.
+
+   그 위에 **설정으로 뚫을 수 없는** 거부 목록이 있습니다. 값 자체가 비밀이거나
+   (Secret) 신원·권한·스키마의 근원인 리소스(ServiceAccount·Node·Namespace·
+   RBAC API 전체·CustomResourceDefinition)는 opt-in 목록에 적어도 거부됩니다.
+   그 외에는 막지 않습니다 — admission 설정·인증서·API 등록 같은 리소스는 이
+   목록에 없고, 운영자가 명시적으로 켜면 검토할 수 있습니다. */
+
+// MaxDryRunAllowlistEntries는 검토 opt-in 목록의 상한입니다.
+const MaxDryRunAllowlistEntries = 64
+
+// groupResource는 버전과 무관한 거부 키입니다. v1을 막고 v2를 여는 실수를 없앱니다.
+type groupResource struct{ group, resource string }
+
+// dryRunDeniedResources는 설정과 무관하게 거부하는 (group, resource)입니다.
+//
+// secrets/serviceaccounts는 값·신원 그 자체이고, nodes/namespaces는 클러스터
+// 경계입니다. 버전을 명시하지 않는 것이 요점입니다 — 새 버전이 생겨도 계속 막힙니다.
+var dryRunDeniedResources = map[groupResource]bool{
+	{group: "", resource: "secrets"}:         true,
+	{group: "", resource: "serviceaccounts"}: true,
+	{group: "", resource: "nodes"}:           true,
+	{group: "", resource: "namespaces"}:      true,
+	// 스키마 자체를 바꾸는 리소스입니다. group 전체가 아니라 **이 하나**만
+	// 막습니다 — 같은 group의 다른 리소스까지 통째로 거부할 이유가 없습니다.
+	{group: "apiextensions.k8s.io", resource: "customresourcedefinitions"}: true,
+}
+
+// dryRunDeniedGroups는 group 전체를 거부합니다. **승인된 하나뿐입니다** —
+// 권한을 정의하는 RBAC API입니다. (ADR 0019 결정 1)
+//
+// 여기에 없는 group을 임의로 더하지 않습니다. 넓게 막으면 정당한 운영 대상까지
+// 사라지고, 그 사실이 UI에서는 "기능이 없다"로만 보입니다.
+var dryRunDeniedGroups = map[string]bool{
+	"rbac.authorization.k8s.io": true,
+}
+
+// DryRunHardDenied는 설정으로 되돌릴 수 없는 거부인지 알려줍니다.
+//
+// 판정 근거는 **정확한 GVR**뿐입니다. kind 텍스트로 판정하지 않습니다 —
+// `Secret`이라는 이름을 쓰는 CRD를 코어 Secret과 같은 것으로 취급하면,
+// 아무 관계 없는 사용자 리소스가 이유 없이 막힙니다. 본문 kind는 선택된
+// descriptor의 kind와 대조하는 방식으로 따로 검증합니다.
+func DryRunHardDenied(gvr schema.GroupVersionResource) bool {
+	if dryRunDeniedGroups[gvr.Group] {
+		return true
+	}
+	return dryRunDeniedResources[groupResource{group: gvr.Group, resource: gvr.Resource}]
+}
+
+// NormalizeDryRunAllowlist는 검토 대상 목록을 확정합니다.
+//
+//   - explorer allowlist의 부분집합이어야 합니다(아니면 오류).
+//   - hard-deny 항목은 오류입니다 — 조용히 빼면 운영자가 켜졌다고 착각합니다.
+//   - deny는 **빼기**입니다. 배포가 opt-in 목록을 좁히려고 쓰는 안전망이므로
+//     겹치는 것은 오류가 아니라 제거입니다.
+//   - 비어 있는 것은 오류가 아닙니다. 기능이 켜져 있어도 대상이 없을 뿐입니다.
+func NormalizeDryRunAllowlist(in, explorer, deny []schema.GroupVersionResource) ([]schema.GroupVersionResource, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[schema.GroupVersionResource]bool, len(explorer))
+	for _, gvr := range explorer {
+		allowed[gvr] = true
+	}
+	denied := make(map[schema.GroupVersionResource]bool, len(deny))
+	for _, gvr := range deny {
+		if err := ValidateGVRSegments(gvr.Group, gvr.Version, gvr.Resource); err != nil {
+			return nil, err
+		}
+		denied[gvr] = true
+	}
+	seen := make(map[schema.GroupVersionResource]bool, len(in))
+	out := make([]schema.GroupVersionResource, 0, len(in))
+	for _, gvr := range in {
+		if err := ValidateGVRSegments(gvr.Group, gvr.Version, gvr.Resource); err != nil {
+			return nil, err
+		}
+		if DryRunHardDenied(gvr) {
+			return nil, fmt.Errorf("%s는 변경 검토 대상이 될 수 없습니다", FormatGVR(gvr))
+		}
+		if !allowed[gvr] {
+			return nil, fmt.Errorf("%s가 Resource Explorer allowlist에 없습니다", FormatGVR(gvr))
+		}
+		if denied[gvr] || seen[gvr] {
+			continue
+		}
+		seen[gvr] = true
+		out = append(out, gvr)
+	}
+	if len(out) > MaxDryRunAllowlistEntries {
+		return nil, fmt.Errorf("변경 검토 대상이 %d개를 넘습니다: %d", MaxDryRunAllowlistEntries, len(out))
+	}
+	sort.Slice(out, func(i, j int) bool { return FormatGVR(out[i]) < FormatGVR(out[j]) })
+	return out, nil
+}

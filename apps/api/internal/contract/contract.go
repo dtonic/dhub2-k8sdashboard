@@ -409,6 +409,9 @@ type ResourceDescriptor struct {
 	Reason string `json:"reason,omitempty"`
 	// Count는 로컬 인덱스에 담긴 객체 수입니다(필터 전).
 	Count int `json:"count"`
+	// DryRun은 이 GVR에 변경 검토를 요청할 수 있는지입니다. **권한이 아니라 배포
+	// 설정**이며, 기능 스위치·opt-in 목록·hard-deny를 모두 통과할 때만 true입니다.
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 type ResourceCatalogResponse struct {
@@ -539,6 +542,191 @@ type ResourceRecentResponse struct {
 	GeneratedAt  string               `json:"generatedAt"`
 	AppliedScope AppliedScope         `json:"appliedScope"`
 	Items        []ResourceRecentItem `json:"items"`
+}
+
+/* ── 변경 검토 dry-run (ADR 0019 Phase 1) ─────────────────────────────────
+
+   ADR 0018 Explorer 위에 얹는 **검토 전용** 경로입니다. 적용·삭제·생성·change
+   token·force·범용 write proxy는 **Phase 1 범위에 없습니다(deferred)** —
+   ADR 0019의 결정 4(token)·5(delete)·6(apply 취소)는 착수하지 않았고, 기존
+   Deployment/Secret write 라우트(ADR 0014)는 그대로 보존됩니다. 뒤 단계에서
+   무엇을 되살릴지는 별도 ADR의 결정이며, 이 타입들이 고정하는 것은 "이 dry-run
+   계약 안에는 그 필드가 없다"까지입니다.
+
+   서버가 지키는 불변조건(핸들러 구현이 이 순서를 그대로 따릅니다)
+
+     1. 본문의 apiVersion·kind·namespace·name·uid·resourceVersion을 선택한 GVR,
+        매니페스트 내용, 서버가 강제 삽입한 Scope와 전부 대조합니다. 하나라도
+        어긋나면 Kubernetes로 나가기 전에 4xx입니다.
+     2. Secret과 serviceaccounts는 설정과 무관하게 거부합니다. 나머지 hard-deny
+        목록과 미등록 GVR, 기능 비활성, central 모드도 전부 fail-closed입니다.
+     3. 매니페스트는 YAML/JSON 단일 문서이며 중복 키를 거부합니다.
+     4. raw 매니페스트는 브라우저→BFF 요청 본문에만 존재합니다. 응답·오류·감사
+        로그 어디에도 되울리지 않습니다.
+     5. 현재본과 dry-run 결과 **양쪽 모두** status·managedFields·휘발성 metadata·
+        민감 annotation과 값을 제거한 뒤 유계·결정적 diff를 만듭니다.
+     6. Kubernetes Status 원문(reason·details·causes·code)은 노출하지 않습니다.
+     7. live GET에서 UID·resourceVersion을 재검증하고, patch 본문에도 서버가
+        identity/CAS를 실어 API 서버가 한 번 더 강제합니다. dry-run 응답 객체의
+        UID가 다르면 결과를 버리고 409입니다. */
+
+const (
+	// ResourceDryRunPath는 검토 엔드포인트의 정본 경로입니다. 기존 상세(object)
+	// 경계 바로 아래에 두어 신원 규칙(UID 필수·목록에서 본 행만)을 공유합니다.
+	// paths 스탠자와 라우터 등록은 이 상수와 글자 단위로 같아야 합니다.
+	ResourceDryRunPath = "/api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run"
+	// ResourceDryRunOperationID는 OpenAPI operationId입니다.
+	ResourceDryRunOperationID = "dryRunClusterResourceObject"
+	// ResourceDryRunFieldManager는 **고정** fieldManager입니다. 배포마다 달라지거나
+	// 다른 manager를 사칭할 수 없도록 계약이 상수로 못박습니다.
+	ResourceDryRunFieldManager = "k8s-dashboard-dryrun"
+)
+
+// dry-run 상한. 계약(OpenAPI)·서버·UI가 같은 숫자를 말해야 합니다.
+const (
+	// DefaultDryRunManifestBytes는 배포 기본 매니페스트 상한입니다.
+	DefaultDryRunManifestBytes = 256 << 10
+	// MaxDryRunManifestBytes는 설정으로도 넘을 수 없는 절대 상한입니다.
+	// OpenAPI의 manifest maxLength가 이 값이고, 배포는 더 낮게만 정할 수 있습니다.
+	MaxDryRunManifestBytes = 1 << 20
+	// DryRunEnvelopeSlack은 매니페스트 외 본문 필드에 허용하는 여유분입니다.
+	// 요청 봉투 상한은 (설정된 매니페스트 상한 + 이 값)입니다.
+	DryRunEnvelopeSlack = 64 << 10
+	// MaxDryRunChanges는 응답에 담는 변경 항목 수 상한입니다.
+	MaxDryRunChanges = 200
+	// MaxDryRunValueBytes는 변경 값 하나의 바이트 상한입니다.
+	MaxDryRunValueBytes = 512
+	// MaxDryRunWarnings/MaxDryRunViolations는 목록 길이 상한입니다.
+	MaxDryRunWarnings   = 32
+	MaxDryRunViolations = 32
+	// MaxDryRunRedacted는 정제 경로 목록의 길이 상한입니다. 정제 목록이 응답
+	// 상한을 밀어내면 안 되므로 개수와 경로 길이를 모두 유계로 둡니다.
+	MaxDryRunRedacted = 64
+	// MaxDryRunResponseBytes는 응답 본문 상한입니다.
+	MaxDryRunResponseBytes = 256 << 10
+)
+
+// ResourceDryRunRequest는 검토 대상 하나와 그 대상의 apply configuration입니다.
+// 동사·force·token 필드는 없습니다 — 서버는 항상 dryRun=All 서버사이드 apply
+// 하나만 수행합니다.
+type ResourceDryRunRequest struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	// Namespace는 namespaced 리소스에서 필수이고 cluster 범위에서는 비어야 합니다.
+	// 힌트가 아니라 대조 대상입니다 — Scope 밖이면 403입니다.
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+	// UID는 목록에서 본 객체의 신원입니다. 다르면 Kubernetes로 나가지 않고 409입니다.
+	UID string `json:"uid"`
+	// ResourceVersion은 CAS 기준입니다. live GET 결과와 대조하고 patch 본문에도 싣습니다.
+	ResourceVersion string `json:"resourceVersion"`
+	// Manifest는 YAML/JSON 단일 문서입니다. 요청 본문에만 존재하며 응답·오류·로그로
+	// 되돌아가지 않습니다.
+	Manifest string `json:"manifest"`
+}
+
+// ResourceDryRunOutcome은 검토 결과입니다. rejected는 "검토가 성공적으로 끝났고
+// 그 답이 거절"이며, 요청·신원·정책 실패(4xx)와 다릅니다.
+type ResourceDryRunOutcome string
+
+const (
+	DryRunUnchanged ResourceDryRunOutcome = "unchanged"
+	DryRunChanged   ResourceDryRunOutcome = "changed"
+	DryRunRejected  ResourceDryRunOutcome = "rejected"
+)
+
+// ResourceDryRunRejectedBy는 거절 주체입니다. force는 어떤 경우에도 없습니다.
+type ResourceDryRunRejectedBy string
+
+const (
+	// DryRunRejectedByValidation은 fieldValidation=Strict 위반입니다.
+	DryRunRejectedByValidation ResourceDryRunRejectedBy = "validation"
+	// DryRunRejectedByAdmission은 admission webhook 거절입니다.
+	DryRunRejectedByAdmission ResourceDryRunRejectedBy = "admission"
+	// DryRunRejectedByConflict는 서버사이드 apply 필드 소유권 충돌입니다.
+	DryRunRejectedByConflict ResourceDryRunRejectedBy = "conflict"
+)
+
+// ResourceDryRunChangeOp는 변경 종류입니다. 색이 아니라 텍스트로 함께 표시합니다.
+type ResourceDryRunChangeOp string
+
+const (
+	DryRunChangeAdded   ResourceDryRunChangeOp = "added"
+	DryRunChangeRemoved ResourceDryRunChangeOp = "removed"
+	DryRunChangeChanged ResourceDryRunChangeOp = "changed"
+)
+
+// ResourceDryRunChange는 정제된 현재본과 정제된 dry-run 결과의 leaf 차이 하나입니다.
+type ResourceDryRunChange struct {
+	// Path는 canonical 경로입니다. 배열은 name 키 또는 인덱스입니다.
+	Path string                 `json:"path"`
+	Op   ResourceDryRunChangeOp `json:"op"`
+	// Before/After는 ValueRedacted가 아닐 때만 채웁니다.
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+	// ValueRedacted는 정제가 값 비교에서 뺀 경로입니다. 바뀌었다는 사실만 알리고
+	// 값을 싣지 않습니다.
+	ValueRedacted bool `json:"valueRedacted,omitempty"`
+	// ValueTruncated는 값이 MaxDryRunValueBytes에서 잘렸는지입니다.
+	ValueTruncated bool `json:"valueTruncated,omitempty"`
+}
+
+// ResourceDryRunViolation은 거절 사유 하나입니다. Kubernetes Status 원문이 아니라
+// 서버가 다시 쓴 필드·메시지·소유 manager뿐입니다.
+type ResourceDryRunViolation struct {
+	// Field는 거절된 필드 경로입니다.
+	//
+	// **Phase 1에서는 언제나 비어 있습니다.** Kubernetes Status의 Causes[].Field는
+	// 구조적으로 보이지만 실제로는 서버(특히 admission webhook)가 자유롭게 채우는
+	// 문자열이고, 거기에 객체 값이나 내부 경로가 실려 오는 것을 우리가 막을 수
+	// 없습니다. 그래서 Causes에서는 개수와 타입만 읽습니다.
+	Field string `json:"field,omitempty"`
+	// Message는 **서버가 쓴 고정 문장**입니다. upstream 문자열이 아닙니다.
+	Message string `json:"message"`
+	// Manager는 그 필드를 소유한 fieldManager입니다.
+	//
+	// **Phase 1에서는 언제나 비어 있습니다.** 소유자 이름은 전용 필드로 오지 않고
+	// 사람이 읽는 메시지 안에 섞여 오는데, 그 문장에는 충돌한 값이 함께 실릴 수
+	// 있습니다. Field·Manager 모두 신뢰할 수 있는 타입 필드가 생기면 그때 채웁니다.
+	Manager string `json:"manager,omitempty"`
+}
+
+// ResourceDryRunResponse는 유계·결정적 구조 diff와 검증/admission 결과뿐입니다.
+// 매니페스트 원문·dry-run 객체·Secret 값·Status 원문은 들어가지 않습니다.
+//
+// Changes/Warnings/Violations/Redacted는 **필수 배열**입니다. 핸들러는 비어 있어도
+// null이 아니라 []로 내보내야 합니다 — null이면 UI가 "검토 안 함"과 "변경 없음"을
+// 구분하지 못합니다.
+type ResourceDryRunResponse struct {
+	ClusterID       string `json:"clusterId"`
+	Group           string `json:"group"`
+	Version         string `json:"version"`
+	Resource        string `json:"resource"`
+	APIVersion      string `json:"apiVersion"`
+	Kind            string `json:"kind"`
+	Namespace       string `json:"namespace,omitempty"`
+	Name            string `json:"name"`
+	UID             string `json:"uid"`
+	ResourceVersion string `json:"resourceVersion"`
+	GeneratedAt     string `json:"generatedAt"`
+	// FieldManager는 항상 ResourceDryRunFieldManager입니다.
+	FieldManager string                `json:"fieldManager"`
+	Outcome      ResourceDryRunOutcome `json:"outcome"`
+	// RejectedBy는 Outcome이 rejected일 때만 채웁니다.
+	RejectedBy ResourceDryRunRejectedBy `json:"rejectedBy,omitempty"`
+	// Changes는 canonical 경로 오름차순으로 정렬한 뒤 상한까지만 담습니다.
+	Changes []ResourceDryRunChange `json:"changes"`
+	// ChangeCount는 절단 이전 전체 변경 수입니다. len(Changes)보다 클 수 있습니다.
+	ChangeCount int  `json:"changeCount"`
+	Truncated   bool `json:"truncated"`
+	// Warnings는 **서버가 직접 쓴 고정 문장**입니다. API 서버 Warning 헤더의
+	// 원문은 어떤 경우에도 여기 들어오지 않습니다 — admission webhook이 쓰는
+	// 그 문자열에는 대상 객체의 필드 값이나 정책 세부가 실려 올 수 있습니다.
+	// 경고가 있었다는 사실만 전달하고, 개수도 헤더에서 오지 않습니다.
+	Warnings   []string                  `json:"warnings"`
+	Violations []ResourceDryRunViolation `json:"violations"`
+	// Redacted는 정제로 비교에서 제외한 경로입니다. MaxDryRunRedacted개까지입니다.
+	Redacted []string `json:"redacted"`
 }
 
 /* ── Workload/Secret 관리 (ADR 0014, #32) ─────────────────────────────────

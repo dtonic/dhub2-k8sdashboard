@@ -378,6 +378,9 @@ export function ResourceExplorer() {
         detail={object.data}
         error={object.error}
         onClose={() => setParam("item", "")}
+        /* 검토 진입점은 **서버가 준 capability 하나**로만 결정됩니다. kind·verbs·
+           사용자 역할로 추론하지 않습니다. (ADR 0019 Phase 1) */
+        canReview={descriptor?.dryRun === true}
       />
     </>
   );

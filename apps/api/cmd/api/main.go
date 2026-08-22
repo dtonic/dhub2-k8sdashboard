@@ -40,6 +40,7 @@ import (
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/scope"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/stream"
 	"github.com/xenx96/k8s-dashboard/apps/api/internal/topologylayout"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 )
 
@@ -301,7 +302,48 @@ func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.
 	if err != nil {
 		return nil, err
 	}
-	clients, err := resourcecatalog.NewClients(restCfg, resourcecatalog.ClientOptions{
+	// 검토 대상은 **켰을 때만** 풉니다. deny는 이 helper 안에서 한 번만 적용되고,
+	// 여기서 나온 목록이 최종본입니다. (ADR 0019 Phase 1)
+	var dryRunAllow []schema.GroupVersionResource
+	if cfg.ResourceExplorer.DryRunEnabled {
+		dryRunAllow, err = cfg.ResourceDryRunAllowlist()
+		if err != nil {
+			return nil, err
+		}
+	}
+	clients, err := resourcecatalog.NewClients(restCfg, resourceClientOptions(cfg))
+	if err != nil {
+		return nil, err
+	}
+	service, err := resourcecatalog.New(clients, resourceServiceConfig(cfg, allowlist, dryRunAllow, logger))
+	if err != nil {
+		return nil, err
+	}
+	if err := service.Start(ctx); err != nil {
+		return nil, err
+	}
+	logger.Info("Resource Explorer 시작",
+		"resources", len(allowlist), "refresh", cfg.ResourceExplorer.Refresh.String(), "crds", cfg.ResourceExplorer.AllowCRDs,
+		"search", cfg.ResourceExplorer.SearchEnabled, "searchMaxBytes", cfg.ResourceExplorer.SearchMaxBytes,
+		"searchIncremental", cfg.ResourceExplorer.SearchIncremental,
+		// 검토 설정은 **개수와 숫자 상한만** 남깁니다. GVR 문자열·env 원문은 남기지 않습니다.
+		"dryRun", cfg.ResourceExplorer.DryRunEnabled, "dryRunResources", len(dryRunAllow),
+		"dryRunTimeout", cfg.ResourceExplorer.DryRunTimeout.String(),
+		"dryRunRate", cfg.ResourceExplorer.DryRunRate,
+		"dryRunBurst", cfg.ResourceExplorer.DryRunBurst,
+		"dryRunConcurrent", cfg.ResourceExplorer.DryRunConcurrent,
+		"dryRunMaxManifestBytes", cfg.ResourceExplorer.DryRunMaxManifestBytes,
+		"dryRunMaxObjectBytes", cfg.ResourceExplorer.DryRunMaxObjectBytes)
+	return service, nil
+}
+
+// resourceClientOptions는 설정을 Resource Explorer 클라이언트 상한으로 옮깁니다.
+//
+// 순수 함수입니다 — 배선이 맞는지는 클러스터 없이 확인할 수 있어야 합니다.
+// 검토 클라이언트는 DryRunEnabled일 때만 만들어지며, 상세 클라이언트와 rate·
+// timeout·본문 상한·UserAgent를 공유하지 않습니다.
+func resourceClientOptions(cfg config.Config) resourcecatalog.ClientOptions {
+	return resourcecatalog.ClientOptions{
 		QPS:            cfg.QPS,
 		Burst:          cfg.Burst,
 		DetailQPS:      float32(cfg.ResourceExplorer.DetailRate),
@@ -309,11 +351,27 @@ func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.
 		UserAgent:      "k8s-dashboard-resources",
 		MaxObjectBytes: int64(cfg.ResourceExplorer.MaxObjectBytes),
 		DetailTimeout:  cfg.ResourceExplorer.DetailTimeout,
-	})
-	if err != nil {
-		return nil, err
+
+		DryRunEnabled:        cfg.ResourceExplorer.DryRunEnabled,
+		DryRunQPS:            float32(cfg.ResourceExplorer.DryRunRate),
+		DryRunBurst:          cfg.ResourceExplorer.DryRunBurst,
+		DryRunTimeout:        cfg.ResourceExplorer.DryRunTimeout,
+		MaxDryRunObjectBytes: int64(cfg.ResourceExplorer.DryRunMaxObjectBytes),
 	}
-	service, err := resourcecatalog.New(clients, resourcecatalog.Config{
+}
+
+// resourceServiceConfig는 설정과 **이미 정규화된** 목록을 서비스 Config로 옮깁니다.
+//
+// dryRunAllow는 config helper가 deny까지 적용해 돌려준 최종본이므로 DryRunDeny는
+// nil입니다. deny를 여기서 다시 넘기면 두 곳에서 빼게 되고, 한쪽만 고쳤을 때
+// 조용한 우회가 생깁니다. core New의 nil-deny 재검증은 부분집합·hard-deny를 한 번
+// 더 확인하는 방어이지 필터링이 아닙니다.
+func resourceServiceConfig(
+	cfg config.Config,
+	allowlist, dryRunAllow []schema.GroupVersionResource,
+	logger *slog.Logger,
+) resourcecatalog.Config {
+	return resourcecatalog.Config{
 		ClusterID:        cfg.ClusterID,
 		Allowlist:        allowlist,
 		AllowCRDs:        cfg.ResourceExplorer.AllowCRDs,
@@ -330,19 +388,18 @@ func startResourceExplorer(ctx context.Context, logger *slog.Logger, cfg config.
 		// 전체 재구성으로 돌아갑니다(비파괴 롤백).
 		SearchIncremental:   cfg.ResourceExplorer.SearchIncremental,
 		MaxSearchIndexBytes: int64(cfg.ResourceExplorer.SearchMaxBytes),
-		Logger:              logger,
-	})
-	if err != nil {
-		return nil, err
+
+		DryRunEnabled:    cfg.ResourceExplorer.DryRunEnabled,
+		DryRunAllowlist:  dryRunAllow,
+		DryRunDeny:       nil,
+		DryRunTimeout:    cfg.ResourceExplorer.DryRunTimeout,
+		DryRunRate:       cfg.ResourceExplorer.DryRunRate,
+		DryRunBurst:      cfg.ResourceExplorer.DryRunBurst,
+		DryRunConcurrent: cfg.ResourceExplorer.DryRunConcurrent,
+		MaxManifestBytes: cfg.ResourceExplorer.DryRunMaxManifestBytes,
+
+		Logger: logger,
 	}
-	if err := service.Start(ctx); err != nil {
-		return nil, err
-	}
-	logger.Info("Resource Explorer 시작",
-		"resources", len(allowlist), "refresh", cfg.ResourceExplorer.Refresh.String(), "crds", cfg.ResourceExplorer.AllowCRDs,
-		"search", cfg.ResourceExplorer.SearchEnabled, "searchMaxBytes", cfg.ResourceExplorer.SearchMaxBytes,
-		"searchIncremental", cfg.ResourceExplorer.SearchIncremental)
-	return service, nil
 }
 
 func startDirectAlertPoller(parent context.Context, poller *stream.AlertPoller, logger *slog.Logger) func() {

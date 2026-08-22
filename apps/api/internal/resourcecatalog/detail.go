@@ -307,6 +307,18 @@ type ClientOptions struct {
 	DetailTimeout time.Duration
 	// DiscoveryTimeout은 discovery 조회 하나의 상한입니다.
 	DiscoveryTimeout time.Duration
+
+	// DryRunEnabled가 false면 **검토 클라이언트를 아예 만들지 않습니다.**
+	// Clients.DryRun이 nil로 남고 Service.DryRun은 ErrDryRunDisabled입니다.
+	// 기본값이 false이므로 기존 호출자·테스트는 그대로 동작합니다. (ADR 0019)
+	DryRunEnabled bool
+	// DryRunQPS/DryRunBurst는 검토 전용 client-side rate limit입니다.
+	DryRunQPS   float32
+	DryRunBurst int
+	// DryRunTimeout은 검토 HTTP 요청 하나의 상한입니다.
+	DryRunTimeout time.Duration
+	// MaxDryRunObjectBytes는 검토 응답 본문 상한입니다.
+	MaxDryRunObjectBytes int64
 }
 
 func (o *ClientOptions) setDefaults() {
@@ -333,6 +345,18 @@ func (o *ClientOptions) setDefaults() {
 	}
 	if o.DiscoveryTimeout <= 0 {
 		o.DiscoveryTimeout = 15 * time.Second
+	}
+	if o.DryRunQPS <= 0 {
+		o.DryRunQPS = float32(DefaultDryRunRate)
+	}
+	if o.DryRunBurst <= 0 {
+		o.DryRunBurst = DefaultDryRunBurst
+	}
+	if o.DryRunTimeout <= 0 {
+		o.DryRunTimeout = DefaultDryRunTimeout
+	}
+	if o.MaxDryRunObjectBytes <= 0 {
+		o.MaxDryRunObjectBytes = DefaultMaxObjectBytes
 	}
 }
 
@@ -383,7 +407,32 @@ func NewClients(base *rest.Config, o ClientOptions) (Clients, error) {
 	if err != nil {
 		return Clients{}, fmt.Errorf("dynamic 클라이언트 생성 실패: %w", err)
 	}
-	return Clients{Metadata: metaClient, Discovery: discClient, Dynamic: dynClient}, nil
+	out := Clients{Metadata: metaClient, Discovery: discClient, Dynamic: dynClient}
+
+	// 변경 검토 클라이언트는 **켰을 때만** 만듭니다. 끄면 nil로 남아 서비스가
+	// fail-closed로 답합니다 — 존재하지 않는 능력을 위해 커넥션 풀을 잡지 않습니다.
+	if o.DryRunEnabled {
+		dryCfg := rest.CopyConfig(base)
+		dryCfg.AcceptContentTypes, dryCfg.ContentType = "", ""
+		// UserAgent가 다른 것이 중요합니다 — API 서버 audit에서 검토 트래픽과
+		// 조회 트래픽을 구분할 수 있어야 합니다.
+		dryCfg.UserAgent = o.UserAgent + "-dryrun"
+		dryCfg.QPS, dryCfg.Burst = o.DryRunQPS, o.DryRunBurst
+		dryCfg.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(o.DryRunQPS, o.DryRunBurst)
+		dryCfg.Timeout = o.DryRunTimeout
+		dryMax := o.MaxDryRunObjectBytes
+		dryCfg.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+			// 순서가 계약입니다. warning 수집이 바깥이라, 본문 상한에 걸려 끊긴
+			// 응답에서도 admission 경고는 이미 헤더에서 건져집니다.
+			return &warningTransport{base: &limitedTransport{base: rt, max: dryMax}}
+		})
+		dryClient, dryErr := dynamic.NewForConfig(dryCfg)
+		if dryErr != nil {
+			return Clients{}, fmt.Errorf("dry-run 클라이언트 생성 실패: %w", dryErr)
+		}
+		out.DryRun = dryClient
+	}
+	return out, nil
 }
 
 /* ── metadata 전용 협상 ───────────────────────────────────────────────────

@@ -663,7 +663,83 @@ tr.is-selected td { background: var(--color-surface-selected); }
   white-space: pre; overflow: auto;
 }
 
+/* ── 상세 드로어 서브탭 · 변경 검토 (ADR 0019 Phase 1) ─────────────────────
+   역할 토큰만 씁니다. 상태는 색이 아니라 글리프·텍스트가 전달하므로 여기서는
+   배치와 여백만 정하고 forced-colors에서도 테두리가 남게 둡니다. */
+
+.resource-drawer__tabs { margin: var(--space-5) 0 0; }
+
+.resource-review { display: flex; flex-direction: column; gap: var(--space-4); margin: var(--space-4) 0 0; }
+.resource-review__disclaimer {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}
+.resource-review__glyph {
+  display: inline-grid; place-items: center;
+  width: 18px; height: 18px;
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  font: var(--weight-bold) var(--text-xs) / 1 var(--font-sans);
+  forced-color-adjust: none;
+}
+.resource-review__editor { display: flex; flex-direction: column; gap: var(--space-2); }
+.resource-review__label { font: var(--type-label); color: var(--color-text-muted); }
+.resource-review__textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-default);
+  border-radius: var(--radius-default);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  font: var(--type-code);
+  white-space: pre;
+  overflow: auto;
+}
+.resource-review__textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+.resource-review__actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3);
+}
+.resource-review__bytes { font: var(--type-meta); }
+
+.resource-review__result { display: flex; flex-direction: column; gap: var(--space-3); }
+.resource-review__outcome {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+  margin: 0;
+  font: var(--type-meta);
+  color: var(--color-text-primary);
+}
+.resource-review__rejected { color: var(--color-text-secondary); }
+.resource-review__count { margin: 0; }
+/* 종류 열은 짧은 라벨 하나뿐이라 좁게 둡니다. */
+.resource-review__op-heading { width: 5rem; }
+.resource-review__value { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1); }
+.resource-review__redacted-value { font: var(--type-meta); color: var(--color-text-muted); }
+.resource-review__truncated { font: var(--type-meta); color: var(--color-text-muted); }
+
+.resource-review__list { display: flex; flex-direction: column; gap: var(--space-2); }
+.resource-review__list-title { font: var(--type-label); color: var(--color-text-muted); margin: 0; }
+.resource-review__list ul { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.resource-review__list li {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+  font: var(--type-meta);
+  color: var(--color-text-secondary);
+}
+.resource-review__redacted { margin: 0; font: var(--type-meta); }
+
 @media (max-width: 900px) {
   .resource-filters { flex-direction: column; align-items: stretch; }
   .resource-drawer { max-height: 94vh; padding: var(--space-4); }
+  /* 좁은 화면에서도 편집기와 결과가 함께 보이도록 편집기 높이를 줄입니다. */
+  .resource-review__textarea { min-height: 160px; }
+  .resource-review__actions { align-items: stretch; }
 }

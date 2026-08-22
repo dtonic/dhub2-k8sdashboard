@@ -205,6 +205,9 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/recent", s.handleResourceRecent)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}", s.handleResourceList)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object", s.handleResourceDetail)
+	// 변경 검토(ADR 0019 Phase 1). 상세 경계 **아래**의 POST 하나뿐이고,
+	// 적용·삭제·생성 라우트는 없습니다.
+	m.HandleFunc("POST /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run", s.handleResourceDryRun)
 	m.HandleFunc("GET /api/v1/clusters/{clusterId}/events/stream", s.handleEventStream)
 }
 
@@ -494,6 +497,8 @@ func routeName(mux *http.ServeMux, r *http.Request) string {
 		return "resource_list"
 	case "GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object":
 		return "resource_detail"
+	case "POST /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run":
+		return "resource_dryrun"
 	case "GET /api/v1/clusters/{clusterId}/resources/search":
 		return "resource_search"
 	case "GET /api/v1/clusters/{clusterId}/resources/recent":

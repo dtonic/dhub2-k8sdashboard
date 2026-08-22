@@ -70,6 +70,27 @@
             "timeout": {"type": "string", "pattern": "^([1-9][0-9]{0,4}(ms|s))$"},
             "maxObjectBytes": {"type": "integer", "minimum": 4096, "maximum": 16777216}
           }
+        },
+        "dryRun": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "resources", "denyResources", "timeout", "rate", "burst", "concurrent", "maxManifestBytes", "maxObjectBytes"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "resources": {
+              "type": "array", "maxItems": 64, "uniqueItems": true,
+              "items": {"type": "string", "maxLength": 320, "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?$"}
+            },
+            "denyResources": {
+              "type": "array", "maxItems": 64, "uniqueItems": true,
+              "items": {"type": "string", "maxLength": 320, "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?/[a-z]([-a-z0-9]*[a-z0-9])?$"}
+            },
+            "timeout": {"type": "string", "pattern": "^([1-9][0-9]{0,4}(ms|s))$"},
+            "rate": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+            "burst": {"type": "integer", "minimum": 1, "maximum": 20},
+            "concurrent": {"type": "integer", "minimum": 1, "maximum": 4},
+            "maxManifestBytes": {"type": "integer", "minimum": 4096, "maximum": 1048576},
+            "maxObjectBytes": {"type": "integer", "minimum": 4096, "maximum": 1048576}
+          }
         }
       }
     },

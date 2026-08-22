@@ -1079,6 +1079,86 @@ paths:
           $ref: "#/components/responses/ResourceUnavailable"
         "504":
           $ref: "#/components/responses/ResourceTimeout"
+  /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run:
+    post:
+      operationId: dryRunClusterResourceObject
+      summary: "선택한 항목에 변경을 적용하면 무엇이 달라지는지 검토 (적용하지 않음)"
+      description: >-
+        서버가 dryRun=All 서버사이드 apply를 **한 번** 수행하고, 정제된 구조 diff와
+        검증/admission 결과만 돌려줍니다. 저장은 일어나지 않습니다.
+
+        권한 근거는 Resource Explorer와 같습니다(platform.admin 또는 AUTH_MODE=none).
+        사용자별 Kubernetes RBAC·SubjectAccessReview·impersonation은 쓰지 않습니다.
+
+        Scope는 서버가 강제합니다 — namespaced 리소스는 본문 namespace가 필수이고
+        권한 밖이면 403, cluster 범위 리소스는 namespace를 지정할 수 없고 클러스터
+        전체 권한이 필요합니다. 본문의 apiVersion·kind·name·uid·resourceVersion은
+        경로 GVR·매니페스트·실제 객체와 모두 대조됩니다.
+
+        요청 본문은 알려진 필드만 담은 JSON 객체 **하나**입니다. 최상위 null·배열·
+        스칼라, 두 번째 JSON 값, 꼬리 문자는 모두 400입니다.
+
+        크기 상한은 **두 겹**이고 걸리는 시점이 다릅니다.
+        (1) HTTP 봉투 상한 = 배포가 설정한 manifest 바이트 상한 + 고정 여유분이며,
+        JSON 디코드 **도중**에 읽기를 끊습니다. (2) 디코드된 manifest 문자열은 그
+        설정 상한만으로 서버가 다시 검사하며, YAML/JSON manifest 파싱 **전에**
+        걸립니다.
+
+        둘 중 어느 쪽이든 413이고, 그때 manifest 파서는 호출되지 않으며 매니페스트
+        원문은 오류에 담기지 않습니다. (봉투 상한은 JSON 디코드 도중에 걸리므로
+        요청 본문 일부는 이미 디코드된 상태일 수 있습니다.)
+
+        적용·삭제·생성·change token·force는 이 경로에 없습니다.
+      parameters:
+        - $ref: "#/components/parameters/ClusterId"
+        - $ref: "#/components/parameters/ResourceGroup"
+        - $ref: "#/components/parameters/ResourceVersion"
+        - $ref: "#/components/parameters/ResourcePlural"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResourceDryRunRequest"
+      responses:
+        "200":
+          description: >-
+            ResourceDryRunResponse. outcome이 rejected여도 200입니다 — 검토가
+            성공적으로 끝났고 그 답이 거절이라는 뜻이며, 요청·신원·정책 실패(4xx)와
+            다릅니다.
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceDryRunResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "409":
+          $ref: "#/components/responses/ResourceConflict"
+        "413":
+          $ref: "#/components/responses/ResourceManifestTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ResourceRateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/ResourceUpstream"
+        "503":
+          $ref: "#/components/responses/ResourceUnavailable"
+        "504":
+          $ref: "#/components/responses/ResourceTimeout"
   /api/v1/clusters/{clusterId}/events/stream:
     get:
       operationId: streamClusterEvents
@@ -1452,9 +1532,30 @@ components:
         X-Request-ID:
           $ref: "#/components/headers/XRequestID"
         Allow:
-          description: 허용 메서드 (전 라우트 GET)
+          description: >-
+            이 경로가 허용하는 메서드 토큰 목록(쉼표로 구분). 경로마다 다릅니다 —
+            대부분은 GET이고, 변경 검토처럼 POST만 받는 경로도 있습니다.
           schema:
             type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    UnsupportedMediaType:
+      description: >-
+        요청 본문의 Content-Type이 application/json이 아닙니다(코드
+        unsupported_media_type). 누락·파싱 불가·다른 media type이 모두 여기입니다.
+        charset 같은 파라미터는 허용합니다.
+
+        본문을 읽기 전에 판정하므로 매니페스트는 파싱되지 않고, Content-Type 원문도
+        요청 본문도 오류에 담기지 않습니다.
+
+        JSON 본문을 받는 경로에만 붙습니다 — 검사하지 않으면 text/plain이나 form
+        인코딩으로도 같은 요청이 통과하고, 그 순간 브라우저의 simple cross-origin
+        요청 표면에 들어갑니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
       content:
         application/json:
           schema:
@@ -1528,6 +1629,21 @@ components:
             $ref: "#/components/schemas/APIError"
     ResourceTimeout:
       description: 클러스터 응답이 상세 조회 timeout을 넘었습니다.
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/XRequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+    ResourceManifestTooLarge:
+      description: >-
+        검토 요청이 크기 상한을 넘었습니다. 두 겹 중 어느 쪽이든 이 응답입니다 —
+        HTTP 봉투 상한(설정된 manifest 바이트 상한 + 고정 여유분, JSON 디코드
+        도중에 적용)이거나, 디코드된 manifest 문자열의 설정 상한(YAML/JSON manifest
+        파싱 전에 적용)입니다. 서버는 절대 상한 1MiB 이하에서 더 낮은 값을 강제할 수
+        있습니다. 어느 경우에도 manifest 파서는 호출되지 않고 매니페스트 원문은
+        오류에 담기지 않습니다.
       headers:
         X-Request-ID:
           $ref: "#/components/headers/XRequestID"
@@ -1686,6 +1802,16 @@ components:
             - upstream_timeout
             - search_unavailable
             - invalid_query
+            # 변경 검토 dry-run (ADR 0019 Phase 1). 쓰기 코드가 아닙니다 —
+            # 모두 "검토 요청 자체가 성립하지 않았다"는 사유입니다.
+            - dryrun_unavailable
+            - dryrun_resource_denied
+            - dryrun_rate_limited
+            - dryrun_forbidden
+            - invalid_manifest
+            - manifest_mismatch
+            - manifest_too_large
+            - resource_version_mismatch
         message:
           type: string
         requestId:
@@ -1773,6 +1899,13 @@ components:
         state: {$ref: "#/components/schemas/ResourceState"}
         reason: {type: string}
         count: {type: integer, minimum: 0}
+        dryRun:
+          type: boolean
+          description: >-
+            이 GVR에 변경 검토(dry-run)를 요청할 수 있는지. **권한이 아니라 배포
+            설정**입니다 — 기능 스위치가 켜져 있고, 이 GVR이 명시적 opt-in 목록에
+            있으며, hard-deny에 걸리지 않을 때만 true입니다. 없으면 false로 읽습니다.
+            UI는 이 값이 false면 검토 진입점을 만들지 않습니다.
     ResourceCatalogResponse:
       type: object
       additionalProperties: false
@@ -1946,6 +2079,224 @@ components:
           type: array
           maxItems: 20
           items: {$ref: "#/components/schemas/ResourceRecentItem"}
+    # ── 변경 검토 dry-run (ADR 0019 Phase 1) ────────────────────────────────
+    #
+    # 정본 경로: POST /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run
+    # paths 스탠자는 라우트 등록과 같은 변경에서 추가합니다 — openapi와 라우터는
+    # 양방향으로 대조되므로(TestOpenAPIMatchesRouter) 한쪽만 먼저 넣을 수 없습니다.
+    #
+    # 이 계약이 고정하는 불변조건
+    #   1. 본문의 apiVersion·kind·namespace·name·uid·resourceVersion을 선택한 GVR,
+    #      매니페스트 내용, 서버가 강제 삽입한 Scope와 **전부** 대조합니다.
+    #      하나라도 어긋나면 Kubernetes로 나가기 전에 4xx입니다.
+    #   2. Secret과 serviceaccounts는 **설정과 무관하게** 거부합니다. 그 밖의
+    #      hard-deny 목록과 미등록 GVR도 fail-closed입니다(403).
+    #   3. 매니페스트는 YAML/JSON **단일 문서**이며 중복 키를 거부합니다.
+    #   4. raw 매니페스트는 브라우저→BFF 요청 본문에만 존재합니다. 응답·오류·로그
+    #      어디에도 되울리지 않습니다 — 그래서 응답에 yaml/manifest/object 필드가
+    #      없고, 오류는 APIError(code·message·requestId)뿐입니다.
+    #   5. 현재본과 dry-run 결과 **양쪽 모두** status·managedFields·휘발성 metadata·
+    #      민감 annotation과 값을 제거한 뒤 유계·결정적 diff를 만듭니다.
+    #   6. Kubernetes Status 원문(reason·details·causes·code)은 노출하지 않습니다.
+    #      violations는 서버가 재작성한 필드·메시지·소유 manager뿐입니다.
+    #   7. central 모드·기능 비활성·capability 없음은 전부 fail-closed입니다.
+    #   8. live GET에서 UID·resourceVersion을 재검증하고, patch 본문에도 서버가
+    #      identity/CAS를 실어 API 서버가 한 번 더 강제하며, 응답 객체의 UID가
+    #      다르면 결과를 버립니다.
+    #
+    # apply·delete·change token·force·generic write proxy는 **Phase 1 범위에
+    # 없습니다(deferred)** — ADR 0019 결정 4·5·6은 착수하지 않았고 기존 write
+    # 라우트는 그대로 보존됩니다. 뒤 단계에서 되살릴지는 별도 ADR의 결정이며,
+    # 여기서 고정하는 것은 "이 dry-run 계약 안에는 그 필드가 없다"까지입니다.
+    ResourceDryRunRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        검토할 대상 하나와 그 대상의 apply configuration입니다. 동사·force·token은
+        없습니다 — 서버가 항상 dryRun=All 서버사이드 apply 하나만 수행합니다.
+      required: [apiVersion, kind, name, uid, resourceVersion, manifest]
+      properties:
+        apiVersion:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: 경로 GVR·매니페스트와 정확히 일치해야 합니다.
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: 경로 GVR의 Kind·매니페스트와 정확히 일치해야 합니다.
+        namespace:
+          type: string
+          maxLength: 63
+          description: >-
+            namespaced 리소스에서 필수이고 cluster 범위에서는 비어 있어야 합니다.
+            값은 힌트가 아니라 대조 대상입니다 — 서버 Scope 밖이면 403입니다.
+        name: {type: string, minLength: 1, maxLength: 253}
+        uid:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 목록에서 본 객체의 UID. 다르면 409이며 Kubernetes로 나가지 않습니다.
+        resourceVersion:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            상세에서 본 resourceVersion. 서버가 live GET 결과와 대조하고 patch
+            본문에도 실어 API 서버의 낙관적 동시성 검사를 함께 겁니다.
+        manifest:
+          type: string
+          minLength: 1
+          maxLength: 1048576
+          description: >-
+            YAML 또는 JSON **단일 문서**. 다중 문서와 중복 키는 거절합니다.
+            여기 적힌 1MiB는 계약의 절대 상한이고 배포 기본값은 256KiB입니다.
+            디코드된 이 문자열의 바이트 수는 배포가 설정한 상한으로 서버가 따로
+            검사하며, 넘으면 YAML/JSON manifest 파싱 전에 413입니다. 그보다 앞서
+            HTTP 봉투 상한(이 상한 + 고정 여유분)이 JSON 디코드 도중에 읽기를
+            끊습니다. 이 문자열은 요청 본문에만 존재하며 응답·오류·로그로
+            되돌아가지 않습니다.
+    ResourceDryRunChangeOp:
+      type: string
+      description: 변경 종류. 색이 아니라 텍스트로 함께 표시합니다.
+      enum: [added, removed, changed]
+    ResourceDryRunChange:
+      type: object
+      additionalProperties: false
+      description: >-
+        정제된 현재본과 정제된 dry-run 결과의 leaf 단위 차이 하나입니다.
+        정제로 값이 제거된 경로는 valueRedacted로만 나타나고 값을 싣지 않습니다.
+      required: [path, op]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: 'canonical 경로. 배열은 name 키 또는 인덱스입니다: spec.template.spec.containers[api].image'
+        op: {$ref: "#/components/schemas/ResourceDryRunChangeOp"}
+        before: {type: string, maxLength: 512}
+        after: {type: string, maxLength: 512}
+        valueRedacted:
+          type: boolean
+          description: >-
+            서버 정제 정책이 값 비교에서 뺀 경로. 바뀌었다는 사실만 알리고 before·after를
+            싣지 않습니다.
+        valueTruncated: {type: boolean, description: 값이 512바이트에서 잘렸는지.}
+    ResourceDryRunViolation:
+      type: object
+      additionalProperties: false
+      description: >-
+        검토가 거절된 사유 하나입니다. Kubernetes Status 원문(message·reason·details·
+        causes[].field·causes[].message·code)은 **어느 필드로도 나가지 않습니다.**
+        서버는 Causes에서 개수와 타입만 읽고, 사용자에게는 자신이 쓴 고정 문장만
+        보여 줍니다.
+      required: [message]
+      properties:
+        field:
+          type: string
+          maxLength: 512
+          description: >-
+            거절된 필드 경로. **Phase 1에서는 언제나 비어 있습니다** —
+            Causes[].field는 구조적으로 보이지만 서버(특히 admission webhook)가
+            자유롭게 채우는 문자열이라 객체 값·내부 경로가 실려 올 수 있습니다.
+        message:
+          type: string
+          maxLength: 512
+          description: 서버가 쓴 고정 문장입니다. upstream 문자열이 아닙니다.
+        manager:
+          type: string
+          maxLength: 128
+          description: >-
+            그 필드를 소유한 fieldManager. **Phase 1에서는 언제나 비어 있습니다** —
+            소유자 이름이 전용 필드로 오지 않고 사람이 읽는 메시지 안에 섞여 오기
+            때문입니다. field·manager 모두 신뢰할 수 있는 타입 필드가 생기면 채웁니다.
+    ResourceDryRunOutcome:
+      type: string
+      description: >-
+        검토 결과. rejected는 "검토가 성공적으로 끝났고 그 답이 거절"이라는 뜻이며,
+        요청·신원·정책 실패(4xx)와 다릅니다.
+      enum: [unchanged, changed, rejected]
+    ResourceDryRunRejectedBy:
+      type: string
+      description: >-
+        validation은 Strict 필드 검증, admission은 webhook 거절, conflict는 서버사이드
+        apply 필드 소유권 충돌입니다. force는 어떤 경우에도 지원하지 않습니다.
+      enum: [validation, admission, conflict]
+    ResourceDryRunResponse:
+      type: object
+      additionalProperties: false
+      description: >-
+        유계·결정적 구조 diff와 검증/admission 결과뿐입니다. 매니페스트 원문,
+        dry-run이 돌려준 객체, Secret 값, Kubernetes Status 원문은 들어가지 않습니다.
+      x-max-response-bytes: 262144
+      required:
+        [clusterId, group, version, resource, apiVersion, kind, name, uid,
+         resourceVersion, generatedAt, fieldManager, outcome, changes,
+         changeCount, truncated, warnings, violations, redacted]
+      properties:
+        clusterId: {type: string, minLength: 1}
+        group: {type: string, minLength: 1, description: 'core group은 "core"로 표기합니다.'}
+        version: {type: string, minLength: 1}
+        resource: {type: string, minLength: 1}
+        apiVersion: {type: string, minLength: 1}
+        kind: {type: string, minLength: 1}
+        namespace: {type: string}
+        name: {type: string, minLength: 1}
+        uid:
+          type: string
+          minLength: 1
+          description: >-
+            live GET과 dry-run 응답 양쪽에서 확인한 UID입니다. 요청 값과 다르면
+            응답이 되지 못하고 409입니다.
+        resourceVersion:
+          type: string
+          minLength: 1
+          description: 검토 기준이 된 현재 resourceVersion입니다.
+        generatedAt: {type: string, format: date-time}
+        fieldManager:
+          type: string
+          const: k8s-dashboard-dryrun
+          description: >-
+            고정 fieldManager입니다. 계약이 상수로 못박아 배포마다 달라지거나 다른
+            manager를 사칭할 수 없게 합니다.
+        outcome: {$ref: "#/components/schemas/ResourceDryRunOutcome"}
+        rejectedBy: {$ref: "#/components/schemas/ResourceDryRunRejectedBy"}
+        changes:
+          type: array
+          maxItems: 200
+          description: >-
+            canonical 경로 오름차순으로 정렬한 뒤 앞에서부터 상한까지만 담습니다.
+            같은 정제 diff 집합은 항상 같은 순서의 changes를 냅니다. (응답 전체는
+            generatedAt 때문에 바이트가 달라집니다 — 결정적인 것은 changes 순서입니다.)
+          items: {$ref: "#/components/schemas/ResourceDryRunChange"}
+        changeCount:
+          type: integer
+          minimum: 0
+          description: 절단 이전 전체 변경 수. changes 길이보다 클 수 있습니다.
+        truncated: {type: boolean, description: 상한으로 changes를 잘랐는지.}
+        warnings:
+          type: array
+          maxItems: 32
+          description: >-
+            **서버가 직접 쓴 고정 문장**입니다. API 서버 Warning 헤더의 원문은
+            어떤 경우에도 들어오지 않습니다 — admission webhook이 쓰는 그 문자열에는
+            대상 객체의 필드 값이나 정책 세부가 실려 올 수 있습니다. 경고가 있었다는
+            사실만 전달하며, 개수도 헤더에서 오지 않습니다.
+          items: {type: string, maxLength: 512}
+        violations:
+          type: array
+          maxItems: 32
+          items: {$ref: "#/components/schemas/ResourceDryRunViolation"}
+        redacted:
+          type: array
+          uniqueItems: true
+          maxItems: 64
+          description: >-
+            정제로 비교에서 제외한 경로. 가려졌다는 사실은 보이게 합니다.
+            경로 수와 길이 모두 유계입니다 — 정제 목록이 응답 상한을 밀어내면
+            안 됩니다.
+          items: {type: string, minLength: 1, maxLength: 512}
     AuthSessionResponse:
       oneOf:
         - type: object

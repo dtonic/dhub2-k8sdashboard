@@ -160,6 +160,38 @@ Helm에서는 `resourceExplorer.*` 값 하나가 **API allowlist와 ServiceAccou
 `core/v1/secrets`는 chart 기본 목록에 없습니다 — 추가하면 Explorer가 Secret **메타데이터**를
 보여주지만 SA에 secrets list/watch 권한이 함께 붙으므로 그 영향을 감수할 때만 넣습니다.
 
+### 변경 검토 dry-run 설정 (ADR 0019 Phase 1 · Issue #7)
+
+Resource Explorer 안의 **두 번째** opt-in입니다. `RESOURCE_EXPLORER_ENABLED=true`와
+`RESOURCE_EXPLORER_DRY_RUN_ENABLED=true`가 **둘 다** 있어야 열리고, Explorer 없이 검토만
+켜면 `Config.Validate()`가 기동을 막습니다. `CLUSTER_STATE_MODE=direct` 전용입니다.
+
+| 환경변수 | 기본값 | 설명 |
+|---|---|---|
+| `RESOURCE_EXPLORER_DRY_RUN_ENABLED` | `false` | 기능 opt-in. boolean이 아니면 기동 실패입니다. **이 값이 롤백 스위치입니다** — 라우트는 `server.go`가 정적으로 등록하므로 사라지지 않고, Explorer가 살아 있는 배포에서 검토 엔드포인트는 고정 503 `dryrun_unavailable`을 돌려줍니다. 카탈로그의 `dryRun` capability가 false가 되어 UI 탭은 나타나지 않고 Explorer 조회는 그대로입니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_RESOURCES` | (비움) | 검토를 허용할 `group/version/resource` CSV. **`RESOURCE_EXPLORER_RESOURCES`의 부분집합**이어야 합니다. 입력 목록과 deny를 뺀 최종 목록 모두 64개가 상한이며, 켠 상태에서 목록이 비어 있거나 deny 적용 후 최종 0개면 기동 실패입니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_DENY_RESOURCES` | (비움) | 위 목록에서 다시 빼는 GVR. 다시 그 목록의 부분집합이어야 합니다 — 밖의 항목은 오타로 봅니다. deny는 서버가 **정확히 한 번** 적용하고, 최종 목록이 0개면 기동 실패입니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_TIMEOUT` | `8s` | 검토 한 건(live GET + dry-run patch)의 상한(0 초과 30s 이하) |
+| `RESOURCE_EXPLORER_DRY_RUN_RATE` / `_BURST` | `1` / `3` | 검토 전용 token bucket. rate는 0 초과 10 이하의 유한값, burst는 1..20입니다. 상세 조회 예산과 공유하지 않습니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_CONCURRENT` | `1` | 검토 동시 실행 상한(1..4). 초과는 대기가 아니라 429입니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_MAX_MANIFEST_BYTES` | `262144` | 매니페스트 바이트 상한(4096..1048576). **파싱 전에** 적용합니다 |
+| `RESOURCE_EXPLORER_DRY_RUN_MAX_OBJECT_BYTES` | `1048576` | 검토 전용 클라이언트의 응답 본문 상한(4096..1048576). 상세 조회 상한과 별개입니다 |
+
+상한을 벗어나면 조용히 clamp하지 않고 기동이 실패합니다.
+
+**설정으로 뚫을 수 없는 거부** — core `secrets`·`serviceaccounts`·`nodes`·`namespaces`,
+`rbac.authorization.k8s.io` **group 전체**, `apiextensions.k8s.io/customresourcedefinitions`
+**이 하나**. 버전과 무관하며, opt-in 목록에 적으면 조용히 빠지는 대신 기동이 실패합니다.
+이보다 넓히지 않습니다.
+
+권한 게이트는 Explorer와 **같은 `CanExploreResources`**(정확히 `platform.admin`, 또는
+개발·데모용 `AUTH_MODE=none`)입니다. 사용자별 SubjectAccessReview·impersonation은 없습니다.
+
+바로 위 문단의 `get`/`list`/`watch` 서술은 **조회 allowlist**에 대한 것입니다. 검토를 켜면
+그와 별개로 deny를 뺀 최종 목록에만 `get`·`patch` 두 verb가 붙습니다 — API 서버가
+`dryRun=All` 서버사이드 apply를 patch로 인가하기 때문이며 저장은 일어나지 않습니다.
+`create`·`update`·`delete`·`deletecollection`·`*`는 어떤 경우에도 붙지 않습니다.
+
 ### 실어댑터가 지키는 규칙
 
 - **질의는 등록형 쿼리 카탈로그에서만 나옵니다.** 프런트는 패널 id·검색어만 보낼 수
@@ -238,6 +270,7 @@ GET /api/v1/clusters/{clusterId}/resources/search?q=&cursor=&limit=          (�
 GET /api/v1/clusters/{clusterId}/resources/recent?ref=&ref=…                 (최근 항목 재해석 · ADR 0023)
 GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}      (목록 · cursor 페이징)
 GET /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object?namespace=&name=&uid=
+POST /api/v1/clusters/{clusterId}/resources/{group}/{version}/{resource}/object/dry-run      (변경 검토 · ADR 0019 Phase 1)
 GET /api/v1/clusters/{clusterId}/events/stream        (SSE · #12)
 GET /healthz   GET /readyz   GET /version   GET /metrics
 ```
@@ -300,6 +333,43 @@ go build -ldflags "-X main.version=v1.2.3 -X main.commit=abc1234 -X main.buildDa
 - **central 모드는 명시적으로 사용할 수 없습니다.** 서비스를 만들지 않고, 세 경로는
   권한 판정이 끝난 뒤 안정적으로 503 `resources_unavailable`을 돌려줍니다.
   빈 카탈로그를 흉내 내지 않습니다.
+
+### 변경 검토 dry-run (ADR 0019 Phase 1 · Issue #7)
+
+`POST …/object/dry-run` 하나입니다. Phase 1은 **준비·diff·검증 검토 전용**이고 영구
+apply·create·delete·change token·force를 제공하지 않습니다. 기존 Deployment/Secret 관리
+write 경로(ADR 0014)는 이것과 별개이며 바뀌거나 없어지지 않습니다.
+
+이 경로는 Issue #7 / ADR 0019 Phase 1이 승인한 **유계 요청 경로 Kubernetes 예외**입니다.
+상세 live GET과도 client·rate·timeout·본문 상한을 공유하지 않습니다.
+
+- **Content-Type은 JSON만**입니다(아니면 415). 본문은 대상 하나와 유계 YAML/JSON **단일
+  문서** 매니페스트 1건이고, 요청 봉투 상한은 설정된 매니페스트 상한 + 65536바이트입니다.
+- **(1)~(8)에서 걸리면 Kubernetes 요청이 0회입니다.** 기능 가용성 → hard-deny와 opt-in
+  목록 → 카탈로그 state 및 `get`·`patch` verb → 신원 문자열 형식 → 바이트 상한(파싱 전) →
+  단일 문서·중복 키·anchor/alias 거부 파싱 → 본문↔요청↔경로 대조 → 로컬 metadata 인덱스
+  UID 게이트. 지어낸 이름·UID로는 API 서버로 나가는 요청 자체가 없습니다.
+- **쓰기 동사는 하나뿐입니다.** live GET으로 UID와 resourceVersion을 다시 확인한 뒤
+  `dryRun=All`·`fieldValidation=Strict`·고정 fieldManager `k8s-dashboard-dryrun`으로
+  서버사이드 apply를 한 번 보냅니다. `force`는 설정하지 않고 subresource도 넘기지 않습니다.
+  patch 본문에는 서버가 신원과 CAS를 덮어써서 실으므로 API 서버가 우리와 독립적으로 한 번
+  더 강제합니다. 응답 객체의 UID가 다르면 diff를 버리고 409입니다. 저장은 없습니다.
+- **정제된 것만 나갑니다.** 현재본과 dry-run 결과 **양쪽**에서 status·managedFields·휘발성
+  metadata·민감 annotation과 값을 제거한 뒤 결정적 diff를 만듭니다. 매니페스트 원문·dry-run
+  객체·Kubernetes Status 원문(reason·details·causes[].field·causes[].message)·Warning 헤더
+  원문은 응답·오류·감사 로그 어디에도 없습니다. `violations[].message`는 서버가 쓴 고정
+  문장이고 `field`·`manager`는 Phase 1에서 항상 비어 있습니다. 경고도 "경고가 있었다"는
+  서버 문장 하나이며 개수가 헤더에서 오지 않습니다.
+- **거절은 오류가 아니라 값입니다.** `outcome`은 `unchanged`·`changed`·`rejected`이고,
+  `rejected`는 "검토가 끝났고 그 답이 거절"이라 요청·신원·정책 실패(4xx)와 다릅니다.
+  `rejectedBy`는 `validation`·`admission`·`conflict`입니다.
+- 상한: 변경 항목 200개(`changeCount`는 절단 전 전체 수이고 `truncated`로 알립니다),
+  값 512바이트(`valueTruncated`), 경고 32, violation 32, `redacted` 64, 응답 본문
+  262144바이트. 표현할 수 없는 diff를 잘라서 성공으로 내보내지 않습니다.
+- 카탈로그의 `descriptor.dryRun`은 **권한이 아니라 배포 능력**입니다 — 기능 스위치·opt-in
+  목록·hard-deny·`ready` 상태·`get`/`patch` 제공을 모두 통과할 때만 true입니다.
+
+이 이슈에서 확인한 게이트는 `make api-vet` · `make api-test` · `make api-build`입니다.
 
 ### 전역 검색과 최근 항목 (ADR 0023)
 

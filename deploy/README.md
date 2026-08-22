@@ -112,6 +112,47 @@ api:
 않습니다. Explorer 전체를 끄는 스위치는 기존 `resourceExplorer.enabled`이며 ServiceAccount
 권한까지 함께 사라집니다. **이 변경은 RBAC·ServiceAccount·NetworkPolicy를 바꾸지 않습니다.**
 
+## 변경 검토 dry-run (ADR 0019 Phase 1 · Issue #7)
+
+Explorer 위의 **두 번째** opt-in입니다. `resourceExplorer.enabled=true`와
+`resourceExplorer.dryRun.enabled=true`가 둘 다 있어야 열립니다. 기본은 둘 다 `false`이고
+disabled 렌더는 기존 매니페스트와 **정확히 같습니다**. `clusterState.mode=central` 조합은
+렌더 단계에서 거부합니다.
+
+Phase 1은 **검토 전용**입니다 — 영구 apply·create·delete·change token·force가 없고, 기존
+`manageWorkloads`의 Deployment/Secret write 경로는 이것과 별개이며 바뀌지 않습니다.
+
+| 값 | 기본값 | 계약 |
+|---|---|---|
+| `resourceExplorer.dryRun.enabled` | `false` | 롤백 스위치 |
+| `resourceExplorer.dryRun.resources` | `[]` | 검토 대상 GVR. **비어 있으면 렌더 실패**이며 `resourceExplorer.resources`의 부분집합이어야 합니다. 입력 배열은 schema가 64개(`maxItems`)로, deny를 뺀 최종 목록은 API가 1..64로 제한합니다 |
+| `resourceExplorer.dryRun.denyResources` | `[]` | 위 목록에서 다시 빼는 GVR. 그 목록의 부분집합이어야 하고, deny로 전부 빠지면 렌더 실패 |
+| `resourceExplorer.dryRun.timeout` | `8s` | 0 초과 30s 이하. 단위·0 오류는 렌더가 막고, 30s 초과는 API 기동에서 걸립니다 |
+| `resourceExplorer.dryRun.rate` / `.burst` | `1` / `3` | rate는 0 초과 10 이하, burst는 1..20 |
+| `resourceExplorer.dryRun.concurrent` | `1` | 1..4 |
+| `resourceExplorer.dryRun.maxManifestBytes` | `262144` | 4096..1048576 |
+| `resourceExplorer.dryRun.maxObjectBytes` | `1048576` | 4096..1048576 |
+
+**설정으로 뚫을 수 없는 거부** — core Secret·ServiceAccount·Node·Namespace,
+`rbac.authorization.k8s.io` group 전체, `apiextensions.k8s.io/customresourcedefinitions`
+이 하나. 목록에 적으면 조용히 빠지는 대신 **렌더가 실패**합니다.
+
+ConfigMap은 `resources`와 `denyResources`를 **원본 그대로** env로 내보내고 deny 정규화는
+API가 한 번만 수행합니다. **RBAC만** deny를 뺀 최종 목록을 계산해 그 group/resource에
+`["get", "patch"]` 두 verb를 붙입니다 — `create`·`update`·`delete`·`deletecollection`·`*`는
+어떤 경우에도 붙지 않습니다. API 서버가 `dryRun=All` 서버사이드 apply를 patch로 인가하기
+때문이며 저장은 일어나지 않습니다. 이는 대시보드 ServiceAccount의 권한이고 사용자별
+RBAC·SubjectAccessReview·impersonation은 없습니다. 화면 노출은 Explorer와 같은 관리자
+권한(`platform.admin`, 또는 개발·데모용 `AUTH_MODE=none`)에서만 열립니다.
+
+**롤백** — `resourceExplorer.dryRun.enabled=false` 한 줄이면 9개 env, 추가된 RBAC 규칙,
+UI의 검토 탭이 함께 사라지고 **Explorer 조회는 그대로**입니다. Explorer 전체를 끄는
+스위치는 기존 `resourceExplorer.enabled`입니다.
+
+렌더 전용 검증은 `make deploy-check`입니다 — disabled 렌더의 무차이, 이중 opt-in·부분집합·
+영구 거부·수치 경계의 렌더 실패, 켠 렌더의 env 9개와 최종 RBAC 구조를 확인합니다. 실제
+cluster apply나 rollback은 수행하지 않습니다.
+
 ## NetworkPolicy 제한
 
 기본 deny 후 UI→API, API→Kubernetes API/Redis/선언된 데이터소스, DNS만 엽니다. Ingress는 UI
