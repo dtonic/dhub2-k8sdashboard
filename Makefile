@@ -9,7 +9,7 @@ install:            ## 의존성 설치
 install-ci:         ## Lockfile-exact clean install for CI
 	npm install --global npm@12.0.2
 	test "$$(npm --version)" = "12.0.2"
-	( cd "$$(npm root --global)/npm" && npm pkg delete devDependencies && npm install --ignore-scripts --omit=dev --no-save brace-expansion@5.0.9 ip-address@10.3.1 )
+	( cd "$$(npm root --global)/npm" && npm pkg delete devDependencies && npm install --ignore-scripts --omit=dev --no-save brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 )
 	node scripts/quality/check-npm-toolchain.mjs
 	npm ci --ignore-scripts
 

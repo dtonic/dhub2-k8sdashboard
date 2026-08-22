@@ -7,6 +7,7 @@ const EXPECTED_NPM = "12.0.2";
 const EXPECTED = new Map([
   ["brace-expansion", "5.0.9"],
   ["ip-address", "10.3.1"],
+  ["tar", "7.5.21"],
 ]);
 
 const npmVersion = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
@@ -39,4 +40,4 @@ visit(npmRoot);
 for (const [name, count] of seen) {
   if (count === 0) throw new Error(`${name} fixed package was not found below ${npmRoot}`);
 }
-console.log(`npm toolchain: npm ${EXPECTED_NPM}, brace-expansion 5.0.9, ip-address 10.3.1; vulnerable copies 0`);
+console.log(`npm toolchain: npm ${EXPECTED_NPM}, brace-expansion 5.0.9, ip-address 10.3.1, tar 7.5.21; vulnerable copies 0`);

@@ -69,4 +69,4 @@ gh api --method DELETE repos/xenx96/k8s-dashboard/branches/main/protection
 
 Trivy 실행 이미지는 digest로 고정하지만, vulnerability DB는 CI 실행 시 최신 버전을 다운로드합니다. 따라서 코드 변경 없이도 새 CVE로 gate가 실패할 수 있으며, 이 경우 baseline·ignore를 추가하지 않고 취약 dependency 또는 base/toolchain digest를 fixed 버전으로 올린 뒤 전체 scan을 다시 실행합니다.
 
-Node builder는 maintained LTS 22.23.2와 npm 12.0.2를 고정합니다. 2026-08-15 기준 official npm 12.0.2의 번들 의존성에 수정 가능한 HIGH가 남아 있어 `brace-expansion@5.0.9`과 `ip-address@10.3.1`을 npm 내부 resolver tree에 exact hoist하고, filesystem에 다른 버전 copy가 하나도 없음을 CI와 Docker에서 검증합니다. 이 임시 pin은 **2026-09-15**까지 재검토하며, official npm이 두 fixed transitive를 포함하는 즉시 hoist를 제거하고 builder scan을 다시 실행합니다.
+Node builder는 maintained LTS 22.23.2와 npm 12.0.2를 고정합니다. 2026-08-22 기준 official npm 12.0.2의 번들 의존성에 수정 가능한 HIGH가 남아 있어 `brace-expansion@5.0.9`·`ip-address@10.3.1`·`tar@7.5.21`(CVE-2026-73566) 세 가지를 npm 내부 resolver tree에 exact hoist하고, filesystem에 다른 버전 copy가 하나도 없음을 CI와 Docker에서 검증합니다. 이 임시 pin은 **2026-09-15**까지 재검토하며, official npm이 **세 fixed transitive를 모두** 포함하는 즉시 hoist를 제거하고 builder scan을 다시 실행합니다.

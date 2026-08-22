@@ -35,7 +35,7 @@ ACTION_PINS = {
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
 }
 REDIS = "redis:8.2.6-alpine@sha256:ea5a07305d6c66f99df5a5ff8d9659e8f6cb598e6e586dc8dd92b7fcd915746e"
-POSTGRES = "cgr.dev/chainguard/postgres@sha256:fb649dbd7afb840985b9e59fd78b35282424a9cc2d1ecef374183973ce19ede4"
+POSTGRES = "cgr.dev/chainguard/postgres@sha256:41a02d9c35a8dc6cac36188a0a201528ea8d686bb238af595867252821f609b9"
 POSTGRES_TEST_URL_LINE = "DASHBOARD_POSTGRES_TEST_URL: postgres://postgres:dashboard-ci-only@127.0.0.1:5432/dashboard_ci?sslmode=disable"
 GO_VERSION = "1.26.6"
 GO_LANGUAGE_VERSION = "1.26.0"
@@ -43,7 +43,7 @@ GO_BUILDER = "golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f
 NODE_VERSION = "22.23.2"
 NODE_BUILDER = "node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32"
 NPM_VERSION = "12.0.2"
-NPM_FIXED_DEPS = "brace-expansion@5.0.9 ip-address@10.3.1"
+NPM_FIXED_DEPS = "brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21"
 WEB_BUILDER_TAG = "observability-dashboard-web-builder:ci"
 GITLEAKS = "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 TRIVY = "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
@@ -195,7 +195,7 @@ def validate(text, makefile, security_scan, package_source=None, docker_source=N
     if makefile.count("node scripts/quality/check-npm-toolchain.mjs") != 1 or "node /tmp/check-npm-toolchain.mjs" not in docker_text:
         errors.append("npm filesystem/tool resolver assertion is not run in CI and Docker")
     npm_tool_text = NPM_TOOLCHAIN_CHECK.read_text(encoding="utf-8") if npm_tool_source is None else npm_tool_source
-    for expected in ('const EXPECTED_NPM = "12.0.2"', '["brace-expansion", "5.0.9"]', '["ip-address", "10.3.1"]'):
+    for expected in ('const EXPECTED_NPM = "12.0.2"', '["brace-expansion", "5.0.9"]', '["ip-address", "10.3.1"]', '["tar", "7.5.21"]'):
         if expected not in npm_tool_text:
             errors.append("npm toolchain exact-version assertion drifted")
     if makefile.count(WEB_BUILDER_TAG) != 1 or WEB_BUILDER_TAG not in security_scan:
@@ -352,6 +352,7 @@ if args.self_test:
     for label, current, drifted in [
         ("brace-expansion drift", '["brace-expansion", "5.0.9"]', '["brace-expansion", "5.0.7"]'),
         ("ip-address drift", '["ip-address", "10.3.1"]', '["ip-address", "10.2.0"]'),
+        ("tar drift", '["tar", "7.5.21"]', '["tar", "7.5.20"]'),
     ]:
         mutated_tool = npm_tool_source.replace(current, drifted, 1)
         if not validate(source, makefile_source, security_source, npm_tool_source=mutated_tool):

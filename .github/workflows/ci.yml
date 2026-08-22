@@ -68,7 +68,7 @@ jobs:
           --health-timeout 2s
           --health-retries 20
       postgres:
-        image: cgr.dev/chainguard/postgres@sha256:fb649dbd7afb840985b9e59fd78b35282424a9cc2d1ecef374183973ce19ede4
+        image: cgr.dev/chainguard/postgres@sha256:41a02d9c35a8dc6cac36188a0a201528ea8d686bb238af595867252821f609b9
         env:
           POSTGRES_PASSWORD: dashboard-ci-only
           POSTGRES_DB: dashboard_ci

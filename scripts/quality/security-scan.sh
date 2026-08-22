@@ -21,7 +21,7 @@ mkdir -p "$SOURCE" "$TRIVY_CACHE"
 GITLEAKS_IMAGE='ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 TRIVY_IMAGE='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
 HELM_IMAGE='alpine/helm:3.17.3@sha256:d899e6316789fec04ee95300a18e454b7942539cbb3d89bde3e0655d6ca2e895'
-POSTGRES_IMAGE='cgr.dev/chainguard/postgres@sha256:fb649dbd7afb840985b9e59fd78b35282424a9cc2d1ecef374183973ce19ede4'
+POSTGRES_IMAGE='cgr.dev/chainguard/postgres@sha256:41a02d9c35a8dc6cac36188a0a201528ea8d686bb238af595867252821f609b9'
 TRIVY_USER="$(id -u):$(id -g)"
 
 is_secret_env_path() {
